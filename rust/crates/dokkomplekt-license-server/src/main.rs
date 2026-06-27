@@ -1,5 +1,6 @@
 mod config;
 mod http;
+mod issuer;
 mod state;
 
 use anyhow::Context;
