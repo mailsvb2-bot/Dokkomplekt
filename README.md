@@ -21,14 +21,15 @@ program creates the working buttons.
 ## Product access / licensing contour
 
 The commercial product layer is local-only and does not upload patient documents
-or telemetry.  It adds:
+or telemetry.  It adds one consolidated production module, `product_licensing.py`,
+with:
 
-- tariff source of truth in `product_licensing.py`;
+- tariff source of truth;
 - trial limits: 14 days / 30 generated documents / watermark;
 - paid limits by plan: Doctor Start, Doctor Pro, Department, Clinic, Enterprise;
 - local offline license JSON with machine binding and signed payload support;
-- runtime creation guard in `product_access_mixin.py`;
-- trial/demo DOCX footer watermark in `product_watermark.py`;
+- runtime creation guard;
+- trial/demo DOCX footer watermark;
 - doctor-facing license dialog via `Ctrl+L`;
 - contract tests in `tests/test_product_licensing_contract.py`.
 
