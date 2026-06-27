@@ -19,10 +19,10 @@ from diagnosis_widget import DiagnosisWidgetMixin
 from ui_file_rows import UiFileRowsMixin
 from diary_template_discovery import DiaryTemplateDiscoveryMixin
 from diary_template_selection import DiaryTemplateSelectionMixin
-from product_licensing import ProductAccessMixin, ProductLicenseMixin
+from product_access import ProductAccessMixin, ProductLicenseMixin
 
 
-class WidgetsMixin(UiCardsMixin, UiIconsMixin, UiButtonsMixin, UiFieldsMixin, DiagnosisWidgetMixin, UiFileRowsMixin):
+class WidgetsMixin(UiCardsMixin, UiIconsMixin, UiButtonsMixin, UiButtonsMixin, UiFieldsMixin, DiagnosisWidgetMixin, UiFileRowsMixin):
     """Aggregates focused widget helper mixins without an extra shim module."""
 
 
