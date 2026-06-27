@@ -44,7 +44,13 @@ jobs:
         run: python -m mypy --config-file pyproject.toml
 
       - name: Run headless unit tests with coverage
-        run: python -m pytest tests --cov=medical_parser --cov=universal_scanner --cov=diary_template_discovery --cov=icd10_f_search --cov=error_taxonomy --cov=doctor_action_journal --cov-report=term-missing --cov-report=xml --cov-fail-under=50
+        shell: bash
+        run: |
+          set +e
+          python -m pytest tests --cov=medical_parser --cov=universal_scanner --cov=diary_template_discovery --cov=icd10_f_search --cov=error_taxonomy --cov=doctor_action_journal --cov-report=term-missing --cov-report=xml --cov-fail-under=50 > python-headless-tests.log 2>&1
+          code=$?
+          tail -160 python-headless-tests.log
+          exit $code
 
       - name: Run strict regression contour
         run: python tools/run_regression_contour.py
@@ -55,6 +61,14 @@ jobs:
           name: MedicalDiaryAutofill-coverage-xml
           path: coverage.xml
           if-no-files-found: error
+
+      - name: Upload Python headless logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-headless-logs
+          path: python-headless-tests.log
+          if-no-files-found: ignore
 
   build:
     runs-on: windows-latest
@@ -82,7 +96,12 @@ jobs:
         run: python project_auditor.py . --ci --quiet
 
       - name: Run production audit
-        run: python prod_audit.py
+        shell: pwsh
+        run: |
+          python prod_audit.py *> python-production-audit.log
+          $code=$LASTEXITCODE
+          Get-Content python-production-audit.log -Tail 160
+          exit $code
 
       - name: Run strict regression contour
         run: python tools/run_regression_contour.py
@@ -129,3 +148,11 @@ jobs:
           name: MedicalDiaryAutofill-Production-Source
           path: release/MedicalDiaryAutofill_PRODUCTION_SOURCE.zip
           if-no-files-found: error
+
+      - name: Upload production audit logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-production-audit-logs
+          path: python-production-audit.log
+          if-no-files-found: ignore
