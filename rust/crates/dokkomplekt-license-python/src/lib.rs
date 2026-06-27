@@ -1,3 +1,5 @@
+#![allow(clippy::useless_conversion)]
+
 use dokkomplekt_license_core::{
     evaluate_access, verify_license_signature, AccessRequest, LicenseDocument, MachineFingerprint,
     PublicKeyBytes, UsageLedger,
