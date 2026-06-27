@@ -1,3 +1,4 @@
+pub mod activation;
 pub mod canonical;
 pub mod clock;
 pub mod core_error;
@@ -7,6 +8,7 @@ pub mod models;
 pub mod policy;
 pub mod usage;
 
+pub use activation::{evaluate_machine_activation, max_machines_for_plan, ActivationDecision};
 pub use clock::{ClockGuard, ClockState};
 pub use core_error::{CoreError, CoreResult};
 pub use crypto::{verify_license_signature, PublicKeyBytes};
