@@ -38,36 +38,81 @@ struct PlanPolicy {
     overage_percent: u32,
 }
 
-pub fn evaluate_access(payload: &LicensePayload, usage: &UsageLedger, request: &AccessRequest) -> CoreResult<AccessDecision> {
+pub fn evaluate_access(
+    payload: &LicensePayload,
+    usage: &UsageLedger,
+    request: &AccessRequest,
+) -> CoreResult<AccessDecision> {
     validate_time(payload, request.now_utc)?;
     validate_machine(payload, &request.machine)?;
-    let policy = plan_policy(&payload.plan)?;
+
+    let policy = plan_policy(&payload.plan);
     if request.requested_documents > policy.max_documents_per_run {
-        return Ok(deny(payload, "per_run_limit", format!("plan allows up to {} documents per run", policy.max_documents_per_run), 0));
+        return Ok(deny(
+            payload,
+            "per_run_limit",
+            format!(
+                "plan allows up to {} documents per run",
+                policy.max_documents_per_run
+            ),
+            0,
+        ));
     }
     if let Some(count) = request.template_count {
         if count > payload.template_limit {
-            return Ok(deny(payload, "template_limit", "template limit exceeded", 0));
+            return Ok(deny(
+                payload,
+                "template_limit",
+                "template limit exceeded",
+                0,
+            ));
         }
     }
     if let Some(count) = request.profile_count {
         if count > payload.profile_limit {
-            return Ok(deny(payload, "profile_limit", "profile limit exceeded", 0));
+            return Ok(deny(
+                payload,
+                "profile_limit",
+                "profile limit exceeded",
+                0,
+            ));
         }
     }
+
     let used = usage.documents_for_month(&request.month_key);
-    let hard_limit = payload.document_limit_month + payload.document_limit_month.saturating_mul(policy.overage_percent) / 100;
+    let hard_limit = payload.document_limit_month
+        + payload
+            .document_limit_month
+            .saturating_mul(policy.overage_percent)
+            / 100;
     let projected = used.saturating_add(request.requested_documents);
     if projected > hard_limit {
-        return Ok(deny(payload, "monthly_limit", "monthly document limit exceeded", payload.document_limit_month.saturating_sub(used)));
+        return Ok(deny(
+            payload,
+            "monthly_limit",
+            "monthly document limit exceeded",
+            payload.document_limit_month.saturating_sub(used),
+        ));
     }
+
     let left = payload.document_limit_month.saturating_sub(projected);
     if projected > payload.document_limit_month {
-        return Ok(warn(payload, "monthly_overage", "monthly limit exceeded; grace overage is active", left));
+        return Ok(warn(
+            payload,
+            "monthly_overage",
+            "monthly limit exceeded; grace overage is active",
+            left,
+        ));
     }
     if projected >= payload.document_limit_month.saturating_mul(80) / 100 {
-        return Ok(warn(payload, "monthly_80_percent", "more than 80 percent of monthly limit will be used", left));
+        return Ok(warn(
+            payload,
+            "monthly_80_percent",
+            "more than 80 percent of monthly limit will be used",
+            left,
+        ));
     }
+
     Ok(allow(payload, left))
 }
 
@@ -89,30 +134,71 @@ fn validate_machine(payload: &LicensePayload, machine: &MachineFingerprint) -> C
     }
 }
 
-fn plan_policy(plan: &PlanId) -> CoreResult<PlanPolicy> {
-    let policy = match plan {
-        PlanId::Trial => PlanPolicy { max_documents_per_run: 3, overage_percent: 0 },
-        PlanId::DoctorStart => PlanPolicy { max_documents_per_run: 10, overage_percent: 20 },
-        PlanId::DoctorPro => PlanPolicy { max_documents_per_run: 50, overage_percent: 20 },
-        PlanId::Department => PlanPolicy { max_documents_per_run: 100, overage_percent: 20 },
-        PlanId::Clinic => PlanPolicy { max_documents_per_run: 250, overage_percent: 20 },
-        PlanId::Enterprise => PlanPolicy { max_documents_per_run: 1000, overage_percent: 20 },
-    };
-    Ok(policy)
+fn plan_policy(plan: &PlanId) -> PlanPolicy {
+    match plan {
+        PlanId::Trial => PlanPolicy {
+            max_documents_per_run: 3,
+            overage_percent: 0,
+        },
+        PlanId::DoctorStart => PlanPolicy {
+            max_documents_per_run: 10,
+            overage_percent: 20,
+        },
+        PlanId::DoctorPro => PlanPolicy {
+            max_documents_per_run: 50,
+            overage_percent: 20,
+        },
+        PlanId::Department => PlanPolicy {
+            max_documents_per_run: 100,
+            overage_percent: 20,
+        },
+        PlanId::Clinic => PlanPolicy {
+            max_documents_per_run: 250,
+            overage_percent: 20,
+        },
+        PlanId::Enterprise => PlanPolicy {
+            max_documents_per_run: 1000,
+            overage_percent: 20,
+        },
+    }
 }
 
 fn allow(payload: &LicensePayload, left: u32) -> AccessDecision {
-    AccessDecision { status: AccessStatus::Allowed, code: "ok".to_string(), message: "access allowed".to_string(), watermark: should_watermark(payload), documents_left_month: left, plan: payload.plan.clone() }
+    AccessDecision {
+        status: AccessStatus::Allowed,
+        code: "ok".to_string(),
+        message: "access allowed".to_string(),
+        watermark: should_watermark(payload),
+        documents_left_month: left,
+        plan: payload.plan.clone(),
+    }
 }
 
 fn warn(payload: &LicensePayload, code: &str, message: &str, left: u32) -> AccessDecision {
-    AccessDecision { status: AccessStatus::Warning, code: code.to_string(), message: message.to_string(), watermark: should_watermark(payload), documents_left_month: left, plan: payload.plan.clone() }
+    AccessDecision {
+        status: AccessStatus::Warning,
+        code: code.to_string(),
+        message: message.to_string(),
+        watermark: should_watermark(payload),
+        documents_left_month: left,
+        plan: payload.plan.clone(),
+    }
 }
 
 fn deny(payload: &LicensePayload, code: &str, message: impl Into<String>, left: u32) -> AccessDecision {
-    AccessDecision { status: AccessStatus::Denied, code: code.to_string(), message: message.into(), watermark: should_watermark(payload), documents_left_month: left, plan: payload.plan.clone() }
+    AccessDecision {
+        status: AccessStatus::Denied,
+        code: code.to_string(),
+        message: message.into(),
+        watermark: should_watermark(payload),
+        documents_left_month: left,
+        plan: payload.plan.clone(),
+    }
 }
 
 fn should_watermark(payload: &LicensePayload) -> bool {
-    matches!(payload.watermark_mode, WatermarkMode::Trial | WatermarkMode::Demo)
+    matches!(
+        payload.watermark_mode,
+        WatermarkMode::Trial | WatermarkMode::Demo
+    )
 }
