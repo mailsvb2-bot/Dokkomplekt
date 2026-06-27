@@ -10,6 +10,7 @@ from typing import List, Sequence
 
 from diagnostic_logging import record_soft_exception
 from medical_formatting import redact_technical_text, technical_ref
+from medical_models import PatientCaseReview
 
 
 class ActionsReportsMixin:
@@ -143,4 +144,3 @@ def append_generation_history(
     except Exception as exc:
         record_soft_exception("generation_history.append", exc, detail=str(output_dir))
         return None
-
