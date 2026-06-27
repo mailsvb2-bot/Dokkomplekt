@@ -28,7 +28,19 @@ jobs:
           components: clippy
 
       - name: Cargo test
-        run: cargo test --workspace
+        shell: bash
+        run: |
+          set +e
+          cargo test --workspace > /tmp/dokkomplekt-rust-test.log 2>&1
+          code=$?
+          tail -160 /tmp/dokkomplekt-rust-test.log
+          exit $code
 
       - name: Cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        shell: bash
+        run: |
+          set +e
+          cargo clippy --workspace --all-targets -- -D warnings > /tmp/dokkomplekt-rust-clippy.log 2>&1
+          code=$?
+          tail -160 /tmp/dokkomplekt-rust-clippy.log
+          exit $code
