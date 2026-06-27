@@ -22,7 +22,7 @@ from diary_template_selection import DiaryTemplateSelectionMixin
 from product_access import ProductAccessMixin, ProductLicenseMixin
 
 
-class WidgetsMixin(UiCardsMixin, UiIconsMixin, UiButtonsMixin, UiButtonsMixin, UiFieldsMixin, DiagnosisWidgetMixin, UiFileRowsMixin):
+class WidgetsMixin(UiCardsMixin, UiIconsMixin, UiButtonsMixin, UiFieldsMixin, DiagnosisWidgetMixin, UiFileRowsMixin):
     """Aggregates focused widget helper mixins without an extra shim module."""
 
 
@@ -30,6 +30,20 @@ class DiaryTemplateMixin(DiaryTemplateDiscoveryMixin, DiaryTemplateSelectionMixi
     """Aggregates diary-template discovery/selection without an extra shim module."""
 
 
-class CombinedMedicalDiaryApp(ProductAccessMixin, ProductLicenseMixin, AppInitializationMixin, SettingsMixin, DesktopIntakeMixin, WindowMixin, LayoutMixin, DialogsMixin, WidgetsMixin, FilesMixin, DiaryTemplateMixin, DragDropMixin, ActionsMixin):
+class CombinedMedicalDiaryApp(
+    ProductAccessMixin,
+    ProductLicenseMixin,
+    AppInitializationMixin,
+    SettingsMixin,
+    DesktopIntakeMixin,
+    WindowMixin,
+    LayoutMixin,
+    DialogsMixin,
+    WidgetsMixin,
+    FilesMixin,
+    DiaryTemplateMixin,
+    DragDropMixin,
+    ActionsMixin,
+):
     def __init__(self, root: tk.Tk):
         self._initialize_app(root)
