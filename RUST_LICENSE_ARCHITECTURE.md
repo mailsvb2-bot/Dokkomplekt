@@ -20,59 +20,26 @@ Rust license server = orders, provider callbacks, machine activation, license is
 - License checks must fail closed for paid access if the native core is missing or cannot verify a license.
 - The medical workflow must remain doctor-owned and local-first.
 
-## Rust workspace
-
-```text
-rust/
-  Cargo.toml
-  crates/
-    dokkomplekt-license-core/
-    dokkomplekt-license-server/
-```
-
-## Core crate responsibilities
-
-`dokkomplekt-license-core` has no HTTP, payment, Tkinter, DOCX or filesystem UI code.
-
-It owns:
-
-- canonical JSON for signed payloads;
-- Ed25519 public-key verification;
-- machine fingerprint comparison;
-- plan and limit policy;
-- trial/demo watermark decision;
-- clock rollback guard;
-- usage ledger model.
-
-## Server crate responsibilities
-
-`dokkomplekt-license-server` owns online commercial operations:
-
-- order creation;
-- QR/payment URL handoff;
-- provider callback boundary;
-- order status;
-- machine activation;
-- license issuing from paid orders.
-
 ## Implemented in this branch
 
-- Rust workspace with separate core/server crates.
-- Core license payload and signed license models.
-- Core canonical JSON and Ed25519 proof verification.
-- Core access policy and watermark decision.
-- Server health/order/status/activation/provider-callback routes.
-- Server issuer that produces a signed `license.json` document when an order is paid.
+- Rust workspace with separate core/server/Python-binding crates.
+- Core license payload, signed license models, canonical JSON and Ed25519 verification.
+- Core access policy, usage ledger model, clock guard and watermark decision.
+- Server order/status/activation/provider-callback routes and license issuer.
+- PostgreSQL schema boundary for orders, payment events, licenses, machines and audit events.
+- Payment provider contracts and manual provider adapter.
+- Native Python binding module `dokkomplekt_license_native`.
+- Python product-access bridge with fail-closed paid access.
+- Windows CI step that prebuilds and installs the native verifier into `.venv_build` before PyInstaller.
 - Rust CI for `cargo test --workspace` and `cargo clippy --workspace --all-targets -D warnings`.
 
 ## Next implementation steps
 
-1. Add PostgreSQL tables for orders, provider events, licenses, machines and audit log.
-2. Add provider adapters: YooKassa/SBP/bank invoice.
-3. Add PyO3 binding crate for desktop Python integration.
-4. Replace Python HMAC verification with Rust Ed25519 verification.
-5. Add desktop fallback rule: if Rust core is missing, paid access is denied but profile export remains available.
-6. Restore strict rustfmt check after connector-side formatting constraints are resolved.
+1. Add real provider adapters: YooKassa/SBP/bank invoice.
+2. Add concrete PostgreSQL runtime implementation behind the storage boundary.
+3. Add activation-slot management and revocation cache.
+4. Add signed local usage ledger.
+5. Restore strict rustfmt check after connector-side formatting constraints are resolved.
 
 ## Signature model
 
