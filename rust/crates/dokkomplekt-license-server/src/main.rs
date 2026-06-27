@@ -23,6 +23,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(http::health::router())
         .merge(http::orders::router())
         .merge(http::activations::router())
+        .merge(http::licenses::router())
         .merge(http::webhooks::router())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
