@@ -1,8 +1,8 @@
 use pyo3::prelude::*;
 
 #[pyfunction]
-fn native_core_version() -> PyResult<String> {
-    Ok("0.1.0".to_string())
+fn native_core_version() -> String {
+    "0.1.0".to_string()
 }
 
 #[pymodule]
