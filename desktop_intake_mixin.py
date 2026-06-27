@@ -35,6 +35,7 @@ class DesktopIntakeMixin:
         self._desktop_intake_popup_open = False
         self._desktop_intake_last_popup_opened = False
         self._desktop_intake_popup_outcome = ""
+        self._desktop_intake_gui_lock_job = None
 
     def _desktop_intake_settings_payload(self) -> dict:
         return {
@@ -56,6 +57,7 @@ class DesktopIntakeMixin:
         self._save_settings()
 
     def _bootstrap_desktop_intake_watcher(self) -> None:
+        self._start_gui_runtime_lock()
         try:
             from desktop_intake import should_prompt_intake_setup
             if should_prompt_intake_setup(self._desktop_intake_settings_payload()):
@@ -65,6 +67,41 @@ class DesktopIntakeMixin:
                 self._start_desktop_intake_watcher()
         except Exception as exc:
             record_soft_exception("desktop_intake_mixin:38", exc)
+
+
+    def _start_gui_runtime_lock(self) -> None:
+        """Publish a lightweight heartbeat so the background agent does not open a second GUI."""
+        if getattr(self, "_desktop_intake_gui_lock_job", None) is not None:
+            return
+        self._refresh_gui_runtime_lock()
+        try:
+            self.root.protocol("WM_DELETE_WINDOW", self._close_app_with_runtime_lock_release)
+        except Exception as exc:
+            record_soft_exception("desktop_intake_mixin.gui_lock_close_protocol", exc)
+
+    def _refresh_gui_runtime_lock(self) -> None:
+        try:
+            from desktop_intake_agent import write_gui_runtime_lock
+            write_gui_runtime_lock()
+        except Exception as exc:
+            record_soft_exception("desktop_intake_mixin.gui_runtime_lock", exc)
+        try:
+            self._desktop_intake_gui_lock_job = self.root.after(5000, self._refresh_gui_runtime_lock)
+        except Exception as exc:
+            self._desktop_intake_gui_lock_job = None
+            record_soft_exception("desktop_intake_mixin.gui_runtime_lock_after", exc)
+
+    def _close_app_with_runtime_lock_release(self) -> None:
+        try:
+            from desktop_intake_agent import release_gui_runtime_lock
+            release_gui_runtime_lock()
+        except Exception as exc:
+            record_soft_exception("desktop_intake_mixin.gui_runtime_lock_release", exc)
+        try:
+            self.root.destroy()
+        except Exception as exc:
+            record_soft_exception("desktop_intake_mixin.root_destroy", exc)
+
 
     def _ask_create_desktop_intake_folder(self) -> None:
         from desktop_intake import DESKTOP_INTAKE_SETUP_PROMPT_VERSION, prompt_intake_folder
@@ -105,8 +142,7 @@ class DesktopIntakeMixin:
             self._desktop_intake_enabled = False
             self._desktop_intake_folder = str(folder)
         self._persist_desktop_intake_settings()
-        if answer and self._desktop_intake_enabled:
-            self._ensure_background_intake_agent_installed(start_now=True)
+        # Background agent is installed once by _bootstrap_desktop_intake_watcher after settings are persisted.
 
     def _ensure_background_intake_agent_installed(self, *, start_now: bool = True) -> bool:
         """Install/start the optional watcher so closed-app intake really works.
