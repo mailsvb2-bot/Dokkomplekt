@@ -1,0 +1,129 @@
+name: Windows EXE Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-exe-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  headless-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements*.txt
+            pyproject.toml
+
+      - name: Install logic-test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements_dev.txt
+
+      - name: Run ruff safety lint
+        run: python -m ruff check .
+
+      - name: Run mypy domain typing check
+        run: python -m mypy --config-file pyproject.toml
+
+      - name: Run headless unit tests with coverage
+        run: python -m pytest tests --cov=medical_parser --cov=universal_scanner --cov=diary_template_discovery --cov=icd10_f_search --cov=error_taxonomy --cov=doctor_action_journal --cov-report=term-missing --cov-report=xml --cov-fail-under=50
+
+      - name: Run strict regression contour
+        run: python tools/run_regression_contour.py
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MedicalDiaryAutofill-coverage-xml
+          path: coverage.xml
+          if-no-files-found: error
+
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements*.txt
+            pyproject.toml
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements_build.txt
+
+      - name: Run project code auditor
+        run: python project_auditor.py . --ci --quiet
+
+      - name: Run production audit
+        run: python prod_audit.py
+
+      - name: Run strict regression contour
+        run: python tools/run_regression_contour.py
+
+      - name: Run full smoke suite
+        run: |
+          python smoke_test.py
+          python smoke_test_combined.py
+          python smoke_desktop_diary_workflow.py
+          python smoke_universal_hardening.py
+          python smoke_stress_hardening.py
+          python smoke_auditor_layer.py
+          python smoke_project_auditor.py
+          python smoke_technical_debt_cleanup.py
+          python smoke_split_entrypoints.py
+          python smoke_followup_regressions.py
+          python smoke_quality_modernization.py
+          python smoke_points_5_11.py
+          python smoke_user_reported_regressions.py
+          python smoke_full_patient_replay.py
+
+      - name: Run release gate
+        run: python release_check.py
+
+      - name: Build EXE
+        shell: cmd
+        run: build_exe_windows.bat
+
+      - name: Build clean source archive
+        run: python make_release_zip.py
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MedicalDiaryAutofill-Windows-EXE
+          path: dist/MedicalDiaryAutofill.exe
+          if-no-files-found: error
+
+      - name: Upload source release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MedicalDiaryAutofill-Production-Source
+          path: release/MedicalDiaryAutofill_PRODUCTION_SOURCE.zip
+          if-no-files-found: error

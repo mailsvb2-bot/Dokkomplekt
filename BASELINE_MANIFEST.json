@@ -1,0 +1,1327 @@
+{
+  "schema": "medical-diary-autofill-baseline-manifest-v1",
+  "version_label": "v1.4.89_release_gate_runtime_isolation_SOURCE",
+  "baseline_version_label": "v1.4.85_baseline_foundation_SOURCE",
+  "baseline_date": "2026-06-26",
+  "regression_contour_date": "2026-06-27",
+  "lineage_source": "v1.4.88_windows_release_gate_determinism_SOURCE",
+  "purpose": "freeze the current best behavior and keep CI/release gates deterministic without runtime artifacts before GitHub upload.",
+  "file_count_excluding_manifest": 263,
+  "files": [
+    {
+      "path": ".gitattributes",
+      "size": 298,
+      "sha256": "9a1ff60804c0e60f6b98d59a47b733ff41a7890237f3cb5941919ae32d702300"
+    },
+    {
+      "path": ".github/workflows/windows-build.yml",
+      "size": 3688,
+      "sha256": "936dc215ffaacb88c00ff6986843abccd3c0b63c1a7497ed043be4808de6ae49"
+    },
+    {
+      "path": ".gitignore",
+      "size": 327,
+      "sha256": "2e1c4c84f5c67b07695ffbcc53fa44c7a38f83b81b6aec6ad29cf65f698625c5"
+    },
+    {
+      "path": "actions_creation.py",
+      "size": 626,
+      "sha256": "3ada977e238bec9c3087f9a23b622c33347c532c17ef95503304d9214e760d00"
+    },
+    {
+      "path": "actions_creation_batch.py",
+      "size": 16541,
+      "sha256": "250347cc2c6d60e3878ec502abea540d5994d5de64fdc5fe74bd8d7a2f086f6c"
+    },
+    {
+      "path": "actions_creation_execution.py",
+      "size": 15981,
+      "sha256": "9c557e4e92afb4a18bf1e7ab927abcd40e1d368f960fc2ee7554f3fa770131d5"
+    },
+    {
+      "path": "actions_creation_foldering.py",
+      "size": 8313,
+      "sha256": "91e153eae34b706acb50e4e2b006a645a1cc4d22b936019e2af14713b709edd8"
+    },
+    {
+      "path": "actions_creation_maintenance.py",
+      "size": 15801,
+      "sha256": "f752310b22640a12a91d8288abb7f023e9715bff2c5cd9041d1bfab005fd7cee"
+    },
+    {
+      "path": "actions_creation_orchestrator.py",
+      "size": 1164,
+      "sha256": "9eb7575e1cd143e31ba352b0817437d28d281e457a229b00c89d8ab636548c8f"
+    },
+    {
+      "path": "actions_creation_preflight.py",
+      "size": 32695,
+      "sha256": "c30b9cfbbc0d6019f3f0a61d4e1a4c71d7dc5f56c8086ee008a6400d762e731c"
+    },
+    {
+      "path": "actions_diary_flow.py",
+      "size": 7870,
+      "sha256": "d1d1a70c1ae694ccb4adee731212d4ab4cf948a83fd1ccc77d9935549cc1aa00"
+    },
+    {
+      "path": "actions_medical_flow.py",
+      "size": 13178,
+      "sha256": "24a7a4d944405ac8b94fcc529108b94b769b1011ea4bad0eea760b2c03eeb65c"
+    },
+    {
+      "path": "actions_mixin.py",
+      "size": 353,
+      "sha256": "e3e75432aabd48509519658f541005fe905e3d300bb74263e5e519c834fc7ea7"
+    },
+    {
+      "path": "actions_navigation.py",
+      "size": 6473,
+      "sha256": "972376453f39214a943226117dfba1f0daec2db36c555d6b177717155b06f2b8"
+    },
+    {
+      "path": "actions_reports.py",
+      "size": 6786,
+      "sha256": "3c89a64ba311899aa621b267f2731f6e18adf2e7d4cc0639a64d6ca49f528545"
+    },
+    {
+      "path": "actions_required_fields_popup.py",
+      "size": 27457,
+      "sha256": "ac13d2f414d69e1e2f8f78b5903389023bf1b083d23a6f15c9a0433a84ee1bfb"
+    },
+    {
+      "path": "actions_selection.py",
+      "size": 2937,
+      "sha256": "84b3b0436488cf496b1f8f296df450e39f95b585e4648e02f6a0de5dcd504d42"
+    },
+    {
+      "path": "actions_template_checks.py",
+      "size": 960,
+      "sha256": "d1653734ce6ade2cedd1eb53402eb4588c59629cc5447e2b4c8c360a26fe14c5"
+    },
+    {
+      "path": "actions_ui_state.py",
+      "size": 3890,
+      "sha256": "4b1cfb40706248d1bd46e52e15d7e2447c5a4e41b16aebeb0a19201a82a157e3"
+    },
+    {
+      "path": "actions_universal_flow.py",
+      "size": 16747,
+      "sha256": "823edea7ee719f2521bc0658a774849f327efd0d00f9dbe267dcd35d6196d70d"
+    },
+    {
+      "path": "app.py",
+      "size": 1442,
+      "sha256": "2d59da423e58d5cbbcb5b1025920f3acccac4254c2145d7b0bb317ddc46f6443"
+    },
+    {
+      "path": "app_config.py",
+      "size": 1929,
+      "sha256": "17b745b55140efa6c5bd2015915fa04bafabd702c2d98c32d7c99850c1078045"
+    },
+    {
+      "path": "app_initialization.py",
+      "size": 27160,
+      "sha256": "3ed840421bb42518e1d58ea36d589d85862d467aa61dd86eb1193d9b9f700bc7"
+    },
+    {
+      "path": "architecture_contracts.py",
+      "size": 29876,
+      "sha256": "9c5231cff974f83a62f64bc8269e33a4890ac10d9cda04c33402d6fba250926a"
+    },
+    {
+      "path": "auditor_layer.py",
+      "size": 2167,
+      "sha256": "54b948a9bb96e05911b277af69e7f2cc3cd5efac0f0b3c2a86d38cf1f2911b30"
+    },
+    {
+      "path": "auditor_models.py",
+      "size": 5273,
+      "sha256": "65fd3247602472a6864a08bc7f8b7aec64c61d48a0ebeca996646c6f381e2ce9"
+    },
+    {
+      "path": "auditor_profile.py",
+      "size": 4285,
+      "sha256": "f4bc63bf81f34f3201023c48719b29dd73142b085128b813c469d89aba1aadeb"
+    },
+    {
+      "path": "auditor_runtime.py",
+      "size": 2743,
+      "sha256": "45c9b25f2254d427947227981f04362d94bccae57e1832859468db8e069ba7a5"
+    },
+    {
+      "path": "auditor_template.py",
+      "size": 4519,
+      "sha256": "043b9768b04bf4b4a207ec9d62991dfd9739e96623777f2f44011c48e3af06fe"
+    },
+    {
+      "path": "BASELINE_VERSION.txt",
+      "size": 1941,
+      "sha256": "01bd08372678e1acc8e8b12c2240afb2a3b9775d591b26146aff6e6664a63556"
+    },
+    {
+      "path": "build_exe_windows.bat",
+      "size": 3755,
+      "sha256": "2ebc6e2ed1a6e6397543092f132db9322ec5b4d2f5654811bfb5de59f1e08810"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "size": 4124,
+      "sha256": "9375149b6aa4c052bab6d1c19b41f10386e8ebfcc39160498bd842872830ad6f"
+    },
+    {
+      "path": "desktop_intake.py",
+      "size": 25187,
+      "sha256": "160e7f1969379e1be3c63570f2abbdb9d4a0f46d92695ddfcdaea5ff7db3dc53"
+    },
+    {
+      "path": "desktop_intake_agent.py",
+      "size": 27252,
+      "sha256": "17600929f5f43190e10df9c57f582ddd103ca8e2ad55fe06b6fae76a2a3f8874"
+    },
+    {
+      "path": "desktop_intake_agent.pyw",
+      "size": 194,
+      "sha256": "f93393994926240639ef7ddc96a6bf6d0cb21dbe6d17aa80eb42079809c0a995"
+    },
+    {
+      "path": "desktop_intake_mixin.py",
+      "size": 26632,
+      "sha256": "85e9d6c6da8e96cd86e734052d365f21d7993719bac322f91de31d10d45daebd"
+    },
+    {
+      "path": "desktop_patient_folder.py",
+      "size": 13922,
+      "sha256": "0cf333434f9bf23d7d3db2c26b70b7b808a770b4aa64a34d6d0343108e75c160"
+    },
+    {
+      "path": "diagnosis_widget.py",
+      "size": 11805,
+      "sha256": "811a469c7c35167efe3decf34a5a49dc020b83e0bef282a3b64778e409c86c71"
+    },
+    {
+      "path": "diagnostic_logging.py",
+      "size": 4627,
+      "sha256": "4d85b5bfd2ea59a39108711eb81e5d5cfb1599a3d43a631c9cdca3e0ea98770d"
+    },
+    {
+      "path": "dialog_dates.py",
+      "size": 8191,
+      "sha256": "734765455bacf100588b8f7b2bdd6a49b894eef761d31794b3402f7ee92c98b1"
+    },
+    {
+      "path": "dialog_document_details.py",
+      "size": 28506,
+      "sha256": "c6a7788d50042db628efa0b12badae93f599eca116f8528364017bb0617a85a5"
+    },
+    {
+      "path": "dialog_expert.py",
+      "size": 45078,
+      "sha256": "095dd3dbc3b13e44e7b75298bc5d4cad342e7fbc979ab01b90a2110b7d8ee8cd"
+    },
+    {
+      "path": "dialog_fields.py",
+      "size": 713,
+      "sha256": "8717490a5ccaa127a491ff63073182ea622895ed56bdcc3c5521f6840e10e118"
+    },
+    {
+      "path": "dialog_fields_core.py",
+      "size": 51652,
+      "sha256": "e979068283011f1bdf4d20499886aae7a84c9256280151e12fb8ae0fbbe14cd0"
+    },
+    {
+      "path": "dialog_fields_linking.py",
+      "size": 1242,
+      "sha256": "5335da3c5c409eba2070b0dc37e63df5d5a249531febfd902a54cb16eb68ef3d"
+    },
+    {
+      "path": "dialog_fields_popup.py",
+      "size": 11136,
+      "sha256": "233dc7857c9192da7bbf7731f49db63b963fd59c6b7150d9a5f905ed59743775"
+    },
+    {
+      "path": "dialogs_mixin.py",
+      "size": 344,
+      "sha256": "4e3cd8bbfe4f4f1763f74f4cb461776a51ba7d479a12dbd94059303f5857da96"
+    },
+    {
+      "path": "diary_batch.py",
+      "size": 11160,
+      "sha256": "36c6347948ee53d9702984542a40cd5ddc614d9ac5b42a444499d27528c021aa"
+    },
+    {
+      "path": "diary_constants.py",
+      "size": 11360,
+      "sha256": "deeaed1462d9e4b9f8b22fa7e97b335e38c5f137135880e2e52cdfa32ac396be"
+    },
+    {
+      "path": "diary_creation_wizard.py",
+      "size": 5204,
+      "sha256": "55ad288feaa5209b5e7de54f6f4fd9d55068904eca18c3305945b0f972c782f6"
+    },
+    {
+      "path": "diary_dates.py",
+      "size": 5144,
+      "sha256": "346a5c931e113087b07fa0696d514d5ab5e7fed1f75b0ee67ffb19401c68039c"
+    },
+    {
+      "path": "diary_filler.py",
+      "size": 524,
+      "sha256": "205692f8c4a7ba72bedeefec70d21b9863a9c6ef7402b0a0a12c734b250f736c"
+    },
+    {
+      "path": "diary_gender.py",
+      "size": 2536,
+      "sha256": "1ec6bb58d14b2ecefd14ef071a29a072b9a5a91541cfe301108746232622dd18"
+    },
+    {
+      "path": "diary_models.py",
+      "size": 864,
+      "sha256": "1c2f04a6b6aff36c1b054e62f0bc68db048736912dc801ae90060c8ba9f540bb"
+    },
+    {
+      "path": "diary_paths.py",
+      "size": 1549,
+      "sha256": "fbb06b6be4c94069036dd67fa58aa67eadc7d73420502bcd9879946b8f1880b4"
+    },
+    {
+      "path": "diary_schedule.py",
+      "size": 12172,
+      "sha256": "18c2f3873fa18cd301b5a5527c9e97a7956373349199ba946ce1ac8a30c9fafc"
+    },
+    {
+      "path": "diary_table.py",
+      "size": 1261,
+      "sha256": "a6ce35e3a973f6430fbc68965e9d746d24858abd90e8ae34fb1ecbf2fb60361b"
+    },
+    {
+      "path": "diary_table_cells.py",
+      "size": 2257,
+      "sha256": "adfa34f2583b1b8a5e494e02de8ab54fafddd213e8736bd5ee0253162d1ea2c6"
+    },
+    {
+      "path": "diary_table_columns.py",
+      "size": 3947,
+      "sha256": "3cba538fd912d930aafb1dec8e950873dec66df543fafc32ced962c409b4b701"
+    },
+    {
+      "path": "diary_table_dates.py",
+      "size": 1264,
+      "sha256": "11008b4787934e6d6f181d5548f373ce7bdb1808b95307b29f1f3966957f1445"
+    },
+    {
+      "path": "diary_table_numbers.py",
+      "size": 1030,
+      "sha256": "e1ff97700eb72c4a580ded6d5d447ef7703572d3c2daf5b9221d907a295a746b"
+    },
+    {
+      "path": "diary_table_rows.py",
+      "size": 2502,
+      "sha256": "e5e020763b8a3b0b8630e246e0591cc7cfc050fee639e3e23c626c73a5b1faa4"
+    },
+    {
+      "path": "diary_table_text_fill.py",
+      "size": 3363,
+      "sha256": "01cfc655c675f9828c820cd6c9e32e8b644c49eaa77177cf0d7debe067b66b57"
+    },
+    {
+      "path": "diary_template_discovery.py",
+      "size": 21064,
+      "sha256": "1a2f0512fe6fc36eff7d72217cc1ff518f0fa08ac07a26535386ee649e2f82ef"
+    },
+    {
+      "path": "diary_template_selection.py",
+      "size": 14074,
+      "sha256": "92097e692d5a7f64842e725fc4a71706a2e05f699264bd60d32dfc52e190ce27"
+    },
+    {
+      "path": "diary_text_parser.py",
+      "size": 4210,
+      "sha256": "efc4b446e255e9d9614dad5eea9c8653137d37b563eb1109f2e0b050be5866e7"
+    },
+    {
+      "path": "diary_text_selection.py",
+      "size": 12856,
+      "sha256": "321e2885880d96e1f48ae4516ce8975556593fdea0ef657561713bb23ddd842c"
+    },
+    {
+      "path": "diary_writer.py",
+      "size": 2797,
+      "sha256": "03f0058f478eebf6093f92fff25c127e5fa19b5a4dba5981c8fa6096d7b1a84a"
+    },
+    {
+      "path": "diary_writer_apply.py",
+      "size": 4592,
+      "sha256": "fee1c0f3eb20c7a3eae10672c2caff2bfa8d57f844577d7da292bf99c1ef1855"
+    },
+    {
+      "path": "diary_writer_entries.py",
+      "size": 9161,
+      "sha256": "4a30fdf7c11bce0395cab8324877e3a7b95d176d5fae6a3ccb84826eaa9696c7"
+    },
+    {
+      "path": "dnd_contract_check.py",
+      "size": 3334,
+      "sha256": "b4d31ac1feb86a364872d94867ad65bf78ea0af326c4c8536987b00ccde1c2c6"
+    },
+    {
+      "path": "dnd_mixin.py",
+      "size": 13832,
+      "sha256": "d79d50c284d9fc6b4e2b2ccb79a612e70646aedb846fdfe05592b8dcb648ec29"
+    },
+    {
+      "path": "doctor_action_journal.py",
+      "size": 7367,
+      "sha256": "da7ad4f84107c9f23d992021b520de0ab46fb2abebc2abf46adbf118f09b1583"
+    },
+    {
+      "path": "embedded_templates.py",
+      "size": 365,
+      "sha256": "1c485ba34acbd8a7f2bb845e3282a7aea00d7dfec22e9cae43652f574608ecf0"
+    },
+    {
+      "path": "error_taxonomy.py",
+      "size": 6424,
+      "sha256": "7768a96a65ee22d3d619b17e9ee2064e5cbe31e154517c15589ca3e77cb6e804"
+    },
+    {
+      "path": "files_mixin.py",
+      "size": 35975,
+      "sha256": "77a6df5d0b092a94c331405e490a58bf6127dd00016846d26b827e766fab642a"
+    },
+    {
+      "path": "FIX_REPORT.md",
+      "size": 1534,
+      "sha256": "185bba34ac7a2941c01b237010779cb8434de2070c7c1e5a916cfcc6cda4a83f"
+    },
+    {
+      "path": "FIX_REPORT_LABS_SAFETY.md",
+      "size": 1222,
+      "sha256": "b09bcb7e23732f794f162b15098830232277310027ab637cc4aa0c52bb480c6c"
+    },
+    {
+      "path": "i18n_strings.py",
+      "size": 4551,
+      "sha256": "e4b115b0179b2b707df623a7bf9904a132c80f7d136f30bffbf745dc65f2be77"
+    },
+    {
+      "path": "icd10_f.py",
+      "size": 1160,
+      "sha256": "e76a2c14f8d45a331344a89c27721a5d324b55c1205d128dc0a7a810de78fd52"
+    },
+    {
+      "path": "icd10_f_data.py",
+      "size": 107963,
+      "sha256": "24dfaaf20a39fde8baa930e3aa5a770134e97cdfb242ec4d363c107642e6e4d3"
+    },
+    {
+      "path": "icd10_f_search.py",
+      "size": 13114,
+      "sha256": "cf4a70d707421645e95af5b016e4a5e834fb6fa7d027c1a5d880c609d6ca8c7f"
+    },
+    {
+      "path": "icd10_models.py",
+      "size": 1311,
+      "sha256": "f5a606098b3fe7614f980dcf19602c006b81d3388f8f4901d339f4a4dace9aff"
+    },
+    {
+      "path": "install_background_watcher.bat",
+      "size": 1434,
+      "sha256": "fd4cc807c75f22e3584544b8b7c8ce5a5869b32cd97dfa6cd9c8c63844c5e192"
+    },
+    {
+      "path": "installation_diagnostics.py",
+      "size": 9970,
+      "sha256": "5d03c76d31f006a75231bb430702087ec80d4fefd9310dd12dd336d271121c23"
+    },
+    {
+      "path": "INSTALLER_PREPARATION.md",
+      "size": 1491,
+      "sha256": "b3f5443f2a80c5450636504217f28c60098e89e13d076ae0c2e4178afe5427ab"
+    },
+    {
+      "path": "language_preferences.py",
+      "size": 2469,
+      "sha256": "7148b2eaad338d4d1daee2ffe0b319b4132955d4eb205976fdc4a0fbbef8249b"
+    },
+    {
+      "path": "LAUNCH_CHECKLIST.md",
+      "size": 4290,
+      "sha256": "1871d7920c250eec4d28b43b6dde8d181e5ab348c243c2ebcdb0065903a17b56"
+    },
+    {
+      "path": "layout_action_bar.py",
+      "size": 19595,
+      "sha256": "7eed1ff7534cd2687c4ba723696067399317cbd03aa87df43efe6aa647133121"
+    },
+    {
+      "path": "layout_checklist.py",
+      "size": 34240,
+      "sha256": "eaf70a537758ad6ecea963596f89335343742c04275df8d15f8c7b041b57914b"
+    },
+    {
+      "path": "layout_mixin.py",
+      "size": 277,
+      "sha256": "64b708abf7afe626ad4ef684b86e325e648968fd62e3bb8ef8a0743fc8170340"
+    },
+    {
+      "path": "layout_sources.py",
+      "size": 13288,
+      "sha256": "799a0ba169b1552ba9b2273176e7a2185665f648abc506350dee22ea5dd8944b"
+    },
+    {
+      "path": "main.py",
+      "size": 2387,
+      "sha256": "bbb1f9a5ffcf7b50ca9e76ec5567b545e0b87f4a94c76eb9c4c14b139724fe80"
+    },
+    {
+      "path": "make_release_zip.py",
+      "size": 3649,
+      "sha256": "ad802d32e56de69167674bc530484eb954f2f77537fb7f08dc9438011ac55cdd"
+    },
+    {
+      "path": "medical_admission_resolver.py",
+      "size": 10101,
+      "sha256": "242eae0b5034ba15bd6279360d5ee0d75228318c3f7e3cb02658d8796e6d8602"
+    },
+    {
+      "path": "medical_constants.py",
+      "size": 2158,
+      "sha256": "eff0ce8f5d141ab475560a7cdda9aeac8f218492dc9b19cef5dcfa2598dba19e"
+    },
+    {
+      "path": "medical_date_state.py",
+      "size": 9854,
+      "sha256": "a93f494337ef4036b292d8a45904b7b90cdb86f553ee1c3844238f467903b5d1"
+    },
+    {
+      "path": "medical_documents.py",
+      "size": 965,
+      "sha256": "c0763b10cb81d13d4582cd6528669085523cb5ecf6ed329164b3781b302fc4fc"
+    },
+    {
+      "path": "medical_docx_blocks.py",
+      "size": 3687,
+      "sha256": "0091cfa7d9181c6e3f8986563960318133dcc8f473427d6e619126a454607a95"
+    },
+    {
+      "path": "medical_docx_date_patterns.py",
+      "size": 696,
+      "sha256": "627259b55c946844b7bdefb89733c4abb6555072cdadd31e65a68a7e9e045996"
+    },
+    {
+      "path": "medical_docx_editor.py",
+      "size": 973,
+      "sha256": "f699ef2c5e0996cc0146a8d3532a09fe886a23e2429a37313ebc45f57ffb8eee"
+    },
+    {
+      "path": "medical_docx_editor_core.py",
+      "size": 350,
+      "sha256": "2047ad7151efb8240f1d52ca34f8d7e5f26302529beab0e551570fd3a98696d6"
+    },
+    {
+      "path": "medical_docx_editor_epi.py",
+      "size": 1501,
+      "sha256": "5456947b80e488e1b0a50f5d360ec77e8fe3edb80b6815f7d6f3b07e9ecfe669"
+    },
+    {
+      "path": "medical_docx_editor_markers.py",
+      "size": 1157,
+      "sha256": "e93a108e698128000c831f93d5b4e55f11418f01c24aad9e27a6676cf6931ead"
+    },
+    {
+      "path": "medical_docx_editor_replace.py",
+      "size": 3720,
+      "sha256": "8f57faab169b385c26a9d8ead8ad482d06ae1022e8b1f7da03d88ee501c8eea2"
+    },
+    {
+      "path": "medical_docx_editor_utils.py",
+      "size": 2998,
+      "sha256": "bac358f6911da08affc3aac257d01b47415a6739c8c7848a0bf19c735dcbda96"
+    },
+    {
+      "path": "medical_docx_reader.py",
+      "size": 986,
+      "sha256": "7f5136639a08c57db0d31e6631ac77234364b13cd16cb7b0e8bbcbeb04f958a1"
+    },
+    {
+      "path": "medical_docx_title_context.py",
+      "size": 3858,
+      "sha256": "241dc4078404b9498f53505e8817b3ef3290ea7c4d5dc53500c0b7237b87dcbe"
+    },
+    {
+      "path": "medical_docx_title_dates.py",
+      "size": 983,
+      "sha256": "5f720d4aafdae8f1a7f8e87468e941fd390d02ebfa9b951bf98b21abe49530fe"
+    },
+    {
+      "path": "medical_docx_title_finder.py",
+      "size": 10334,
+      "sha256": "c850fbb5413184137c8f44e61ff2c3a5522410859cd1d7f540d6627b88d58d53"
+    },
+    {
+      "path": "medical_docx_xml_fragments.py",
+      "size": 2343,
+      "sha256": "84841b26abb6235a35bd542cd06d109a991390923b2e87b378d069c43bbd5a39"
+    },
+    {
+      "path": "medical_expert.py",
+      "size": 6037,
+      "sha256": "17a8899f290064960374a26c82574c3f35ce865e8d9c455bc67d1b95dfff0762"
+    },
+    {
+      "path": "medical_field_line_pairs.py",
+      "size": 4364,
+      "sha256": "c27571503369e75a11cf85a5771fab93a536aaa69fa598628e25639c343fe0ee"
+    },
+    {
+      "path": "medical_formatting.py",
+      "size": 16493,
+      "sha256": "eecc86f878efd9f7ec1788e7e50f397155d4997839fb8085d4ac93ade0f28c10"
+    },
+    {
+      "path": "medical_gender.py",
+      "size": 6966,
+      "sha256": "ef1b02d7a63d405b9ec412c116e90099ceb358d95cbc4ff7545ccbde2d3de1da"
+    },
+    {
+      "path": "medical_language_catalog.py",
+      "size": 3517,
+      "sha256": "41bd6d3be70a4373b80edd66f7ee7e6e74f0240d1fa9cf80fff008b224eb6a1a"
+    },
+    {
+      "path": "medical_language_detector.py",
+      "size": 6904,
+      "sha256": "f0fbe00eafb14e95f548aa2578762d50bfc3ed8ed8eb14ed99e2500b5eac5525"
+    },
+    {
+      "path": "medical_markers.py",
+      "size": 5609,
+      "sha256": "124d627720e55ed44392d74513e73d0fb128131d3a838ecc2e8a75a555ced1db"
+    },
+    {
+      "path": "medical_models.py",
+      "size": 19014,
+      "sha256": "aaea2aab1c2ddcf7c5836b4def600a736bacab6e2b8ed5144456a19752ca4ce3"
+    },
+    {
+      "path": "medical_orthography.py",
+      "size": 4636,
+      "sha256": "a19e2096830a8392f46e1ff5fdd5eebc754653798d5477da34bd62b5da860b07"
+    },
+    {
+      "path": "medical_orthography_rules.py",
+      "size": 2400,
+      "sha256": "8ea44803921bd21537edc786914aaabc782bc8cec5467d2913b6f9296eb9e970"
+    },
+    {
+      "path": "medical_parser.py",
+      "size": 8044,
+      "sha256": "55a5f3ea11c9daccbc8e51544e04590ec65199f9606f4a46a6d85f580ab8d3f4"
+    },
+    {
+      "path": "medical_parser_blocks.py",
+      "size": 7271,
+      "sha256": "31a05a8d6de36f25197c32b07ed3647fd2d11f1419433750f034f6e2ad9c8223"
+    },
+    {
+      "path": "medical_parser_core.py",
+      "size": 10191,
+      "sha256": "788220821023593d3d219c774b8fea3d9c148e65dbe7f5a5d794f445f1f74315"
+    },
+    {
+      "path": "medical_parser_demographics.py",
+      "size": 9987,
+      "sha256": "598dc8a9e0c02b7f02675112659dcd37c2635bfdb10d45dd2eace434a1b576ac"
+    },
+    {
+      "path": "medical_parser_inline.py",
+      "size": 8501,
+      "sha256": "9d57a9bbd892f8e1d6fa813327d6ee439c66144b8e196fb62a323808da2d3003"
+    },
+    {
+      "path": "medical_parser_sanitize.py",
+      "size": 4724,
+      "sha256": "3b14ec67bc6df099829d4453387ee2219c8d3df46d7abab530cbcf4f9afd8c16"
+    },
+    {
+      "path": "medical_parser_work.py",
+      "size": 7136,
+      "sha256": "e551c09396a3395608050109f15129146e9c3751299581707455345a6d2bf19c"
+    },
+    {
+      "path": "medical_paths.py",
+      "size": 3055,
+      "sha256": "d90763c26ab04d978cecd27bcb617a5e458bb56bc54c4036aafa44dc3eba25b9"
+    },
+    {
+      "path": "medical_preview.py",
+      "size": 2741,
+      "sha256": "b73629ebfacf072eb998e895323102a3c21427f687a908511ab8be439ef767cb"
+    },
+    {
+      "path": "medical_primary_document_state.py",
+      "size": 8699,
+      "sha256": "1045c28c04af34268c29fc28583280d1b6df49462a2e978943f26fd3adc73ff9"
+    },
+    {
+      "path": "medical_renderer.py",
+      "size": 1661,
+      "sha256": "1779a7636751d21e72ba749f2b22dbee9634513e573a600de9f939b84e635678"
+    },
+    {
+      "path": "medical_renderer_commission.py",
+      "size": 10213,
+      "sha256": "5b26919a15cc5040d8d5bb0acb77f6cb37fcf3dff67ad7f81fe53568a65e4231"
+    },
+    {
+      "path": "medical_renderer_labs.py",
+      "size": 13701,
+      "sha256": "f47cea890abf5019f8cb454b3f0ac8579751f102d3d87692610b793787886720"
+    },
+    {
+      "path": "medical_renderer_primary.py",
+      "size": 10871,
+      "sha256": "163569922f1709ab23829a0d954801ffaaa683e4ba24d4d8cc8c9bf1029ffd46"
+    },
+    {
+      "path": "medical_renderer_special.py",
+      "size": 11300,
+      "sha256": "4a291bfddb8c1fd6a67356f464c3cbff717132a19ee8cab244a199e089d44126"
+    },
+    {
+      "path": "medical_service.py",
+      "size": 28655,
+      "sha256": "6391af07c46cc295a2f0ff21df0a3c18a3425040283193786c85a7cb85660e56"
+    },
+    {
+      "path": "medical_text_utils.py",
+      "size": 12554,
+      "sha256": "85a344e790fb0372f13c4d42de792153804e2ae14e8702d98b3eedfd6b1933e8"
+    },
+    {
+      "path": "medical_treatment_detection.py",
+      "size": 2860,
+      "sha256": "c3e923dc2e9201cc8a1f7dd383dee7c42545193724f579c5b4d765e3ef2de9bf"
+    },
+    {
+      "path": "performance_check.py",
+      "size": 1489,
+      "sha256": "10469f7ddd0aab67fe821bd9cf24282f1a00163f831756bb168c7e002a2afc1a"
+    },
+    {
+      "path": "personal_document_buttons.py",
+      "size": 41364,
+      "sha256": "846641f3b3fb1cfe6f5f3e960cf441c7ccdef04bd321fee4d0dd3f1fc56cb2f7"
+    },
+    {
+      "path": "printer_discovery.py",
+      "size": 2028,
+      "sha256": "b8b34a75217e051aa00c91344b218a203a0eaff2c80fd00d09c242fa9b752c21"
+    },
+    {
+      "path": "printer_jobs.py",
+      "size": 4316,
+      "sha256": "445b81b7c81be8f41cad448f11afb15190c56d3316f1f4cebe4f641cbce60692"
+    },
+    {
+      "path": "printer_models.py",
+      "size": 706,
+      "sha256": "1733781be8644f2ddcedcb8c6551e90134f74ab18b159e23760487e92de54e3b"
+    },
+    {
+      "path": "printer_platform.py",
+      "size": 2880,
+      "sha256": "a8bca275c800cec16fb4ca7678a0ccfd34088ace7435902fa7709289a58ed0db"
+    },
+    {
+      "path": "printer_support.py",
+      "size": 596,
+      "sha256": "02576c697b539e4ba8ab0478306644ba8021c5633b7676f0ec96d15c1251382f"
+    },
+    {
+      "path": "prod_audit.py",
+      "size": 52819,
+      "sha256": "44fe6f4968da6840f597528213d1a4e89d692554c9a69fde4e73143d15d49bb1"
+    },
+    {
+      "path": "PROD_READY_AUDIT_REPORT.md",
+      "size": 9410,
+      "sha256": "f4e04235506b8c7a47759d1b5227cddf70bb65f58595832f30f923a8cf66bb79"
+    },
+    {
+      "path": "project_auditor.py",
+      "size": 4034,
+      "sha256": "b17d7716a5d2badc7df8ac36a32806a54419d0c6de740dfc1c3ef4090e38e4f4"
+    },
+    {
+      "path": "project_auditor_dependencies.py",
+      "size": 4009,
+      "sha256": "bf006b535e70385dde962fffebef96aa6b192890bf5936cce155b00e23e59618"
+    },
+    {
+      "path": "project_auditor_files.py",
+      "size": 7344,
+      "sha256": "3e98ae2877772c7529b6fd7b98f4035e289736cac17be4abff65e919c5b1b7a1"
+    },
+    {
+      "path": "project_auditor_imports.py",
+      "size": 4434,
+      "sha256": "2612cdb987e8915122df5aa4cc99c554470707d896fa565a34cdddde843fdbba"
+    },
+    {
+      "path": "project_auditor_models.py",
+      "size": 7333,
+      "sha256": "af0b20f5e94f9a6d81415d920889383034895046795a6805ee6ab10d23edb422"
+    },
+    {
+      "path": "project_auditor_reports.py",
+      "size": 1076,
+      "sha256": "551b89c74cbbbab4c42c0abde7d484229b3360826c9f73c386b0c93eed22c18a"
+    },
+    {
+      "path": "project_auditor_rules.py",
+      "size": 16915,
+      "sha256": "81890f01b2c5e5c74c1c3436cb68c5c93359b2a37824bb999ecd97919a7e5d9f"
+    },
+    {
+      "path": "pyproject.toml",
+      "size": 886,
+      "sha256": "04168f153008c45902623d9661fe1ba1cdee2ebdfb9784f442bc9f247980ab41"
+    },
+    {
+      "path": "README.md",
+      "size": 1833,
+      "sha256": "f3d4d0328ccbe9e07bc2a23b6f348d7dbed36b904ecb87544c3895ccbdc940f6"
+    },
+    {
+      "path": "REGRESSION_CONTOUR.md",
+      "size": 2324,
+      "sha256": "5d2e316c9c03168f7c2f14eae96b3d71c7df057bc2f45969573033aa6cf7018b"
+    },
+    {
+      "path": "REGRESSION_MATRIX.md",
+      "size": 2590,
+      "sha256": "6f222468e4aa7e3f5f7dddbe7f995ce9bdb8a777d0e573a8d74c861fa7624efc"
+    },
+    {
+      "path": "regulatory_advisory_policy.py",
+      "size": 2609,
+      "sha256": "f29eb9518d19c42b8ae5118ff8d880c84c6b71f4c32df1b02fc77fa1f016c239"
+    },
+    {
+      "path": "regulatory_caucasus_aliases.py",
+      "size": 21178,
+      "sha256": "b4f77748fdeca01a698a9478ebaf397a610ea8434eceb5f81180c56249d37706"
+    },
+    {
+      "path": "REGULATORY_CAUCASUS_NOTES.md",
+      "size": 974,
+      "sha256": "5839e3bfbd540a779724d31f8043a998a323ba0fbe92549f63ad54a7be3a5903"
+    },
+    {
+      "path": "regulatory_completion_blocks.py",
+      "size": 5164,
+      "sha256": "4bf467497987d3ebb6b5c0daad6c71a0903089647dbb97f16b7504aeded50f25"
+    },
+    {
+      "path": "regulatory_document_classifier.py",
+      "size": 5091,
+      "sha256": "7eb0c425269b4dafdb375f1b2c314be693222cb27ae70f2eea11a39f45b117be"
+    },
+    {
+      "path": "regulatory_document_roles.py",
+      "size": 12584,
+      "sha256": "436fa5634f35d2decaef078f26429356384b1a22a6f7ae4e9fff5ea0a52c4a44"
+    },
+    {
+      "path": "regulatory_section_registry.py",
+      "size": 7973,
+      "sha256": "008092a6c7703c49a9bc345961312e98a1a9fb69ba228d9cdc7a2f10e47b21a9"
+    },
+    {
+      "path": "regulatory_specialty_overlays.py",
+      "size": 4491,
+      "sha256": "e270bc34043eec0fc9a7133dc0ffae714447efba154cfb7bf7554f40d33bd303"
+    },
+    {
+      "path": "regulatory_template_advisor.py",
+      "size": 9281,
+      "sha256": "42495a76912796c232a956ee061f2ab359a3456ce0edf5853cb51bdb2a46e53c"
+    },
+    {
+      "path": "release_check.py",
+      "size": 41377,
+      "sha256": "5036f04089107c04a1d3db59c3b4a57afeecff80ed3886157475f3b414f44ff2"
+    },
+    {
+      "path": "RELEASE_NOTES.md",
+      "size": 3457,
+      "sha256": "abced36e4dadb40cbd7e7f7193992d41978a7afcee7214700d8897e8bc3cdba8"
+    },
+    {
+      "path": "requirements.txt",
+      "size": 96,
+      "sha256": "6988b52c72575ab41957492d19729ff3d13d00d5e534b36fa542a188755e0abd"
+    },
+    {
+      "path": "requirements_build.txt",
+      "size": 118,
+      "sha256": "c1bd4d33649d53296f9cf59545be8b32be5cbe2ef74d7176b7393b4bae1125b3"
+    },
+    {
+      "path": "requirements_dev.txt",
+      "size": 96,
+      "sha256": "b9ddcd2246bbb15772621f62b2fe200ecd74697d8fa9564f1d7bc6cf6f3a4eb8"
+    },
+    {
+      "path": "settings_mixin.py",
+      "size": 14225,
+      "sha256": "d51ce061dc52249b08b67e8f81bacfd6e660efa91a25dd87ab7af9cf57238dcb"
+    },
+    {
+      "path": "smoke_auditor_layer.py",
+      "size": 4079,
+      "sha256": "18c869c944d28c768aa7802006740e747881d294021f33ad50f920475c0aa3f6"
+    },
+    {
+      "path": "smoke_combined_part01_setup_contracts.py",
+      "size": 45838,
+      "sha256": "dec46bbe393e3da5b068c573ebe8610eb0e551826aee2817983deda40ed74bb7"
+    },
+    {
+      "path": "smoke_combined_part02_ui_parser_regressions.py",
+      "size": 47230,
+      "sha256": "817bada4baa25e27ba7091ec5491f084fb451382dd3454da7156c8586c7735be"
+    },
+    {
+      "path": "smoke_combined_part03_medical_parser_manual.py",
+      "size": 11333,
+      "sha256": "97a00376d260beb01f756b97fe9bcdb73dad0c29691032ff85b2a3c84fd6a87a"
+    },
+    {
+      "path": "smoke_combined_part04_medical_generation.py",
+      "size": 21128,
+      "sha256": "a398ee0c0fe11c812aa24802818b36b692ff08661c784ad5897892bcfefd90ee"
+    },
+    {
+      "path": "smoke_combined_part05_diary_basic_templates.py",
+      "size": 14307,
+      "sha256": "ee362f5d36f80605a70c522c94c51d85446e3fa32b6a63e71deceab3fa67951c"
+    },
+    {
+      "path": "smoke_combined_part06_diary_columns_settings.py",
+      "size": 36769,
+      "sha256": "80d263a1d3a14e63c6ce2686ce266b3b9a9205b15b98abf69962bee222e5acfb"
+    },
+    {
+      "path": "smoke_combined_runner.py",
+      "size": 3010,
+      "sha256": "dfadcbd18c9a27a8cb95d17fe8fac3869ea6b3ce891c593486061fd53399caa7"
+    },
+    {
+      "path": "smoke_desktop_diary_workflow.py",
+      "size": 30756,
+      "sha256": "1124bf66e95e6bb9c7bf537635254b49ecf8b46677e93de0762af1bf603f921a"
+    },
+    {
+      "path": "smoke_followup_regressions.py",
+      "size": 9987,
+      "sha256": "a58cc910c5ef3ed97e96e786af2874cbbf96b1f872e5b401081d7161a2587c63"
+    },
+    {
+      "path": "smoke_full_patient_replay.py",
+      "size": 4235,
+      "sha256": "42ae874a04fc07898044dcaa77859f125ca4edbe0db33b30c117cb4b0a928d5e"
+    },
+    {
+      "path": "smoke_points_5_11.py",
+      "size": 2115,
+      "sha256": "3ec55cf2cdb5a6c9e7ce4173a23279a6506e992ead1471e4f2ec044e9980cfd6"
+    },
+    {
+      "path": "smoke_project_auditor.py",
+      "size": 3717,
+      "sha256": "dc4b15f58d56d5e24521ccc29d24ca8f85c1c2d563ea464abbcdba4770122807"
+    },
+    {
+      "path": "smoke_quality_modernization.py",
+      "size": 2990,
+      "sha256": "e2989ec56cc9bfe39393b694916e7c2532e484ed1b93575212ae7a5f04325ada"
+    },
+    {
+      "path": "smoke_split_entrypoints.py",
+      "size": 2047,
+      "sha256": "f8d53e3996982110de284f594e3c830c9b6e7a609f4a54035c3514aa0d3b9980"
+    },
+    {
+      "path": "smoke_stress_hardening.py",
+      "size": 23478,
+      "sha256": "d26162129a8a19a65685699a8515712974c1a8f2d9256941a946a9c274e94b87"
+    },
+    {
+      "path": "smoke_technical_debt_cleanup.py",
+      "size": 3344,
+      "sha256": "0faa03ee911cdccfea4b397525a80bd4841843d55f209c0bfb23de4e490078b4"
+    },
+    {
+      "path": "smoke_test.py",
+      "size": 242,
+      "sha256": "d9b2d4771359c69dda177cf81cb2890b0d27189ab4c1259dfa567bb7740a7679"
+    },
+    {
+      "path": "smoke_test_combined.py",
+      "size": 652,
+      "sha256": "2e17ab3d5428fe5ec7712633e7e65305daf3971da5a48e3965e1509821a4316b"
+    },
+    {
+      "path": "smoke_universal_hardening.py",
+      "size": 9005,
+      "sha256": "f3c93a03129e970a8f675563b58d88d2d5f7d2108c4c958a160b52c50a08e0c9"
+    },
+    {
+      "path": "smoke_user_reported_regressions.py",
+      "size": 24142,
+      "sha256": "5035e4c428ae0cb1fbbca91ccf076816b1945bebc927bf89effe391b18572a46"
+    },
+    {
+      "path": "start_windows.bat",
+      "size": 1215,
+      "sha256": "0de5e22a3e421d82e92a1db01876de96fa0c97efe83a0718e56e160594e4afac"
+    },
+    {
+      "path": "start_windows_debug.bat",
+      "size": 1493,
+      "sha256": "fce6767943e652d3894ebebe98b069e4b70e52e172e49ce27bc1623afe92df9f"
+    },
+    {
+      "path": "start_windows_no_console.pyw",
+      "size": 261,
+      "sha256": "efd80108f468947e02c81a8410149eae25dbc63bde87381d4831180c1439cac6"
+    },
+    {
+      "path": "start_windows_no_console.vbs",
+      "size": 608,
+      "sha256": "c2a5b54b9d3f0f2d882b19b1bcb2b482fd94b0e9f9388ce6f7dbb1327ab6af10"
+    },
+    {
+      "path": "startup.py",
+      "size": 1002,
+      "sha256": "ec4dbce79528ce616abf1167cafa0007bb8db7a20d8f9146203799480ffaeb9b"
+    },
+    {
+      "path": "tests/test_architecture_contract_hardening_v1464.py",
+      "size": 2342,
+      "sha256": "80951ceb5205615dde42fadef10e5b33ede807289fcefa6dcbe8e2862227b927"
+    },
+    {
+      "path": "tests/test_architecture_contract_hardening_v1465.py",
+      "size": 2425,
+      "sha256": "417ef85d568d7f843e1f980fcdf9212adb614b7aa5081732d17ecda12482972d"
+    },
+    {
+      "path": "tests/test_architecture_diary_report_privacy_v1471.py",
+      "size": 1718,
+      "sha256": "2c565deff5824cd4f926ad5a3b93111d5386efe5ef94c7bbafb0aa361b6bc142"
+    },
+    {
+      "path": "tests/test_architecture_domain_boundary_v1466.py",
+      "size": 2033,
+      "sha256": "ae423b1d3ae106e07e034813bf85551417513802a9fb76bf034eb19285e3f65a"
+    },
+    {
+      "path": "tests/test_architecture_privacy_runtime_locks_v1473.py",
+      "size": 3483,
+      "sha256": "c711dbf3f921f3b342e3bba300b516bb423e3745dd08e4476d4744a8314311b9"
+    },
+    {
+      "path": "tests/test_architecture_runtime_contracts_v1468.py",
+      "size": 1270,
+      "sha256": "248a3763cbde7f6ae2326268465e23f1227a4b57bd72f10dc0744769bc1bf21d"
+    },
+    {
+      "path": "tests/test_architecture_semantic_date_state_v1467.py",
+      "size": 1580,
+      "sha256": "a5e43f7c36c74ce51f264e355f0c67dfd28ceb64bb068aec5f3b7871dc77dff0"
+    },
+    {
+      "path": "tests/test_architecture_technical_privacy_v1470.py",
+      "size": 2783,
+      "sha256": "5c1c1a6229a6098cdff3912f9715c28583aad74f4918f8d8bb876e06a3030ec0"
+    },
+    {
+      "path": "tests/test_button_management_popup_values_folder_v1484.py",
+      "size": 8198,
+      "sha256": "e02c4d87dd2599e68b1d8d5ae121e6b9f77fd5f1ec9d23916c900c1c38094840"
+    },
+    {
+      "path": "tests/test_contextual_placeholder_regression_v1481.py",
+      "size": 7594,
+      "sha256": "943270a90e76953d209f62d60ab24f2e48c92ad228e676532f973f7bc1a948a5"
+    },
+    {
+      "path": "tests/test_contextual_role_disambiguation_v1482.py",
+      "size": 10140,
+      "sha256": "26b8e90e836d7a5ab357b62ffa7074f4eed39d924da349e1adec1cb448145521"
+    },
+    {
+      "path": "tests/test_desktop_intake_folder_reports_v1469.py",
+      "size": 3810,
+      "sha256": "67bae994e6082ad06aa3314beeddcc50cdf2297bc82482896e6083e843f7ac6c"
+    },
+    {
+      "path": "tests/test_diary_discovery_logic.py",
+      "size": 1154,
+      "sha256": "bc707a3eaa216c3384543968d19a628cf53401154650bea3dd2e8b3886f7d586"
+    },
+    {
+      "path": "tests/test_docx_placeholder_camelcase_regression_v1483.py",
+      "size": 4625,
+      "sha256": "425629aa1aa93018be1f66ab78d4d06fb38a63a1cc2026546fd14d3de4d8d3d7"
+    },
+    {
+      "path": "tests/test_dynamic_required_field_semantics_v1477.py",
+      "size": 3711,
+      "sha256": "a55298e68ece172052a210611b92df652fb9c814f8058f8113311e279b54ea4b"
+    },
+    {
+      "path": "tests/test_full_ui_contract_popup_dates_v1463.py",
+      "size": 6620,
+      "sha256": "ef44d8f1a3a556be918bbffb85518145b86547e860b31b762d4121ea956de1d2"
+    },
+    {
+      "path": "tests/test_human_placeholder_role_alias_regression_v1479.py",
+      "size": 5004,
+      "sha256": "fe004525805e0a09b2040241f91fffa70b8752b628fbe376dcc9c99ec6b0eb34"
+    },
+    {
+      "path": "tests/test_labs_safety_logic.py",
+      "size": 3164,
+      "sha256": "15abe1f119c30088cf7eb220680c26309cacd5d45c0a72c88c8b87e9d62ed741"
+    },
+    {
+      "path": "tests/test_no_shell_desktop_intake_v1462.py",
+      "size": 1809,
+      "sha256": "c958071879074c4d53a0179946cda0891fe99e4e9db6bcc68a42d8df7dd91db8"
+    },
+    {
+      "path": "tests/test_parser_scanner_logic.py",
+      "size": 2306,
+      "sha256": "07e93bc5a2c8aaa08dafb3e838223ee9bb58878355f6062cc075796e1fdcf418"
+    },
+    {
+      "path": "tests/test_points_5_11_logic.py",
+      "size": 4670,
+      "sha256": "b4f0ef05a2340f110435906e0ed9004dc81a39ca05fdd02fdc1636cbc73e4eef"
+    },
+    {
+      "path": "tests/test_primary_document_and_icd10_popup_v1460.py",
+      "size": 4539,
+      "sha256": "22a50eb67cdabc24446099de08aeb212214422d9abd8584b13f39de58de564f2"
+    },
+    {
+      "path": "tests/test_production_interaction_matrix_v1487.py",
+      "size": 11395,
+      "sha256": "7cfe1121469aa44febaa3c51158151f7408f532e3f121b120b48ee9bdd4e1294"
+    },
+    {
+      "path": "tests/test_registry_driven_alias_regression_v1480.py",
+      "size": 7861,
+      "sha256": "b95de7715f19b621685da0a69f9d3a3acdc8c1cb782e9f35900de576d800b737"
+    },
+    {
+      "path": "tests/test_regression_contour_baseline_v1486.py",
+      "size": 11725,
+      "sha256": "bc1a7bf457ef06d5b6178c1e1222e834aa276b089b051619a47469a5ea597d70"
+    },
+    {
+      "path": "tests/test_release_version_and_privacy_v1475.py",
+      "size": 1886,
+      "sha256": "1fe037cc3d9b3b04af2a1dc7b29d73c3ec24ec000716c37e1322e25cdb408e1d"
+    },
+    {
+      "path": "tests/test_semantic_alias_regression_v1478.py",
+      "size": 5031,
+      "sha256": "9b05e7cd359b4a9737935867abdb99ad2d974f3d5b7f7d0b3aa922d3acf14d28"
+    },
+    {
+      "path": "tests/test_semantic_date_conflict_v1461.py",
+      "size": 2807,
+      "sha256": "ab5e2c09f7e64c300b246caf0e6b65f59e697fead7ae5bfd1e3b34b54668e58d"
+    },
+    {
+      "path": "tests/test_startup_vbs_encoding_v1472.py",
+      "size": 1263,
+      "sha256": "7f668dbc6f537e21e8a2228a07668c4bc5b53225c89727c9b45435c4586aaa07"
+    },
+    {
+      "path": "tests/test_ui_contract_hardening_v1459.py",
+      "size": 2087,
+      "sha256": "4b1fa809cac9d222fd79aa52812dc0052974f2175bf1903bb3c08a30239df84a"
+    },
+    {
+      "path": "tests/test_ui_labs_preflight_logic.py",
+      "size": 9017,
+      "sha256": "69030c6b99786425c47f1f3c8438bf7868557c43a542587e844a1b742b4ff471"
+    },
+    {
+      "path": "tests/test_universal_generation_report_v1476.py",
+      "size": 1620,
+      "sha256": "9affd23fedf269029fd21da74aea76c77c8affdf3dbfb305f4dac57ca9c120f4"
+    },
+    {
+      "path": "tools/run_regression_contour.py",
+      "size": 1605,
+      "sha256": "f9964f9e8d0d741ee5976669afa8a781cab462e9b34f8747dace61fea4a42a21"
+    },
+    {
+      "path": "ui_buttons.py",
+      "size": 8921,
+      "sha256": "441b3267e70f738015f30443e6e8ef0dfbc620a359bbb1904881437828ccee08"
+    },
+    {
+      "path": "ui_cards.py",
+      "size": 6933,
+      "sha256": "f2b642d9eb031f0f5bc5cc8fc5e42673cdda9b18765b6e0dd6778432854d93f6"
+    },
+    {
+      "path": "ui_components.py",
+      "size": 2013,
+      "sha256": "d00791482cd74f809637abcc83fc1ec6d2509a63e8b07b770c64674870802bdf"
+    },
+    {
+      "path": "ui_fields.py",
+      "size": 13903,
+      "sha256": "d58b79b7c0345391b03a327b5a2b6ad344a0801a28248abdd87ae63af38dcb43"
+    },
+    {
+      "path": "ui_file_rows.py",
+      "size": 862,
+      "sha256": "59af9837404a0a1239d97762c86fe246c4c6f1f1a0bba82b1f624fac4dd99dc2"
+    },
+    {
+      "path": "ui_icons.py",
+      "size": 9306,
+      "sha256": "3c74ee1e5f3a85c01c726a0cb1469903a0f7ffe3ef55b4b4ea5d4f0e03fc9a04"
+    },
+    {
+      "path": "uninstall_background_watcher.bat",
+      "size": 618,
+      "sha256": "de1e061cb8f17a9c3b5a4e36f2130c4d9540623d92852f3b4f04e14f752b90e4"
+    },
+    {
+      "path": "universal_case_adapter.py",
+      "size": 4056,
+      "sha256": "b919ba2f134f71ca2cba0925ca015e013719de49bf1b801541be0309f7372809"
+    },
+    {
+      "path": "universal_diary_generation.py",
+      "size": 5789,
+      "sha256": "64591bd61ad49dafc30353c93085bb76089ca460fa2f7aabd24a9951fa1cfd27"
+    },
+    {
+      "path": "universal_diary_templates.py",
+      "size": 4419,
+      "sha256": "ef2afdee9c4a47acb479c134ad18ce85e547e4f4978c956e5f81a8e8d4322c09"
+    },
+    {
+      "path": "universal_fields.py",
+      "size": 53110,
+      "sha256": "79d1b451ce8ff16f8f0b6bc8bc594b7c1ad893e8ee5ef41fd128fefe063264f5"
+    },
+    {
+      "path": "universal_generation.py",
+      "size": 14744,
+      "sha256": "44a15ee7d8a73f2bfd2543a396b85e5d1f241962328115824629574b1f68311b"
+    },
+    {
+      "path": "universal_main_documents.py",
+      "size": 15157,
+      "sha256": "2cacebbcaa9a8aff9b2a1a31ec4e9136fcb4ee7c54f2b9a51a22e84e2c550f64"
+    },
+    {
+      "path": "universal_profile_builder.py",
+      "size": 21432,
+      "sha256": "07f9d7a340888a93e1c0ea9d48b97f258cd765b54c015a4069016fe24f278723"
+    },
+    {
+      "path": "universal_profiles.py",
+      "size": 19700,
+      "sha256": "3168599c55779358782386a08232b188e721ee3078b5512462f3e6a78544268f"
+    },
+    {
+      "path": "universal_scanner.py",
+      "size": 25542,
+      "sha256": "cf63c185292f7118d3da06423df64434e63306645c49cd0a761d0628bc50ca4d"
+    },
+    {
+      "path": "universal_template_engine.py",
+      "size": 42288,
+      "sha256": "bce7405e4bd61b8d30ab8f081ab049b5416d172d8f39324bfd369210927cec98"
+    },
+    {
+      "path": "USER_BEHAVIOR_CONTRACT.md",
+      "size": 5595,
+      "sha256": "3cf230f223fe9a700bef44086004c47adf020810778d5e5dae1d84ed304958af"
+    },
+    {
+      "path": "version_info.txt",
+      "size": 873,
+      "sha256": "26fa24792d04a7090d138d60f441a90b8d22ba5953f856b47fbb857f72b79db3"
+    },
+    {
+      "path": "window_chrome_mixin.py",
+      "size": 10084,
+      "sha256": "a2db8b3bc2cdc6333eaec49edc90d3eb84c89679f8b1056cd2561ec2b62c1e46"
+    },
+    {
+      "path": "window_completion_dialog.py",
+      "size": 12283,
+      "sha256": "cee42fad00b0919887a083f44b4ee0043130d80d0015ee629ef7de578fce7643"
+    },
+    {
+      "path": "window_core_mixin.py",
+      "size": 3729,
+      "sha256": "9e4f592014691944c2a08b621277c53beaed9cf3e291b8f8b523c8bdefdd52ab"
+    },
+    {
+      "path": "window_document_mapper.py",
+      "size": 38875,
+      "sha256": "08fd3935cbce1fb6a735b36c97ed4dcb6c60bd3bb49147835c556b42566e0717"
+    },
+    {
+      "path": "window_header_mixin.py",
+      "size": 13090,
+      "sha256": "f3c368c0ece42b8748e1390192aa9b8a8f819b66efae0485be48d7ad3434756c"
+    },
+    {
+      "path": "window_mapper_dialog.py",
+      "size": 571,
+      "sha256": "80a306b1b8f462de82404458f768d97c3aff1f1bca95c818ea88dcd60c81920f"
+    },
+    {
+      "path": "window_mixin.py",
+      "size": 631,
+      "sha256": "cdeaafea55a15ce05c5fa43c964e633584613ade0dc3b24679c4b03f06e4f2c7"
+    },
+    {
+      "path": "window_setup_center.py",
+      "size": 48922,
+      "sha256": "fc3fdbf54a9dda7a6d58a99df7a70fa842dc753e9b847d4773fee99ecf7dcc74"
+    },
+    {
+      "path": "window_style_mixin.py",
+      "size": 3976,
+      "sha256": "f4d864bd850514d513c0a1ea36440240713c355e136d86b580b9da4d3ff6d295"
+    },
+    {
+      "path": "window_universal_dialogs_mixin.py",
+      "size": 753,
+      "sha256": "ef5dd6de22f8c66dfb38e04b92cbc3a49e4b77419a5b98165e9de964264494dd"
+    },
+    {
+      "path": "WINDOWS_ACCEPTANCE_CHECKLIST.md",
+      "size": 4313,
+      "sha256": "a415cd9fc15bac851675e3cd353702f7c36736a3530904ca984198bf4f7e13cb"
+    }
+  ]
+}

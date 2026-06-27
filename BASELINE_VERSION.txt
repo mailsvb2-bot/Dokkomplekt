@@ -1,0 +1,39 @@
+MedicalDiaryAutofill baseline
+=============================
+
+Baseline version: v1.4.85_baseline_foundation_SOURCE
+Current regression-contour release: v1.4.89_release_gate_runtime_isolation_SOURCE
+Baseline date: 2026-06-26
+Regression contour date: 2026-06-26
+Baseline lineage source: v1.4.84_button_management_popup_folder_regression_closure_SOURCE
+Purpose: freeze the current best behavior, then protect it with a strict regression contour before GitHub upload.
+
+Meaning of this baseline
+------------------------
+The v1.4.85 build is the reference point for future repair and stabilization work.
+The v1.4.86 build adds the first executable regression contour around that baseline.
+A future build is allowed to replace it only if it preserves all user-facing behavior described in USER_BEHAVIOR_CONTRACT.md and passes REGRESSION_CONTOUR.md / REGRESSION_MATRIX.md checks.
+
+Non-negotiable baseline rules
+-----------------------------
+1. Do not return bundled medical DOCX/DOCM templates.
+2. Keep the project as a doctor-owned constructor: the doctor uploads their own Word templates.
+3. Preserve block-03 custom button creation, rename and delete behavior.
+4. Preserve popup/UI data priority over scanner data for generated documents.
+5. Preserve patient subfolder naming according to the selected naming principle.
+6. Preserve privacy and neutral medical wording constraints.
+7. Do not remove existing user functionality while repairing regressions.
+
+Minimum checks for this regression-contour release
+-------------------------------------------------
+python -m compileall -q .
+python -m pytest -q
+python tools/run_regression_contour.py
+python prod_audit.py
+python release_check.py
+python smoke_test.py
+python project_auditor.py . --ci --quiet
+
+Next step after this contour
+----------------------------
+Use this source tree as the GitHub candidate.  Push only after the contour is green locally, then keep GitHub Actions as the project guard.
