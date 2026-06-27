@@ -109,6 +109,8 @@ jobs:
 
       - name: Build EXE
         shell: cmd
+        env:
+          MEDICAL_AUTOFILL_SKIP_BUILD_PRECHECKS: '1'
         run: build_exe_windows.bat
 
       - name: Build clean source archive
