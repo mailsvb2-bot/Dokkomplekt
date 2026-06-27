@@ -3,15 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 
-from product_licensing import PLAN_LIMITS, ProductAccessManager, machine_fingerprint, sign_license_payload
+from product_access import PLAN_LIMITS, ProductAccessManager, machine_fingerprint, sign_license_payload
 
 
 def test_trial_starts_locally_and_requires_watermark(tmp_path, monkeypatch):
     monkeypatch.setenv("DOKKOMPLEKT_LICENSE_DIR", str(tmp_path))
     manager = ProductAccessManager(now=datetime(2026, 6, 27, tzinfo=timezone.utc))
-
     state = manager.current_state()
-
     assert state.plan == "trial"
     assert state.active is True
     assert state.watermark_required is True
@@ -24,9 +22,7 @@ def test_trial_blocks_after_total_document_limit(tmp_path, monkeypatch):
     monkeypatch.setenv("DOKKOMPLEKT_LICENSE_DIR", str(tmp_path))
     manager = ProductAccessManager(now=datetime(2026, 6, 27, tzinfo=timezone.utc))
     manager.record_created_documents(30)
-
     decision = manager.check_document_creation(1)
-
     assert decision.allowed is False
     assert decision.code == "license_inactive"
     assert decision.state.plan == "trial"
@@ -48,10 +44,8 @@ def test_paid_license_uses_plan_limits_without_watermark(tmp_path, monkeypatch):
     signed = sign_license_payload(payload, "test-secret")
     manager = ProductAccessManager(now=datetime(2026, 6, 27, tzinfo=timezone.utc))
     manager.install_license_text(json.dumps(signed, ensure_ascii=False))
-
     state = manager.current_state()
     decision = manager.check_document_creation(50)
-
     assert state.plan == "doctor_pro"
     assert state.active is True
     assert state.watermark_required is False
@@ -72,9 +66,7 @@ def test_paid_license_rejects_excess_per_run(tmp_path, monkeypatch):
     signed = sign_license_payload(payload, "test-secret")
     manager = ProductAccessManager(now=datetime(2026, 6, 27, tzinfo=timezone.utc))
     manager.install_license_text(json.dumps(signed, ensure_ascii=False))
-
     decision = manager.check_document_creation(11)
-
     assert decision.allowed is False
     assert decision.code == "per_run_limit"
 
@@ -92,10 +84,8 @@ def test_expired_paid_license_keeps_safe_blocked_state(tmp_path, monkeypatch):
     signed = sign_license_payload(payload, "test-secret")
     manager = ProductAccessManager(now=datetime(2026, 6, 27, tzinfo=timezone.utc))
     manager.install_license_text(json.dumps(signed, ensure_ascii=False))
-
     state = manager.current_state()
     decision = manager.check_document_creation(1)
-
     assert state.active is False
     assert state.plan == "blocked"
     assert state.watermark_required is True
@@ -115,10 +105,8 @@ def test_paid_license_grace_period_allows_temporary_creation(tmp_path, monkeypat
     signed = sign_license_payload(payload, "test-secret")
     manager = ProductAccessManager(now=datetime(2026, 6, 27, tzinfo=timezone.utc))
     manager.install_license_text(json.dumps(signed, ensure_ascii=False))
-
     state = manager.current_state()
     decision = manager.check_document_creation(5)
-
     assert state.active is True
     assert state.reason == "active_grace"
     assert decision.allowed is True
