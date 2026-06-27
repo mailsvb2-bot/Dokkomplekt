@@ -1,4 +1,4 @@
-# MedicalDiaryAutofill
+# MedicalDiaryAutofill / Dokkomplekt
 
 Version: `v1.4.89_release_gate_runtime_isolation_SOURCE`
 
@@ -17,6 +17,22 @@ wiring.
 No bundled medical DOCX/DOCM templates were added. The build remains a
 doctor-owned constructor: the doctor uploads their own Word templates and the
 program creates the working buttons.
+
+## Product access / licensing contour
+
+The commercial product layer is local-only and does not upload patient documents
+or telemetry.  It adds:
+
+- tariff source of truth in `product_licensing.py`;
+- trial limits: 14 days / 30 generated documents / watermark;
+- paid limits by plan: Doctor Start, Doctor Pro, Department, Clinic, Enterprise;
+- local offline license JSON with machine binding and signed payload support;
+- runtime creation guard in `product_access_mixin.py`;
+- trial/demo DOCX footer watermark in `product_watermark.py`;
+- doctor-facing license dialog via `Ctrl+L`;
+- contract tests in `tests/test_product_licensing_contract.py`.
+
+See `PRODUCT_PRICING_AND_LICENSING.md` for the product tariff policy.
 
 ## Запуск локально
 
