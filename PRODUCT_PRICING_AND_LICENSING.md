@@ -84,11 +84,20 @@ Trial создаёт документы только с footer-водяным з
 
 ## Техническая реализация
 
-- `product_licensing.py` — источник истины тарифов, trial, лимитов, machine binding, usage counters и offline-license проверки.
-- `product_watermark.py` — post-processing водяного знака для trial/demo DOCX.
-- `product_license_mixin.py` — локальный UI-диалог лицензии.
-- `product_access_mixin.py` — обвязка создания документов лимитами, watermark-policy и счётчиком успешных DOCX.
-- `tests/test_product_licensing_contract.py` — регрессионный контракт тарифов, trial, лимитов, grace и watermark-mode.
+`product_licensing.py` — единый production-модуль продуктового доступа. В нём находятся:
+
+- источник истины тарифов;
+- trial/paid/expired/grace состояния;
+- лимиты по документам, шаблонам, профилям и рабочим местам;
+- machine binding и offline-license проверка;
+- счётчик успешно созданных документов;
+- runtime creation guard;
+- trial/demo DOCX footer watermark;
+- локальный UI-диалог лицензии.
+
+Так слой лицензирования не разрастается в набор микрофайлов и сохраняет production contour проекта.
+
+`tests/test_product_licensing_contract.py` — регрессионный контракт тарифов, trial, лимитов, grace и watermark-mode.
 
 ## Коммерческий принцип
 
