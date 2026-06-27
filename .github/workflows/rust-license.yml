@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          show-progress: false
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -31,16 +33,26 @@ jobs:
         shell: bash
         run: |
           set +e
-          cargo test --workspace > /tmp/dokkomplekt-rust-test.log 2>&1
+          cargo test --workspace > rust-test.log 2>&1
           code=$?
-          tail -160 /tmp/dokkomplekt-rust-test.log
+          tail -160 rust-test.log
           exit $code
 
       - name: Cargo clippy
         shell: bash
         run: |
           set +e
-          cargo clippy --workspace --all-targets -- -D warnings > /tmp/dokkomplekt-rust-clippy.log 2>&1
+          cargo clippy --workspace --all-targets -- -D warnings > rust-clippy.log 2>&1
           code=$?
-          tail -160 /tmp/dokkomplekt-rust-clippy.log
+          tail -160 rust-clippy.log
           exit $code
+
+      - name: Upload Rust CI logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-ci-logs
+          path: |
+            rust/rust-test.log
+            rust/rust-clippy.log
+          if-no-files-found: ignore
