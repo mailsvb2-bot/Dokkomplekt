@@ -38,3 +38,4 @@ addopts = "-q"
 
 [tool.ruff.lint.per-file-ignores]
 "smoke_combined_part*.py" = ["F821"]
+"window_setup_center.py" = ["F821"]
