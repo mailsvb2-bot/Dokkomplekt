@@ -41,10 +41,12 @@ AGENT_VERSION = "v1.7"
 POLL_SECONDS = 2.5
 LAUNCH_COOLDOWN_SECONDS = 20.0
 LOCK_STALE_SECONDS = 120.0
+GUI_ACTIVE_SECONDS = 45.0
 PENDING_RETRY_SECONDS = 75.0
 MAX_LOG_BYTES = 512 * 1024
 STATE_FILE_NAME = "desktop_intake_agent_state.json"
 LOCK_FILE_NAME = "desktop_intake_agent.lock"
+GUI_LOCK_FILE_NAME = "medical_diary_autofill_gui.lock"
 STARTUP_AGENT_SCRIPT_NAME = "MedicalDiaryAutofill Intake Agent.vbs"
 LEGACY_STARTUP_SHORTCUT_NAME = "MedicalDiaryAutofill Intake Agent.lnk"
 DESKTOP_INTAKE_AGENT_HAS_SINGLETON_LOCK = True
@@ -63,6 +65,7 @@ DESKTOP_INTAKE_AGENT_STATE_IS_PATHLESS = True
 DESKTOP_INTAKE_AGENT_LOGS_ARE_REDACTED = True
 DESKTOP_INTAKE_AGENT_AUTOSTART_IS_DISABLED_IN_CI = True
 DESKTOP_INTAKE_AGENT_LOGGING_IS_DISABLED_IN_CI = True
+DESKTOP_INTAKE_AGENT_RESPECTS_ACTIVE_GUI_LOCK = True
 
 
 def _truthy_env(value: object) -> bool:
@@ -113,6 +116,10 @@ def _log_path() -> Path:
     return _data_root() / "desktop_intake_agent.log"
 
 
+def _gui_lock_path() -> Path:
+    return _data_root() / GUI_LOCK_FILE_NAME
+
+
 def _rotate_log_if_needed(path: Path) -> None:
     try:
         if path.exists() and path.stat().st_size > MAX_LOG_BYTES:
@@ -146,6 +153,57 @@ def _write_log(message: str) -> None:
         record_soft_exception("desktop_intake_agent.log", exc)
 
 
+
+
+
+
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _gui_lock_payload() -> dict:
+    return {"version": AGENT_VERSION, "pid": os.getpid(), "updated_at": time.time()}
+
+
+def write_gui_runtime_lock() -> None:
+    """Refresh the foreground GUI heartbeat used by the background agent.
+
+    The file contains only technical runtime data.  It prevents the background
+    watcher from launching a second GUI while the doctor already has the main
+    window open and the in-process watcher can handle the dropped DOCX.
+    """
+    _save_json(_gui_lock_path(), _gui_lock_payload())
+
+
+def release_gui_runtime_lock() -> None:
+    """Remove this process' GUI heartbeat on normal shutdown."""
+    path = _gui_lock_path()
+    payload = _load_json(path)
+    if _safe_int(payload.get("pid"), -1) not in {-1, os.getpid()}:
+        return
+    with suppress(OSError):
+        path.unlink()
+
+
+def is_gui_runtime_active(now: float | None = None) -> bool:
+    """Return True when a foreground GUI heartbeat is fresh.
+
+    Stale or corrupted locks are ignored so a crashed program cannot suppress
+    legitimate desktop-intake launches forever.
+    """
+    payload = _load_json(_gui_lock_path())
+    if not payload:
+        return False
+    updated_at = _safe_float(payload.get("updated_at", 0.0), 0.0)
+    current = time.time() if now is None else now
+    if current - updated_at <= GUI_ACTIVE_SECONDS:
+        return True
+    with suppress(OSError):
+        _gui_lock_path().unlink()
+    return False
 
 
 def _safe_signature_ref(signature: object) -> str:
@@ -579,7 +637,9 @@ def run_forever() -> None:
             state_changed = state_changed or pending_changed
             if folder is not None and not pending:
                 candidates = scan_primary_candidates(folder, seen)
-                if candidates and time.time() - last_launch >= LAUNCH_COOLDOWN_SECONDS:
+                if candidates and is_gui_runtime_active():
+                    _write_log("foreground GUI is active; agent will not launch duplicate window")
+                elif candidates and time.time() - last_launch >= LAUNCH_COOLDOWN_SECONDS:
                     candidate = candidates[0]
                     candidate_sig = _candidate_signature(candidate)
                     if _launch_main_app(f"new primary file: {_candidate_ref(candidate)}"):
@@ -597,6 +657,8 @@ def run_forever() -> None:
 def assert_desktop_intake_agent_lock() -> None:
     if AGENT_VERSION != "v1.7":
         raise AssertionError("Desktop intake agent lock changed unexpectedly")
+    if not DESKTOP_INTAKE_AGENT_RESPECTS_ACTIVE_GUI_LOCK:
+        raise AssertionError("Desktop intake agent must respect active foreground GUI lock")
     if not DESKTOP_INTAKE_AGENT_HAS_SINGLETON_LOCK:
         raise AssertionError("Desktop intake agent must have a singleton lock")
     if not DESKTOP_INTAKE_AGENT_RESPECTS_EXPLICIT_DISABLED_SETTINGS:

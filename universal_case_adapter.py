@@ -7,10 +7,18 @@ semantic field container out.
 
 from __future__ import annotations
 
+import re
 from typing import Mapping
 
+from icd10_f_search import normalize_required_diagnosis_with_icd10
 from medical_models import PatientData
 from universal_fields import PatientCase
+
+
+def _icd10_code_from_diagnosis(value: str) -> str:
+    normalized = normalize_required_diagnosis_with_icd10(value)
+    match = re.search(r"\b([A-Z][0-9]{2}(?:\.[0-9A-Z]+)?)\b", normalized)
+    return match.group(1) if match else ""
 
 
 def _labs_results_for_case(data: PatientData) -> str:
@@ -44,6 +52,7 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
         "status.mental": data.mental_status,
         "status.somatic": data.somatic_status,
         "diagnosis.main": data.diagnosis,
+        "diagnosis.icd10": _icd10_code_from_diagnosis(data.diagnosis),
         "treatment.plan": data.treatment_plan,
         "labs.results": _labs_results_for_case(data),
         "labs.source": data.labs_source,

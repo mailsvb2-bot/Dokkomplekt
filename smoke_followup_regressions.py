@@ -232,6 +232,71 @@ def test_background_agent_contracts() -> None:
     assert "--intake-agent" in Path("main.py").read_text(encoding="utf-8")
 
 
+
+def test_background_agent_respects_active_gui_runtime_lock(tmp: Path) -> None:
+    import time
+    import desktop_intake_agent
+
+    old_data_root = desktop_intake_agent._data_root
+    try:
+        desktop_intake_agent._data_root = lambda: tmp  # type: ignore[assignment]
+        assert desktop_intake_agent.is_gui_runtime_active() is False
+        desktop_intake_agent.write_gui_runtime_lock()
+        assert desktop_intake_agent.is_gui_runtime_active() is True
+        stale = {"version": desktop_intake_agent.AGENT_VERSION, "pid": 123456, "updated_at": time.time() - desktop_intake_agent.GUI_ACTIVE_SECONDS - 10}
+        desktop_intake_agent._save_json(desktop_intake_agent._gui_lock_path(), stale)
+        assert desktop_intake_agent.is_gui_runtime_active() is False
+    finally:
+        desktop_intake_agent._data_root = old_data_root  # type: ignore[assignment]
+
+
+def test_desktop_intake_bootstrap_installs_background_agent_once(tmp: Path) -> None:
+    from pathlib import Path
+    from unittest.mock import patch
+    import desktop_intake_mixin
+    from desktop_intake import DESKTOP_INTAKE_FOLDER_NAME, DESKTOP_INTAKE_SETUP_PROMPT_VERSION
+
+    calls: list[bool] = []
+
+    class Root:
+        def after(self, _delay, callback):
+            return "job"
+        def protocol(self, *_args):
+            return None
+
+    class App(desktop_intake_mixin.DesktopIntakeMixin):
+        def __init__(self):
+            self.root = Root()
+            self._folder = tmp / DESKTOP_INTAKE_FOLDER_NAME
+            self._folder.mkdir()
+            self._settings = {}
+            self._desktop_intake_enabled = True
+            self._desktop_intake_asked = True
+            self._desktop_intake_folder = str(self._folder)
+            self._desktop_intake_prompt_version = DESKTOP_INTAKE_SETUP_PROMPT_VERSION
+            self._desktop_intake_seen_signatures = set()
+            self._desktop_intake_poll_job = "already-running"
+            self._desktop_intake_popup_open = False
+            self._desktop_intake_last_popup_opened = False
+            self._desktop_intake_popup_outcome = ""
+            self._desktop_intake_gui_lock_job = None
+        def _settings_payload_for_disk(self):
+            return {"asked": True, "enabled": True, "folder": self._desktop_intake_folder, "prompt_version": DESKTOP_INTAKE_SETUP_PROMPT_VERSION}
+        def _save_settings(self):
+            return None
+        def _log(self, _message):
+            return None
+        def _ask_create_desktop_intake_folder(self):
+            raise AssertionError("prompt should not run for current enabled settings")
+        def _ensure_background_intake_agent_installed(self, *, start_now=True):
+            calls.append(start_now)
+            return True
+
+    with patch("desktop_intake_agent.write_gui_runtime_lock", lambda: None):
+        App()._bootstrap_desktop_intake_watcher()
+    assert calls == [True]
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory(prefix="followup_regressions_") as tmp_dir:
         tmp = Path(tmp_dir)
@@ -242,6 +307,8 @@ def main() -> None:
         test_custom_renderer_preserves_run_formatting(tmp)
         test_background_agent_pending_handshake(tmp)
         test_background_agent_contracts()
+        test_background_agent_respects_active_gui_runtime_lock(tmp)
+        test_desktop_intake_bootstrap_installs_background_agent_once(tmp)
     print("FOLLOWUP REGRESSIONS SMOKE OK")
 
 
