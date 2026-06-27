@@ -84,7 +84,7 @@ Trial создаёт документы только с footer-водяным з
 
 ## Техническая реализация
 
-`product_licensing.py` — единый production-модуль продуктового доступа. В нём находятся:
+`product_access` — единый package-слой продуктового доступа. В нём находятся:
 
 - источник истины тарифов;
 - trial/paid/expired/grace состояния;
@@ -95,7 +95,7 @@ Trial создаёт документы только с footer-водяным з
 - trial/demo DOCX footer watermark;
 - локальный UI-диалог лицензии.
 
-Так слой лицензирования не разрастается в набор микрофайлов и сохраняет production contour проекта.
+Слой лицензирования не добавляет root-level microfile и сохраняет production contour проекта.
 
 `tests/test_product_licensing_contract.py` — регрессионный контракт тарифов, trial, лимитов, grace и watermark-mode.
 
