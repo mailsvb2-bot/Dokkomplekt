@@ -21,8 +21,7 @@ program creates the working buttons.
 ## Product access / licensing contour
 
 The commercial product layer is local-only and does not upload patient documents
-or telemetry.  It adds one consolidated production module, `product_licensing.py`,
-with:
+or telemetry.  It adds one consolidated package, `product_access`, with:
 
 - tariff source of truth;
 - trial limits: 14 days / 30 generated documents / watermark;
