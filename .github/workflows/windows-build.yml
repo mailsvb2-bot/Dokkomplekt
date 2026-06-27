@@ -87,6 +87,9 @@ jobs:
             requirements*.txt
             pyproject.toml
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install build and gate dependencies
         run: |
           python -m pip install --upgrade pip
@@ -125,6 +128,15 @@ jobs:
 
       - name: Run release gate
         run: python release_check.py
+
+      - name: Prebuild native license verifier for EXE
+        shell: pwsh
+        run: |
+          python -m venv .venv_build
+          .\.venv_build\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv_build\Scripts\python.exe -m pip install -r requirements_build.txt
+          .\.venv_build\Scripts\python.exe -m pip install .\rust\crates\dokkomplekt-license-python
+          .\.venv_build\Scripts\python.exe -c "import dokkomplekt_license_native as n; print(n.native_core_version())"
 
       - name: Build EXE
         shell: cmd
