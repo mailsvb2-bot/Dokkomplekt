@@ -20,7 +20,7 @@ from ui_file_rows import UiFileRowsMixin
 from diary_template_discovery import DiaryTemplateDiscoveryMixin
 from diary_template_selection import DiaryTemplateSelectionMixin
 from product_access import ProductAccessMixin, ProductLicenseMixin
-from product_access_native_runtime import NativeProductAccessMixin
+from product_access_native import NativeProductAccessMixin
 
 
 class WidgetsMixin(UiCardsMixin, UiIconsMixin, UiButtonsMixin, UiFieldsMixin, DiagnosisWidgetMixin, UiFileRowsMixin):
