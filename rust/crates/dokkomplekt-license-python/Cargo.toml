@@ -6,6 +6,7 @@ rust-version.workspace = true
 
 [lib]
 name = "dokkomplekt_license_native"
+crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [dependencies]
