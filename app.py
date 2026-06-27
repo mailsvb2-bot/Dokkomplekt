@@ -19,8 +19,7 @@ from diagnosis_widget import DiagnosisWidgetMixin
 from ui_file_rows import UiFileRowsMixin
 from diary_template_discovery import DiaryTemplateDiscoveryMixin
 from diary_template_selection import DiaryTemplateSelectionMixin
-from product_access_mixin import ProductAccessMixin
-from product_license_mixin import ProductLicenseMixin
+from product_licensing import ProductAccessMixin, ProductLicenseMixin
 
 
 class WidgetsMixin(UiCardsMixin, UiIconsMixin, UiButtonsMixin, UiFieldsMixin, DiagnosisWidgetMixin, UiFileRowsMixin):
