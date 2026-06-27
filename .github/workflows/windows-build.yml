@@ -73,10 +73,10 @@ jobs:
             requirements*.txt
             pyproject.toml
 
-      - name: Install build dependencies
+      - name: Install build and gate dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements_build.txt
+          python -m pip install -r requirements_dev.txt
 
       - name: Run project code auditor
         run: python project_auditor.py . --ci --quiet
