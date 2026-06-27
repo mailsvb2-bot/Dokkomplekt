@@ -166,7 +166,7 @@ class ActionsCreationBatchingMixin:
     def _open_output_folder_after_creation(
         self,
         *,
-        created_files: List[Path],
+        created_files: list[Path],
         creation_report: Path | None,
     ) -> bool:
         if not getattr(self, "open_result_folder_var", None) or not self.open_result_folder_var.get():
@@ -283,4 +283,3 @@ class ActionsCreationBatchingMixin:
         if (remaining or (custom_regular_non_special and custom.get("requires_treatment"))) and not self._prompt_assigned_treatment_if_needed(force=False):
             return False
         return True
-
