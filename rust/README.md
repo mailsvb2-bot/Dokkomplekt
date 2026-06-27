@@ -6,6 +6,7 @@ This workspace is the new foundation for commercial licensing and the license se
 
 - `dokkomplekt-license-core` — pure deterministic license verification and access policy.
 - `dokkomplekt-license-server` — HTTP service boundary for orders, provider callbacks and machine activation.
+- `dokkomplekt-license-python` — PyO3 native verifier module packaged as `dokkomplekt_license_native`.
 
 ## Local commands
 
@@ -15,6 +16,15 @@ cargo fmt --all
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
+
+## Native verifier wheel
+
+```bash
+python -m pip install ./rust/crates/dokkomplekt-license-python
+python -c "import dokkomplekt_license_native as n; print(n.native_core_version())"
+```
+
+The Windows EXE workflow installs this wheel into `.venv_build` before PyInstaller runs.
 
 ## Runtime server command
 
