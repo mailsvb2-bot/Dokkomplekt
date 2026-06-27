@@ -3,9 +3,8 @@ from __future__ import annotations
 """Local product access, tariff, trial and license contract for Dokkomplekt.
 
 Stores only product metadata. Never store/read/send patient documents, names,
-diagnoses, template contents or patient file names here.  The runtime mixins and
-watermark helpers intentionally live in this one product module so the project
-keeps the existing anti-microfile production contour.
+diagnoses, template contents or patient file names here. Runtime UI imports are
+lazy so headless CI can test the product contract without a Tk display stack.
 """
 
 from dataclasses import dataclass
@@ -16,8 +15,6 @@ import json
 import os
 import platform
 from pathlib import Path
-import tkinter as tk
-from tkinter import filedialog, messagebox
 from typing import Any, Iterable, Mapping
 import uuid
 
@@ -104,94 +101,27 @@ class PlanLimits:
 
 PLAN_LIMITS: dict[str, PlanLimits] = {
     "trial": PlanLimits(
-        plan_id="trial",
-        title="Trial",
-        monthly_price_rub=0,
-        yearly_price_rub=0,
-        included_machines=1,
-        included_users=1,
-        profile_limit=1,
-        template_limit=5,
-        document_limit_month=30,
-        max_documents_per_run=3,
-        watermark_mode="trial",
+        "trial",
+        "Trial",
+        0,
+        0,
+        1,
+        1,
+        1,
+        5,
+        30,
+        3,
+        "trial",
         offline_activation=False,
         overage_percent=0,
         grace_days=0,
         support_level="knowledge_base",
     ),
     "doctor_start": PlanLimits("doctor_start", "Doctor Start", 1490, 14900, 1, 1, 1, 30, 600, 10),
-    "doctor_pro": PlanLimits(
-        "doctor_pro",
-        "Doctor Pro",
-        3900,
-        29900,
-        2,
-        1,
-        3,
-        150,
-        3000,
-        50,
-        batch_generation=True,
-        batch_print=True,
-        support_level="priority",
-    ),
-    "department": PlanLimits(
-        "department",
-        "Department",
-        14900,
-        149000,
-        5,
-        10,
-        10,
-        500,
-        20000,
-        100,
-        batch_generation=True,
-        batch_print=True,
-        shared_department_profile=True,
-        role_management=True,
-        grace_days=14,
-        support_level="department",
-    ),
-    "clinic": PlanLimits(
-        "clinic",
-        "Clinic",
-        49000,
-        490000,
-        20,
-        50,
-        50,
-        2000,
-        100000,
-        250,
-        batch_generation=True,
-        batch_print=True,
-        shared_department_profile=True,
-        role_management=True,
-        local_license_server=True,
-        grace_days=30,
-        support_level="sla",
-    ),
-    "enterprise": PlanLimits(
-        "enterprise",
-        "Enterprise",
-        0,
-        900000,
-        9999,
-        9999,
-        9999,
-        999999,
-        9999999,
-        1000,
-        batch_generation=True,
-        batch_print=True,
-        shared_department_profile=True,
-        role_management=True,
-        local_license_server=True,
-        grace_days=45,
-        support_level="enterprise_sla",
-    ),
+    "doctor_pro": PlanLimits("doctor_pro", "Doctor Pro", 3900, 29900, 2, 1, 3, 150, 3000, 50, batch_generation=True, batch_print=True, support_level="priority"),
+    "department": PlanLimits("department", "Department", 14900, 149000, 5, 10, 10, 500, 20000, 100, batch_generation=True, batch_print=True, shared_department_profile=True, role_management=True, grace_days=14, support_level="department"),
+    "clinic": PlanLimits("clinic", "Clinic", 49000, 490000, 20, 50, 50, 2000, 100000, 250, batch_generation=True, batch_print=True, shared_department_profile=True, role_management=True, local_license_server=True, grace_days=30, support_level="sla"),
+    "enterprise": PlanLimits("enterprise", "Enterprise", 0, 900000, 9999, 9999, 9999, 999999, 9999999, 1000, batch_generation=True, batch_print=True, shared_department_profile=True, role_management=True, local_license_server=True, grace_days=45, support_level="enterprise_sla"),
 }
 
 
@@ -216,29 +146,21 @@ class LicenseEntitlement:
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "LicenseEntitlement":
         return cls(
-            license_id=str(payload.get("license_id") or "").strip(),
-            plan=str(payload.get("plan") or "").lower().strip(),
-            owner_name=str(payload.get("owner_name") or "").strip(),
-            organization_name=str(payload.get("organization_name") or "").strip(),
-            seats=max(1, int(payload.get("seats") or 1)),
-            allowed_machines=tuple(
-                str(item).lower().strip() for item in payload.get("allowed_machines", ()) if str(item).strip()
-            ),
-            valid_until=str(payload.get("valid_until") or "").strip(),
-            issued_at=str(payload.get("issued_at") or "").strip(),
-            generation_limit_month=int(payload["generation_limit_month"])
-            if payload.get("generation_limit_month") is not None
-            else None,
-            template_limit=int(payload["template_limit"]) if payload.get("template_limit") is not None else None,
-            profile_limit=int(payload["profile_limit"]) if payload.get("profile_limit") is not None else None,
-            watermark_mode=str(payload.get("watermark_mode")).lower().strip()
-            if payload.get("watermark_mode") is not None
-            else None,
-            offline_grace_days=int(payload["offline_grace_days"])
-            if payload.get("offline_grace_days") is not None
-            else None,
-            features=tuple(str(item).strip() for item in payload.get("features", ()) if str(item).strip()),
-            signature=str(payload.get("signature") or "").strip(),
+            str(payload.get("license_id") or "").strip(),
+            str(payload.get("plan") or "").lower().strip(),
+            str(payload.get("owner_name") or "").strip(),
+            str(payload.get("organization_name") or "").strip(),
+            max(1, int(payload.get("seats") or 1)),
+            tuple(str(item).lower().strip() for item in payload.get("allowed_machines", ()) if str(item).strip()),
+            str(payload.get("valid_until") or "").strip(),
+            str(payload.get("issued_at") or "").strip(),
+            int(payload["generation_limit_month"]) if payload.get("generation_limit_month") is not None else None,
+            int(payload["template_limit"]) if payload.get("template_limit") is not None else None,
+            int(payload["profile_limit"]) if payload.get("profile_limit") is not None else None,
+            str(payload.get("watermark_mode")).lower().strip() if payload.get("watermark_mode") is not None else None,
+            int(payload["offline_grace_days"]) if payload.get("offline_grace_days") is not None else None,
+            tuple(str(item).strip() for item in payload.get("features", ()) if str(item).strip()),
+            str(payload.get("signature") or "").strip(),
         )
 
     def unsigned_payload(self) -> dict[str, Any]:
@@ -515,26 +437,14 @@ class ProductAccessManager:
             warning=reason,
         )
 
-    def check_document_creation(
-        self,
-        requested_count: int,
-        *,
-        template_count: int | None = None,
-        profile_count: int | None = None,
-    ) -> AccessDecision:
+    def check_document_creation(self, requested_count: int, *, template_count: int | None = None, profile_count: int | None = None) -> AccessDecision:
         count = max(1, int(requested_count or 1))
         state = self.current_state()
         if not state.active:
             return AccessDecision(False, "license_inactive", "Лицензия не активна", state.warning or "Создание рабочих документов заблокировано.", state)
         limits = PLAN_LIMITS.get(state.plan, PLAN_LIMITS["trial"])
         if count > limits.max_documents_per_run:
-            return AccessDecision(
-                False,
-                "per_run_limit",
-                "Слишком много документов за один запуск",
-                f"Тариф разрешает до {limits.max_documents_per_run} документов за один запуск. Выбрано: {count}.",
-                state,
-            )
+            return AccessDecision(False, "per_run_limit", "Слишком много документов за один запуск", f"Тариф разрешает до {limits.max_documents_per_run} документов за один запуск. Выбрано: {count}.", state)
         if template_count is not None and int(template_count) > state.template_limit:
             return AccessDecision(False, "template_limit", "Превышен лимит шаблонов", f"Лимит тарифа: {state.template_limit} шаблонов.", state)
         if profile_count is not None and int(profile_count) > state.profile_limit:
@@ -546,13 +456,7 @@ class ProductAccessManager:
         hard_limit = state.documents_limit_month + int(state.documents_limit_month * max(0, limits.overage_percent) / 100)
         projected = state.documents_used_month + count
         if state.documents_limit_month and projected > hard_limit:
-            return AccessDecision(
-                False,
-                "monthly_limit",
-                "Месячный лимит документов исчерпан",
-                f"Использовано {state.documents_used_month}/{state.documents_limit_month}; льготный перерасход исчерпан.",
-                state,
-            )
+            return AccessDecision(False, "monthly_limit", "Месячный лимит документов исчерпан", f"Использовано {state.documents_used_month}/{state.documents_limit_month}; льготный перерасход исчерпан.", state)
         warning = state.warning
         if not warning and state.documents_limit_month and projected > state.documents_limit_month:
             warning = f"Будет превышен месячный лимит {state.documents_limit_month}; действует льготный перерасход до {hard_limit}."
@@ -591,13 +495,7 @@ class ProductAccessManager:
             lines.append(f"Пробный период до: {state.trial_ends_at}")
         if state.documents_limit_month:
             lines.append(f"Документы: {used} / {state.documents_limit_month}")
-        lines.extend(
-            [
-                f"Шаблоны: до {state.template_limit}",
-                f"Профили: до {state.profile_limit}",
-                f"Компьютеры: до {state.included_machines}",
-            ]
-        )
+        lines.extend([f"Шаблоны: до {state.template_limit}", f"Профили: до {state.profile_limit}", f"Компьютеры: до {state.included_machines}"])
         if state.watermark_required:
             lines.append("Водяной знак: включён")
         if state.warning:
@@ -655,12 +553,7 @@ def apply_watermark_to_files(paths: Iterable[str | Path], text: str) -> Watermar
 class ProductAccessMixin:
     """Wrap document creation with local licensing, limits and watermark policy."""
 
-    def _estimate_selected_document_count(
-        self,
-        selected_medical: list[str],
-        selected_diaries: bool,
-        selected_custom: list[str],
-    ) -> int:
+    def _estimate_selected_document_count(self, selected_medical: list[str], selected_diaries: bool, selected_custom: list[str]) -> int:
         return max(1, len(selected_medical or []) + len(selected_custom or []) + (1 if selected_diaries else 0))
 
     def _product_access_manager(self) -> ProductAccessManager:
@@ -671,10 +564,11 @@ class ProductAccessMixin:
         if selected is None:
             return
         selected_medical, selected_diaries, selected_custom = selected
-        estimated_count = self._estimate_selected_document_count(selected_medical, selected_diaries, selected_custom)
         manager = self._product_access_manager()
-        decision = manager.check_document_creation(estimated_count)
+        decision = manager.check_document_creation(self._estimate_selected_document_count(selected_medical, selected_diaries, selected_custom))
         if not decision.allowed:
+            from tkinter import messagebox
+
             messagebox.showwarning(decision.title, decision.message)
             try:
                 self._log(f"\n⚠ {decision.title}: {decision.message}\n")
@@ -698,11 +592,7 @@ class ProductAccessMixin:
             result = apply_watermark_to_files(created_files, watermark)
             if result.errors:
                 try:
-                    self._log(
-                        "\n⚠ Водяной знак trial/demo применён не ко всем документам:\n"
-                        + "\n".join(result.errors[:10])
-                        + "\n"
-                    )
+                    self._log("\n⚠ Водяной знак trial/demo применён не ко всем документам:\n" + "\n".join(result.errors[:10]) + "\n")
                 except Exception as exc:
                     record_soft_exception("product_access.watermark_log", exc)
         try:
@@ -713,7 +603,7 @@ class ProductAccessMixin:
 
 
 class ProductLicenseMixin:
-    def _initialize_app(self, root: tk.Tk) -> None:
+    def _initialize_app(self, root) -> None:
         super()._initialize_app(root)
         self._install_product_license_entrypoints()
 
@@ -725,6 +615,9 @@ class ProductLicenseMixin:
             record_soft_exception("product_license.install_entrypoints", exc)
 
     def show_product_license_dialog(self) -> None:
+        import tkinter as tk
+        from tkinter import filedialog, messagebox
+
         manager = self._product_access_manager()
         window = tk.Toplevel(self.root)
         window.title("Лицензия Dokkomplekt")
@@ -738,12 +631,7 @@ class ProductLicenseMixin:
         outer.grid_columnconfigure(0, weight=1)
         outer.grid_rowconfigure(1, weight=1)
 
-        tk.Label(outer, text="Лицензия и лимиты продукта", font=("Segoe UI", 13, "bold"), anchor="w").grid(
-            row=0,
-            column=0,
-            sticky="ew",
-        )
-
+        tk.Label(outer, text="Лицензия и лимиты продукта", font=("Segoe UI", 13, "bold"), anchor="w").grid(row=0, column=0, sticky="ew")
         summary = tk.Text(outer, height=11, wrap="word")
         summary.grid(row=1, column=0, sticky="nsew", pady=(10, 10))
         summary.configure(state="normal")
@@ -752,10 +640,7 @@ class ProductLicenseMixin:
 
         tk.Label(
             outer,
-            text=(
-                "Для offline-активации вставьте JSON лицензии или загрузите .json файл. "
-                "Программа проверяет доступ локально и не отправляет документы пациента наружу."
-            ),
+            text="Для offline-активации вставьте JSON лицензии или загрузите .json файл. Программа проверяет доступ локально и не отправляет документы пациента наружу.",
             justify="left",
             wraplength=560,
             anchor="w",
@@ -763,7 +648,6 @@ class ProductLicenseMixin:
 
         license_text = tk.Text(outer, height=7, wrap="word")
         license_text.grid(row=3, column=0, sticky="ew")
-
         buttons = tk.Frame(outer)
         buttons.grid(row=4, column=0, sticky="ew", pady=(12, 0))
         for column in range(4):
@@ -789,16 +673,12 @@ class ProductLicenseMixin:
                 messagebox.showerror("Лицензия не установлена", str(exc))
 
         def load_file() -> None:
-            path = filedialog.askopenfilename(
-                title="Выберите файл лицензии",
-                filetypes=(("License JSON", "*.json"), ("All files", "*.*")),
-            )
+            path = filedialog.askopenfilename(title="Выберите файл лицензии", filetypes=(("License JSON", "*.json"), ("All files", "*.*")))
             if not path:
                 return
             try:
-                data = Path(path).read_text(encoding="utf-8")
                 license_text.delete("1.0", "end")
-                license_text.insert("1.0", data)
+                license_text.insert("1.0", Path(path).read_text(encoding="utf-8"))
             except OSError as exc:
                 messagebox.showerror("Лицензия", f"Не удалось прочитать файл лицензии:\n{exc}")
 
