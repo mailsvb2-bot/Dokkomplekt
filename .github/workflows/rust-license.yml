@@ -25,10 +25,7 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
-
-      - name: Cargo fmt
-        run: cargo fmt --all
+          components: clippy
 
       - name: Cargo test
         run: cargo test --workspace
