@@ -49,6 +49,11 @@ if errorlevel 1 (
   exit /b 1
 )
 
+if "%MEDICAL_AUTOFILL_SKIP_BUILD_PRECHECKS%"=="1" (
+  echo [4/6] CI уже выполнил smoke/regression/release gate. Пропускаю дубли перед PyInstaller.
+  goto AFTER_PRECHECKS
+)
+
 echo [4/6] Запускаю полную smoke-проверку...
 for %%S in (smoke_test.py smoke_test_combined.py smoke_desktop_diary_workflow.py smoke_universal_hardening.py smoke_stress_hardening.py smoke_auditor_layer.py smoke_project_auditor.py smoke_technical_debt_cleanup.py smoke_split_entrypoints.py smoke_followup_regressions.py smoke_quality_modernization.py smoke_points_5_11.py smoke_user_reported_regressions.py smoke_full_patient_replay.py) do (
   echo [SMOKE] %%S
@@ -75,6 +80,8 @@ if errorlevel 1 (
   if "%CI%"=="" pause
   exit /b 1
 )
+
+:AFTER_PRECHECKS
 
 echo [6/6] Собираю один EXE через PyInstaller...
 set ADD_TEMPLATES=
