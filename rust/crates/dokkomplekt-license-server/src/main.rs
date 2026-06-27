@@ -1,5 +1,5 @@
 mod config;
-mod routes;
+mod http;
 mod state;
 
 use anyhow::Context;
@@ -19,17 +19,17 @@ async fn main() -> anyhow::Result<()> {
     let config = ServerConfig::from_env()?;
     let state = AppState::new(config.clone());
     let app = Router::new()
-        .merge(routes::health::router())
-        .merge(routes::orders::router())
-        .merge(routes::licenses::router())
-        .merge(routes::webhooks::router())
+        .merge(http::health::router())
+        .merge(http::orders::router())
+        .merge(http::activations::router())
+        .merge(http::webhooks::router())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr)
         .await
         .with_context(|| format!("failed to bind {}", config.bind_addr))?;
-    tracing::info!("dokkomplekt license server listening on {}", listener.local_addr()?);
+    tracing::info!("dokkomplekt service listening on {}", listener.local_addr()?);
     axum::serve(listener, app).await?;
     Ok(())
 }
