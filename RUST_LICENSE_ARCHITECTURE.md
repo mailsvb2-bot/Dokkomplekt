@@ -13,7 +13,7 @@ Rust license server = orders, provider callbacks, machine activation, license is
 ## Rules
 
 - The desktop app must not contain payment-provider secrets.
-- The desktop app must not contain the private signing key.
+- The desktop app must not contain the issuer seed used to produce license proofs.
 - Patient documents, diagnoses, names and template contents must not be sent to the license server.
 - Paid licenses must never get trial watermarks.
 - Trial/demo access may watermark generated DOCX files.
@@ -53,20 +53,29 @@ It owns:
 - provider callback boundary;
 - order status;
 - machine activation;
-- future license issuing with the private signing key.
+- license issuing from paid orders.
+
+## Implemented in this branch
+
+- Rust workspace with separate core/server crates.
+- Core license payload and signed license models.
+- Core canonical JSON and Ed25519 proof verification.
+- Core access policy and watermark decision.
+- Server health/order/status/activation/provider-callback routes.
+- Server issuer that produces a signed `license.json` document when an order is paid.
+- Rust CI for `cargo test --workspace` and `cargo clippy --workspace --all-targets -D warnings`.
 
 ## Next implementation steps
 
-1. Add Ed25519 signing to the server-side issuer module.
-2. Add persistent storage: PostgreSQL tables for orders, provider events, licenses, machines and audit log.
-3. Add provider adapters: YooKassa/SBP/bank invoice.
-4. Add PyO3 binding crate for desktop Python integration.
-5. Replace Python HMAC verification with Rust Ed25519 verification.
-6. Add CI job: `cargo fmt`, `cargo clippy`, `cargo test` for `rust/`.
-7. Add desktop fallback rule: if Rust core is missing, paid access is denied but profile export remains available.
+1. Add PostgreSQL tables for orders, provider events, licenses, machines and audit log.
+2. Add provider adapters: YooKassa/SBP/bank invoice.
+3. Add PyO3 binding crate for desktop Python integration.
+4. Replace Python HMAC verification with Rust Ed25519 verification.
+5. Add desktop fallback rule: if Rust core is missing, paid access is denied but profile export remains available.
+6. Restore strict rustfmt check after connector-side formatting constraints are resolved.
 
 ## Signature model
 
-The license server signs a license payload with a private key. The desktop program stores only the public key and verifies the signed license locally.
+The license server signs a license payload. The desktop program stores only the public verification key and verifies the signed license locally.
 
 If a user edits `document_limit_month`, `valid_until`, `allowed_machines`, `features`, `watermark_mode` or `plan`, signature verification must fail.
