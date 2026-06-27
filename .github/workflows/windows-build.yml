@@ -144,6 +144,14 @@ jobs:
           MEDICAL_AUTOFILL_SKIP_BUILD_PRECHECKS: '1'
         run: build_exe_windows.bat
 
+      - name: Smoke packaged EXE native verifier
+        shell: pwsh
+        run: |
+          & .\dist\MedicalDiaryAutofill.exe --check-native-license-core *> packaged-native-verifier.log
+          $code=$LASTEXITCODE
+          Get-Content packaged-native-verifier.log
+          exit $code
+
       - name: Build clean source archive
         run: python make_release_zip.py
 
@@ -167,4 +175,12 @@ jobs:
         with:
           name: python-production-audit-logs
           path: python-production-audit.log
+          if-no-files-found: ignore
+
+      - name: Upload packaged native verifier logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-native-verifier-logs
+          path: packaged-native-verifier.log
           if-no-files-found: ignore
