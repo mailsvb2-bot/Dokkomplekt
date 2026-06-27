@@ -1,5 +1,6 @@
 use dokkomplekt_license_core::{
-    evaluate_access, AccessRequest, LicenseDocument, MachineFingerprint, UsageLedger,
+    evaluate_access, verify_license_signature, AccessRequest, LicenseDocument, MachineFingerprint,
+    PublicKeyBytes, UsageLedger,
 };
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -15,6 +16,21 @@ fn license_plan(license_json: &str) -> PyResult<String> {
     let document: LicenseDocument = serde_json::from_str(license_json)
         .map_err(|err| PyValueError::new_err(err.to_string()))?;
     Ok(format!("{:?}", document.license.payload.plan))
+}
+
+#[pyfunction]
+fn proof_ok(license_json: &str, verifier_b64: &str) -> PyResult<bool> {
+    let document: LicenseDocument = serde_json::from_str(license_json)
+        .map_err(|err| PyValueError::new_err(err.to_string()))?;
+    let verifier = PublicKeyBytes::from_base64(verifier_b64)
+        .map_err(|err| PyValueError::new_err(err.to_string()))?;
+    verify_license_signature(
+        &document.license.payload,
+        &document.license.signature,
+        &verifier,
+    )
+    .map_err(|err| PyValueError::new_err(err.to_string()))?;
+    Ok(true)
 }
 
 #[pyfunction]
@@ -43,6 +59,7 @@ fn access_decision(
 fn dokkomplekt_license_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(native_core_version, module)?)?;
     module.add_function(wrap_pyfunction!(license_plan, module)?)?;
+    module.add_function(wrap_pyfunction!(proof_ok, module)?)?;
     module.add_function(wrap_pyfunction!(access_decision, module)?)?;
     Ok(())
 }
