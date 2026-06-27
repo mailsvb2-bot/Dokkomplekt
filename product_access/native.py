@@ -7,6 +7,11 @@ from typing import Any, Mapping
 
 from product_access import LicenseEntitlement, ProductAccessManager
 
+try:
+    import dokkomplekt_license_native as _native_license_core
+except Exception:
+    _native_license_core = None
+
 PUBLIC_KEY_ENV = "DOKKOMPLEKT_LICENSE_PUBLIC_KEY_B64"
 RUST_LICENSE_SCHEMA = "dokkomplekt.license.v1"
 
@@ -19,14 +24,20 @@ def is_rust_license_document(payload: Mapping[str, Any]) -> bool:
     return payload.get("schema") == RUST_LICENSE_SCHEMA and isinstance(payload.get("license"), Mapping)
 
 
+def _native_module():
+    if _native_license_core is not None:
+        return _native_license_core
+    try:
+        return importlib.import_module("dokkomplekt_license_native")
+    except Exception as exc:
+        raise NativeLicenseError("Rust native license core is unavailable.") from exc
+
+
 def _verify_text(text: str) -> None:
     key = os.getenv(PUBLIC_KEY_ENV, "").strip()
     if not key:
         raise NativeLicenseError("License public verification key is not configured.")
-    try:
-        native = importlib.import_module("dokkomplekt_license_native")
-    except Exception as exc:
-        raise NativeLicenseError("Rust native license core is unavailable.") from exc
+    native = _native_module()
     if native.proof_ok(text, key) is not True:
         raise NativeLicenseError("Rust license proof was rejected.")
 
