@@ -4,14 +4,16 @@ from __future__ import annotations
 
 This module intentionally contains no patient data logic and no payment secrets.
 It only bridges a signed Rust license document into the existing Python product
-access model. If a paid Rust license cannot be checked by the native core, the
-caller must treat paid access as unavailable.
+access model. If a paid Rust license cannot be checked by the native core, paid
+access fails closed.
 """
 
 import importlib
 import json
 import os
 from typing import Any, Mapping
+
+from product_access import LicenseEntitlement, ProductAccessManager
 
 NATIVE_LICENSE_CORE_MODULE = "dokkomplekt_license_native"
 PUBLIC_KEY_ENV = "DOKKOMPLEKT_LICENSE_PUBLIC_KEY_B64"
@@ -83,3 +85,65 @@ def load_verified_rust_entitlement_text(text: str) -> dict[str, Any]:
         raise NativeLicenseError("License document must be a JSON object.")
     verify_rust_license_document_text(text)
     return rust_document_to_entitlement_payload(document)
+
+
+class NativeProductAccessManager(ProductAccessManager):
+    def _read_license_text(self) -> str | None:
+        if not self.license_path.exists():
+            return None
+        return self.license_path.read_text("utf-8")
+
+    def load_license(self) -> LicenseEntitlement | None:
+        text = self._read_license_text()
+        if text is None:
+            return None
+        payload: Any = json.loads(text or "{}")
+        if isinstance(payload, dict) and is_rust_license_document(payload):
+            return LicenseEntitlement.from_mapping(load_verified_rust_entitlement_text(text))
+        return LicenseEntitlement.from_mapping(payload) if isinstance(payload, dict) else None
+
+    def install_license_text(self, text: str):
+        payload: Any = json.loads(text or "{}")
+        if isinstance(payload, dict) and is_rust_license_document(payload):
+            load_verified_rust_entitlement_text(text)
+            tmp_path = self.license_path.with_suffix(".tmp")
+            tmp_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path.write_text(text, "utf-8")
+            os.replace(tmp_path, self.license_path)
+            return self.current_state()
+        return super().install_license_text(text)
+
+    def _validate_license(self, entitlement: LicenseEntitlement, *, require_not_expired: bool = True) -> None:
+        if entitlement.signature == "rust-ed25519":
+            if not entitlement.license_id:
+                raise ValueError("В лицензии нет license_id.")
+            if entitlement.plan not in self.plan_ids() or entitlement.plan == "trial":
+                raise ValueError(f"Неизвестный тариф лицензии: {entitlement.plan!r}.")
+            if require_not_expired and entitlement.is_expired(self._now()):
+                raise ValueError("Срок действия лицензии истёк.")
+            from product_access import machine_fingerprint
+            if entitlement.allowed_machines and machine_fingerprint() not in entitlement.allowed_machines:
+                raise ValueError("Лицензия не привязана к этому компьютеру.")
+            return
+        return super()._validate_license(entitlement, require_not_expired=require_not_expired)
+
+    @staticmethod
+    def plan_ids() -> set[str]:
+        from product_access import PLAN_LIMITS
+        return set(PLAN_LIMITS)
+
+    def current_state(self):
+        try:
+            return super().current_state()
+        except (NativeLicenseError, ValueError, json.JSONDecodeError) as exc:
+            payload = self._ensure_trial_started(self._load_state_payload())
+            usage = payload.get("usage_by_month") if isinstance(payload.get("usage_by_month"), dict) else {}
+            from product_access import month_key
+            used = int(usage.get(month_key(self._now()), 0) or 0)
+            trial_total = int(payload.get("trial_created_total", 0) or 0)
+            return self._blocked_state(str(exc), used, trial_total)
+
+
+class NativeProductAccessMixin:
+    def _product_access_manager(self) -> NativeProductAccessManager:
+        return NativeProductAccessManager()
