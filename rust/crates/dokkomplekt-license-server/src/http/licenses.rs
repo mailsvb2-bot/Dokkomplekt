@@ -1,5 +1,6 @@
 use crate::issuer::{issue_license, IssueLicenseInput};
 use crate::state::{AppState, OrderStatus};
+use crate::storage::{LicenseRecord, LicenseStore, StoreError};
 use axum::{extract::{Path, State}, http::StatusCode, routing::post, Json, Router};
 use dokkomplekt_license_core::models::PlanId;
 use serde::Deserialize;
@@ -24,10 +25,7 @@ async fn issue_for_order(
     if request.machine_hash.trim().is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let order = {
-        let store = state.store.read().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        store.orders.get(&order_id).ok_or(StatusCode::NOT_FOUND)?.clone()
-    };
+    let order = state.store.get_order(order_id).map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
     if !matches!(order.status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
         return Err(StatusCode::CONFLICT);
     }
@@ -46,13 +44,26 @@ async fn issue_for_order(
         &issuer_key,
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    {
-        let mut store = state.store.write().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        if let Some(order) = store.orders.get_mut(&order_id) {
-            order.status = OrderStatus::LicenseIssued;
-        }
-    }
+    let license_record = LicenseRecord {
+        id: Uuid::new_v4(),
+        order_id,
+        license_id: document.license.payload.license_id.clone(),
+        document_json: serde_json::to_string(&document).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+        issued_at: document.license.payload.issued_at,
+        revoked_at: None,
+    };
+    state.store.store_license(license_record).map_err(store_error_status)?;
+    state.store.update_order_status(order_id, OrderStatus::LicenseIssued).map_err(store_error_status)?;
     Ok(Json(document))
+}
+
+fn store_error_status(error: StoreError) -> StatusCode {
+    match error {
+        StoreError::Conflict => StatusCode::CONFLICT,
+        StoreError::Invalid(_) => StatusCode::BAD_REQUEST,
+        StoreError::NotFound => StatusCode::NOT_FOUND,
+        StoreError::Poisoned => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }
 
 fn parse_plan(value: &str) -> Option<PlanId> {
