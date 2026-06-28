@@ -36,8 +36,7 @@ required_async_calls=(
   "get_order_async"
   "record_payment_event_for_order_async"
   "create_activation_for_order_async"
-  "store_license_async"
-  "update_order_status_async"
+  "issue_license_for_paid_order_async"
 )
 
 for method in "${required_async_calls[@]}"; do
