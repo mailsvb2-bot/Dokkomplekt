@@ -8,6 +8,9 @@ mod providers;
 mod state;
 mod storage;
 
+#[cfg(test)]
+mod http_integration_tests;
+
 use anyhow::Context;
 use axum::Router;
 use config::ServerConfig;
