@@ -1,6 +1,6 @@
 use super::{
-    AuditEventRecord, LicenseRecord, LicenseStore, PaymentEventRecord, PaymentEventStatus,
-    PaymentEventWriteOutcome, StoreError,
+    AuditEventRecord, LicenseIssueOutcome, LicenseRecord, LicenseStore, PaymentEventRecord,
+    PaymentEventStatus, PaymentEventWriteOutcome, StoreError,
 };
 use crate::state::{ActivationRecord, OrderRecord, OrderStatus};
 use postgres::error::SqlState;
@@ -8,6 +8,7 @@ use postgres::{Client, GenericClient, NoTls, Row};
 use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -41,6 +42,43 @@ impl PostgresStore {
         let mut client = self.client()?;
         let value: i32 = client.query_one("SELECT 1", &[]).map_err(pg_err)?.get(0);
         if value == 1 { Ok(()) } else { Err(StoreError::Invalid("postgres_readiness_failed".to_string())) }
+    }
+
+    pub fn issue_license_for_paid_order(&self, record: LicenseRecord) -> Result<LicenseIssueOutcome, StoreError> {
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(pg_err)?;
+        let row = tx.query_opt(
+            "SELECT id, plan, amount_rub, status, machine_hash, created_at FROM license_orders WHERE id = $1 FOR UPDATE",
+            &[&record.order_id],
+        ).map_err(pg_err)?.ok_or(StoreError::NotFound)?;
+        let order = order_from_row(row)?;
+        if !matches!(order.status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
+            return Err(StoreError::Conflict);
+        }
+        if let Some(row) = tx.query_opt(
+            "SELECT id, order_id, license_id, document_json, issued_at, revoked_at FROM license_documents WHERE order_id = $1 ORDER BY issued_at ASC LIMIT 1",
+            &[&record.order_id],
+        ).map_err(pg_err)? {
+            let existing = license_from_row(row);
+            insert_audit_event(
+                &mut tx,
+                &audit_event(record.order_id, "license_issue_reused", &existing.license_id, OffsetDateTime::now_utc()),
+            )?;
+            tx.commit().map_err(pg_err)?;
+            return Ok(LicenseIssueOutcome { record: existing, reused: true });
+        }
+        tx.execute(
+            "INSERT INTO license_documents (id, order_id, license_id, document_json, issued_at, revoked_at) VALUES ($1, $2, $3, $4, $5, $6)",
+            &[&record.id, &record.order_id, &record.license_id, &record.document_json, &record.issued_at, &record.revoked_at],
+        ).map_err(pg_err)?;
+        let issued = order_status_to_str(&OrderStatus::LicenseIssued);
+        tx.execute("UPDATE license_orders SET status = $2 WHERE id = $1", &[&record.order_id, &issued]).map_err(pg_err)?;
+        insert_audit_event(
+            &mut tx,
+            &audit_event(record.order_id, "license_issued", &record.license_id, record.issued_at),
+        )?;
+        tx.commit().map_err(pg_err)?;
+        Ok(LicenseIssueOutcome { record, reused: false })
     }
 
     fn client(&self) -> Result<MutexGuard<'_, Client>, StoreError> {
@@ -111,6 +149,10 @@ impl LicenseStore for PostgresStore {
             "INSERT INTO license_machines (id, order_id, machine_hash, created_at) VALUES ($1, $2, $3, $4)",
             &[&record.id, &record.order_id, &record.machine_hash, &record.created_at],
         ).map_err(pg_err)?;
+        insert_audit_event(
+            &mut tx,
+            &audit_event(record.order_id, "machine_activated", &record.machine_hash, record.created_at),
+        )?;
         tx.commit().map_err(pg_err)?;
         Ok(order)
     }
@@ -128,6 +170,11 @@ impl LicenseStore for PostgresStore {
             "SELECT id FROM billing_events WHERE provider = $1 AND provider_event_id = $2",
             &[&provider, &record.provider_event_id],
         ).map_err(pg_err)?.is_some() {
+            insert_audit_event(
+                &mut tx,
+                &audit_event(record.order_id, "payment_duplicate", &record.provider_event_id, record.received_at),
+            )?;
+            tx.commit().map_err(pg_err)?;
             return Ok(PaymentEventWriteOutcome::Duplicate);
         }
         let row = tx.query_opt(
@@ -143,6 +190,10 @@ impl LicenseStore for PostgresStore {
             tx.execute("UPDATE license_orders SET status = $2 WHERE id = $1", &[&record.order_id, &paid]).map_err(pg_err)?;
         }
         insert_payment_event(&mut tx, &record)?;
+        insert_audit_event(
+            &mut tx,
+            &audit_event(record.order_id, "payment_recorded", &record.provider_event_id, record.received_at),
+        )?;
         tx.commit().map_err(pg_err)?;
         Ok(PaymentEventWriteOutcome::Recorded)
     }
@@ -158,11 +209,7 @@ impl LicenseStore for PostgresStore {
 
     fn audit(&self, record: AuditEventRecord) -> Result<(), StoreError> {
         let mut client = self.client()?;
-        client.execute(
-            "INSERT INTO license_audit_events (id, entity_id, event_type, happened_at, details_json) VALUES ($1, $2, $3, $4, $5)",
-            &[&record.id, &record.entity_id, &record.event_type, &record.happened_at, &record.details_json],
-        ).map_err(pg_err)?;
-        Ok(())
+        insert_audit_event(&mut *client, &record)
     }
 }
 
@@ -235,6 +282,24 @@ fn insert_payment_event(client: &mut impl GenericClient, record: &PaymentEventRe
     Ok(())
 }
 
+fn insert_audit_event(client: &mut impl GenericClient, record: &AuditEventRecord) -> Result<(), StoreError> {
+    client.execute(
+        "INSERT INTO license_audit_events (id, entity_id, event_type, happened_at, details_json) VALUES ($1, $2, $3, $4, $5)",
+        &[&record.id, &record.entity_id, &record.event_type, &record.happened_at, &record.details_json],
+    ).map_err(pg_err)?;
+    Ok(())
+}
+
+fn audit_event(entity_id: Uuid, event_type: &str, detail_value: &str, happened_at: OffsetDateTime) -> AuditEventRecord {
+    AuditEventRecord {
+        id: Uuid::new_v4(),
+        entity_id,
+        event_type: event_type.to_string(),
+        happened_at,
+        details_json: serde_json::json!({"value": detail_value}).to_string(),
+    }
+}
+
 fn order_from_row(row: Row) -> Result<OrderRecord, StoreError> {
     let amount: i64 = row.get("amount_rub");
     let status: String = row.get("status");
@@ -246,6 +311,17 @@ fn order_from_row(row: Row) -> Result<OrderRecord, StoreError> {
         machine_hash: row.get("machine_hash"),
         created_at: row.get("created_at"),
     })
+}
+
+fn license_from_row(row: Row) -> LicenseRecord {
+    LicenseRecord {
+        id: row.get("id"),
+        order_id: row.get("order_id"),
+        license_id: row.get("license_id"),
+        document_json: row.get("document_json"),
+        issued_at: row.get("issued_at"),
+        revoked_at: row.get("revoked_at"),
+    }
 }
 
 fn amount_to_i64(amount: u64) -> Result<i64, StoreError> {
