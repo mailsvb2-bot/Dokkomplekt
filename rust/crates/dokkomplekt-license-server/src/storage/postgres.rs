@@ -143,6 +143,15 @@ impl LicenseStore for PostgresStore {
 }
 
 fn apply_migrations(client: &mut Client) -> anyhow::Result<()> {
+    client.query_one("SELECT pg_advisory_lock($1)", &[&MIGRATION_LOCK_ID])?;
+    let result = apply_migrations_locked(client);
+    let unlock_result = client.query_one("SELECT pg_advisory_unlock($1)", &[&MIGRATION_LOCK_ID]);
+    result?;
+    unlock_result?;
+    Ok(())
+}
+
+fn apply_migrations_locked(client: &mut Client) -> anyhow::Result<()> {
     client.batch_execute(MIGRATION_LEDGER_SCHEMA)?;
     let already_applied: bool = client.query_one(
         "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)",
@@ -244,5 +253,6 @@ fn pg_err(error: postgres::Error) -> StoreError {
 }
 
 const SCHEMA_VERSION: &str = "0001_license_schema";
+const MIGRATION_LOCK_ID: i64 = 4_207_301_001;
 const MIGRATION_LEDGER_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL);";
 const SCHEMA_V1: &str = include_str!("../../migrations/0001_license_schema.sql");
