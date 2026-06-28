@@ -1,6 +1,8 @@
 use crate::state::{AppState, OrderStatus};
+use crate::storage::{PaymentEventRecord, PaymentEventStatus, PaymentProvider};
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
@@ -14,6 +16,7 @@ pub struct ProviderCallbackRequest {
 #[derive(Debug, Serialize)]
 pub struct ProviderCallbackResponse {
     pub accepted: bool,
+    pub duplicate: bool,
     pub order_id: Uuid,
 }
 
@@ -22,16 +25,38 @@ pub fn router() -> Router<AppState> {
 }
 
 async fn provider_callback(State(state): State<AppState>, Json(event): Json<ProviderCallbackRequest>) -> Result<Json<ProviderCallbackResponse>, StatusCode> {
-    if event.provider_event_id.trim().is_empty() {
+    let event_id = event.provider_event_id.trim();
+    if event_id.is_empty() || event.amount_rub == 0 {
         return Err(StatusCode::BAD_REQUEST);
     }
     let mut store = state.store.write().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if store.payment_events.values().any(|record| record.provider_event_id == event_id) {
+        return Ok(Json(ProviderCallbackResponse { accepted: true, duplicate: true, order_id: event.order_id }));
+    }
     let order = store.orders.get_mut(&event.order_id).ok_or(StatusCode::NOT_FOUND)?;
     if order.amount_rub != event.amount_rub {
         return Err(StatusCode::BAD_REQUEST);
     }
-    if event.status == "succeeded" {
+    let status = match event.status.trim().to_ascii_lowercase().as_str() {
+        "succeeded" => PaymentEventStatus::Succeeded,
+        "pending" => PaymentEventStatus::Pending,
+        "cancelled" | "canceled" => PaymentEventStatus::Cancelled,
+        "rejected" => PaymentEventStatus::Rejected,
+        _ => return Err(StatusCode::BAD_REQUEST),
+    };
+    if status == PaymentEventStatus::Succeeded {
         order.status = OrderStatus::Paid;
     }
-    Ok(Json(ProviderCallbackResponse { accepted: true, order_id: event.order_id }))
+    let record_id = Uuid::new_v4();
+    store.payment_events.insert(record_id, PaymentEventRecord {
+        id: record_id,
+        order_id: event.order_id,
+        provider: PaymentProvider::Manual,
+        provider_event_id: event_id.to_string(),
+        provider_payment_id: None,
+        status,
+        amount_rub: event.amount_rub,
+        received_at: OffsetDateTime::now_utc(),
+    });
+    Ok(Json(ProviderCallbackResponse { accepted: true, duplicate: false, order_id: event.order_id }))
 }
