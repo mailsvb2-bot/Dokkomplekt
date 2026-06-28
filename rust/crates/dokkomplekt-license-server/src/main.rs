@@ -23,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = ServerConfig::from_env()?;
-    let state = AppState::new(config.clone());
+    let state = AppState::try_new(config.clone()).context("failed to initialize license server state")?;
     let app = Router::new()
         .merge(http::health::router())
         .merge(http::orders::router())
