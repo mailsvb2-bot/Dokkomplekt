@@ -3,7 +3,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub fn canonical_json<T: Serialize>(value: &T) -> CoreResult<Vec<u8>> {
-    let json_value = serde_json::to_value(value).map_err(|exc| CoreError::BadCanonicalJson(exc.to_string()))?;
+    let json_value =
+        serde_json::to_value(value).map_err(|exc| CoreError::BadCanonicalJson(exc.to_string()))?;
     let normalized = normalize_value(json_value);
     serde_json::to_vec(&normalized).map_err(|exc| CoreError::BadCanonicalJson(exc.to_string()))
 }
