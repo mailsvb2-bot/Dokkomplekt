@@ -2,6 +2,7 @@ mod config;
 mod http;
 mod issuer;
 mod state;
+mod storage;
 
 use anyhow::Context;
 use axum::Router;
