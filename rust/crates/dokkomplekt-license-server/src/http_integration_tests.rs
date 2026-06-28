@@ -69,7 +69,8 @@ async fn memory_http_order_payment_activation_flow() {
 #[test]
 fn postgres_runtime_migration_records_schema_version_when_database_url_is_present() {
     let Ok(database_url) = std::env::var("DATABASE_URL") else { return; };
-    let _store = PostgresStore::connect(&database_url).unwrap();
+    let store = PostgresStore::connect(&database_url).unwrap();
+    assert_eq!(store.pool_size(), 4);
     let mut client = Client::connect(&database_url, NoTls).unwrap();
     let applied: bool = client.query_one("SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0001_license_schema')", &[]).unwrap().get(0);
     assert!(applied);
