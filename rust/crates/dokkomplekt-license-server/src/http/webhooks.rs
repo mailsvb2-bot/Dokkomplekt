@@ -44,7 +44,7 @@ async fn provider_callback(State(state): State<AppState>, Json(event): Json<Prov
         "rejected" => PaymentEventStatus::Rejected,
         _ => return Err(StatusCode::BAD_REQUEST),
     };
-    if status == PaymentEventStatus::Succeeded {
+    if matches!(status, PaymentEventStatus::Succeeded) {
         order.status = OrderStatus::Paid;
     }
     let record_id = Uuid::new_v4();
