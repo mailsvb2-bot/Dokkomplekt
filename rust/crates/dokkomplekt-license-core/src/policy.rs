@@ -70,12 +70,7 @@ pub fn evaluate_access(
     }
     if let Some(count) = request.profile_count {
         if count > payload.profile_limit {
-            return Ok(deny(
-                payload,
-                "profile_limit",
-                "profile limit exceeded",
-                0,
-            ));
+            return Ok(deny(payload, "profile_limit", "profile limit exceeded", 0));
         }
     }
 
@@ -185,7 +180,12 @@ fn warn(payload: &LicensePayload, code: &str, message: &str, left: u32) -> Acces
     }
 }
 
-fn deny(payload: &LicensePayload, code: &str, message: impl Into<String>, left: u32) -> AccessDecision {
+fn deny(
+    payload: &LicensePayload,
+    code: &str,
+    message: impl Into<String>,
+    left: u32,
+) -> AccessDecision {
     AccessDecision {
         status: AccessStatus::Denied,
         code: code.to_string(),
