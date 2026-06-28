@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::state::{ActivationRecord, OrderRecord, OrderStatus};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
