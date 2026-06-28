@@ -129,9 +129,10 @@ jobs:
       - name: Run release gate
         shell: pwsh
         run: |
-          python release_check.py *> release-gate.log
+          $log = Join-Path $env:RUNNER_TEMP "release-gate.log"
+          python release_check.py *> $log
           $code=$LASTEXITCODE
-          Get-Content release-gate.log -Tail 160
+          Get-Content $log -Tail 160
           exit $code
 
       - name: Prebuild native license verifier for EXE
@@ -187,7 +188,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-gate-logs
-          path: release-gate.log
+          path: ${{ runner.temp }}/release-gate.log
           if-no-files-found: ignore
 
       - name: Upload packaged native verifier logs
