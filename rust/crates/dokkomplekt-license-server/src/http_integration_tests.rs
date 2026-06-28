@@ -116,7 +116,7 @@ async fn postgres_http_order_payment_activation_flow_when_database_url_is_presen
     assert_eq!(order_status["status"], "paid");
 
     let (status, activation) = call(
-        app,
+        app.clone(),
         Method::POST,
         format!("/api/orders/{order_id}/activate-machine"),
         Some(json!({ "machine_hash": "machine-a" })),
@@ -124,4 +124,6 @@ async fn postgres_http_order_payment_activation_flow_when_database_url_is_presen
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(activation["status"], "paid");
+
+    tokio::task::spawn_blocking(move || drop(app)).await.unwrap();
 }
