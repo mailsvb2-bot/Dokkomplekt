@@ -1,6 +1,10 @@
 mod config;
 mod http;
 mod issuer;
+mod provider_manual;
+mod provider_sbp;
+mod provider_yookassa;
+mod providers;
 mod state;
 mod storage;
 
