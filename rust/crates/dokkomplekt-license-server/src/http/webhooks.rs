@@ -37,13 +37,7 @@ async fn provider_callback(State(state): State<AppState>, Json(event): Json<Prov
     if order.amount_rub != event.amount_rub {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let status = match event.status.trim().to_ascii_lowercase().as_str() {
-        "succeeded" => PaymentEventStatus::Succeeded,
-        "pending" => PaymentEventStatus::Pending,
-        "cancelled" | "canceled" => PaymentEventStatus::Cancelled,
-        "rejected" => PaymentEventStatus::Rejected,
-        _ => return Err(StatusCode::BAD_REQUEST),
-    };
+    let status = normalize_payment_status(&event.status).ok_or(StatusCode::BAD_REQUEST)?;
     if matches!(status, PaymentEventStatus::Succeeded) {
         order.status = OrderStatus::Paid;
     }
@@ -59,4 +53,14 @@ async fn provider_callback(State(state): State<AppState>, Json(event): Json<Prov
         received_at: OffsetDateTime::now_utc(),
     });
     Ok(Json(ProviderCallbackResponse { accepted: true, duplicate: false, order_id: event.order_id }))
+}
+
+pub fn normalize_payment_status(value: &str) -> Option<PaymentEventStatus> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "succeeded" => Some(PaymentEventStatus::Succeeded),
+        "pending" => Some(PaymentEventStatus::Pending),
+        "cancelled" | "canceled" => Some(PaymentEventStatus::Cancelled),
+        "rejected" => Some(PaymentEventStatus::Rejected),
+        _ => None,
+    }
 }
