@@ -8,6 +8,8 @@ pub struct ServerConfig {
     pub issuer_key_b64: Option<String>,
     pub default_license_days: i64,
     pub payment_provider: String,
+    pub storage_mode: String,
+    pub database_url: Option<String>,
 }
 
 impl ServerConfig {
@@ -28,7 +30,21 @@ impl ServerConfig {
             &std::env::var("DOKKOMPLEKT_PAYMENT_PROVIDER").unwrap_or_else(|_| "manual".to_string()),
         )
         .unwrap_or_else(|| "manual".to_string());
-        Ok(Self { bind_addr, public_base_url, issuer_id, issuer_key_b64, default_license_days, payment_provider })
+        let database_url = std::env::var("DATABASE_URL").ok();
+        let storage_mode = match database_url.as_ref().map(|value| value.trim()).filter(|value| !value.is_empty()) {
+            Some(_) => "postgres".to_string(),
+            None => "memory".to_string(),
+        };
+        Ok(Self {
+            bind_addr,
+            public_base_url,
+            issuer_id,
+            issuer_key_b64,
+            default_license_days,
+            payment_provider,
+            storage_mode,
+            database_url,
+        })
     }
 }
 
@@ -56,6 +72,6 @@ mod tests {
 
     #[test]
     fn unknown_payment_provider_is_rejected() {
-        assert!(normalize_payment_provider("cash-under-table").is_none());
+        assert!(normalize_payment_provider("unsupported").is_none());
     }
 }
