@@ -1,5 +1,5 @@
 use crate::config::ServerConfig;
-use crate::storage::PaymentEventRecord;
+use crate::storage::{AuditEventRecord, LicenseRecord, PaymentEventRecord};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
@@ -23,6 +23,8 @@ pub struct MemoryStore {
     pub orders: BTreeMap<Uuid, OrderRecord>,
     pub activations: BTreeMap<Uuid, ActivationRecord>,
     pub payment_events: BTreeMap<Uuid, PaymentEventRecord>,
+    pub licenses: BTreeMap<Uuid, LicenseRecord>,
+    pub audit_events: BTreeMap<Uuid, AuditEventRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
