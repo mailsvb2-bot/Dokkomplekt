@@ -119,6 +119,16 @@ impl StoreBackend {
         matches!(self, Self::Postgres(_))
     }
 
+    pub async fn database_ready_async(&self) -> bool {
+        match self {
+            Self::Memory(_) => false,
+            Self::Postgres(store) => {
+                let store = store.clone();
+                tokio::task::spawn_blocking(move || store.check_ready().is_ok()).await.unwrap_or(false)
+            }
+        }
+    }
+
     pub async fn create_order_async(&self, record: OrderRecord) -> Result<(), StoreError> {
         match self {
             Self::Memory(store) => store.create_order(record),
