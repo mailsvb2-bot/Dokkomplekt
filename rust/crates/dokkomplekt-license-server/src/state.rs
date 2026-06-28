@@ -1,9 +1,7 @@
 use crate::config::ServerConfig;
-use crate::storage::{AuditEventRecord, LicenseRecord, PaymentEventRecord};
-use crate::storage_postgres::StoreBackend;
+use crate::storage::{AuditEventRecord, LicenseRecord, PaymentEventRecord, StoreBackend};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::sync::{Arc, RwLock};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -15,15 +13,8 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: ServerConfig) -> Self {
-        Self {
-            config,
-            store: StoreBackend::Memory(Arc::new(RwLock::new(MemoryStore::default()))),
-        }
-    }
-
-    pub fn from_config(config: ServerConfig) -> anyhow::Result<Self> {
-        let store = StoreBackend::from_config(&config)?;
-        Ok(Self { config, store })
+        let store = StoreBackend::from_config(&config).expect("license store backend must initialize");
+        Self { config, store }
     }
 }
 
