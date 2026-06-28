@@ -27,7 +27,16 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: rustfmt, clippy
+
+      - name: Cargo fmt check
+        shell: bash
+        run: |
+          set +e
+          cargo fmt --all -- --check > rust-fmt.log 2>&1
+          code=$?
+          tail -160 rust-fmt.log
+          exit $code
 
       - name: Cargo test
         shell: bash
@@ -53,6 +62,7 @@ jobs:
         with:
           name: rust-ci-logs
           path: |
+            rust/rust-fmt.log
             rust/rust-test.log
             rust/rust-clippy.log
           if-no-files-found: ignore
