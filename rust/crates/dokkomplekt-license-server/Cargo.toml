@@ -25,3 +25,6 @@ uuid.workspace = true
 
 [dependencies.postgres]
 workspace = true
+
+[dev-dependencies]
+tower.workspace = true
