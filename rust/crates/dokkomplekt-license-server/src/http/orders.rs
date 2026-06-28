@@ -1,4 +1,5 @@
 use crate::state::{AppState, OrderRecord, OrderStatus};
+use crate::storage::{LicenseStore, StoreError};
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -37,11 +38,20 @@ async fn create_order(State(state): State<AppState>, Json(request): Json<CreateO
         machine_hash: request.machine_hash,
         created_at: OffsetDateTime::now_utc(),
     };
-    state.store.write().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.orders.insert(order_id, record.clone());
+    state.store.create_order(record.clone()).map_err(store_error_status)?;
     let provider = state.config.payment_provider.clone();
     let payment_url = payment_url_for(&state.config.public_base_url, &provider, order_id);
     let qr_url = qr_url_for(&state.config.public_base_url, &provider, order_id);
     Ok(Json(CreateOrderResponse { order_id, status: record.status, provider, payment_url, qr_url }))
+}
+
+fn store_error_status(error: StoreError) -> StatusCode {
+    match error {
+        StoreError::Conflict => StatusCode::CONFLICT,
+        StoreError::Invalid(_) => StatusCode::BAD_REQUEST,
+        StoreError::NotFound => StatusCode::NOT_FOUND,
+        StoreError::Poisoned => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }
 
 pub fn payment_url_for(base_url: &str, provider: &str, order_id: Uuid) -> String {
