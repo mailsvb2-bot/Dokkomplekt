@@ -1,5 +1,5 @@
 use crate::state::{ActivationRecord, AppState, OrderStatus};
-use crate::storage::{LicenseStore, StoreError};
+use crate::storage::StoreError;
 use axum::{extract::{Path, State}, http::StatusCode, routing::{get, post}, Json, Router};
 use dokkomplekt_license_core::{max_machines_for_plan, PlanId};
 use serde::{Deserialize, Serialize};
@@ -26,7 +26,7 @@ pub fn router() -> Router<AppState> {
 }
 
 async fn order_status(State(state): State<AppState>, Path(order_id): Path<Uuid>) -> Result<Json<ActivationResponse>, StatusCode> {
-    let order = state.store.get_order(order_id).map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
+    let order = state.store.get_order_async(order_id).await.map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
     Ok(Json(ActivationResponse { activation_id: Uuid::nil(), order_id, status: order.status, message: "order status".to_string() }))
 }
 
@@ -39,7 +39,7 @@ async fn activate_machine(
     if machine_hash.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let order = state.store.get_order(order_id).map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
+    let order = state.store.get_order_async(order_id).await.map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
     if !matches!(order.status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
         return Err(StatusCode::CONFLICT);
     }
@@ -53,7 +53,8 @@ async fn activate_machine(
     };
     let stored_order = state
         .store
-        .create_activation_for_order(record, max_machines_for_plan(&plan))
+        .create_activation_for_order_async(record, max_machines_for_plan(&plan))
+        .await
         .map_err(store_error_status)?;
     Ok(Json(ActivationResponse { activation_id, order_id, status: stored_order.status, message: "slot_available".to_string() }))
 }
