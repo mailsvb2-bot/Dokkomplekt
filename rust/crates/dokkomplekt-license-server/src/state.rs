@@ -12,9 +12,13 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn try_new(config: ServerConfig) -> anyhow::Result<Self> {
+        let store = StoreBackend::from_config(&config)?;
+        Ok(Self { config, store })
+    }
+
     pub fn new(config: ServerConfig) -> Self {
-        let store = StoreBackend::from_config(&config).expect("license store backend must initialize");
-        Self { config, store }
+        Self::try_new(config).expect("license store backend must initialize")
     }
 }
 
