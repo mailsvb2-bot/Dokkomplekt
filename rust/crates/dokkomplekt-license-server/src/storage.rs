@@ -118,6 +118,66 @@ impl StoreBackend {
     pub fn database_connected(&self) -> bool {
         matches!(self, Self::Postgres(_))
     }
+
+    pub async fn create_order_async(&self, record: OrderRecord) -> Result<(), StoreError> {
+        match self {
+            Self::Memory(store) => store.create_order(record),
+            Self::Postgres(store) => {
+                let store = store.clone();
+                tokio::task::spawn_blocking(move || store.create_order(record)).await.map_err(|_| StoreError::Poisoned)?
+            }
+        }
+    }
+
+    pub async fn get_order_async(&self, order_id: Uuid) -> Result<Option<OrderRecord>, StoreError> {
+        match self {
+            Self::Memory(store) => store.get_order(order_id),
+            Self::Postgres(store) => {
+                let store = store.clone();
+                tokio::task::spawn_blocking(move || store.get_order(order_id)).await.map_err(|_| StoreError::Poisoned)?
+            }
+        }
+    }
+
+    pub async fn update_order_status_async(&self, order_id: Uuid, status: OrderStatus) -> Result<(), StoreError> {
+        match self {
+            Self::Memory(store) => store.update_order_status(order_id, status),
+            Self::Postgres(store) => {
+                let store = store.clone();
+                tokio::task::spawn_blocking(move || store.update_order_status(order_id, status)).await.map_err(|_| StoreError::Poisoned)?
+            }
+        }
+    }
+
+    pub async fn create_activation_for_order_async(&self, record: ActivationRecord, max_machines: u32) -> Result<OrderRecord, StoreError> {
+        match self {
+            Self::Memory(store) => store.create_activation_for_order(record, max_machines),
+            Self::Postgres(store) => {
+                let store = store.clone();
+                tokio::task::spawn_blocking(move || store.create_activation_for_order(record, max_machines)).await.map_err(|_| StoreError::Poisoned)?
+            }
+        }
+    }
+
+    pub async fn record_payment_event_for_order_async(&self, record: PaymentEventRecord) -> Result<PaymentEventWriteOutcome, StoreError> {
+        match self {
+            Self::Memory(store) => store.record_payment_event_for_order(record),
+            Self::Postgres(store) => {
+                let store = store.clone();
+                tokio::task::spawn_blocking(move || store.record_payment_event_for_order(record)).await.map_err(|_| StoreError::Poisoned)?
+            }
+        }
+    }
+
+    pub async fn store_license_async(&self, record: LicenseRecord) -> Result<(), StoreError> {
+        match self {
+            Self::Memory(store) => store.store_license(record),
+            Self::Postgres(store) => {
+                let store = store.clone();
+                tokio::task::spawn_blocking(move || store.store_license(record)).await.map_err(|_| StoreError::Poisoned)?
+            }
+        }
+    }
 }
 
 impl LicenseStore for StoreBackend {
