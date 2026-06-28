@@ -1,5 +1,8 @@
-use crate::state::{AppState, OrderStatus};
-use crate::storage::{PaymentEventRecord, PaymentEventStatus, PaymentProvider};
+use crate::state::AppState;
+use crate::storage::{
+    LicenseStore, PaymentEventRecord, PaymentEventStatus, PaymentEventWriteOutcome, PaymentProvider,
+    StoreError,
+};
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -32,21 +35,9 @@ async fn provider_callback(State(state): State<AppState>, Json(event): Json<Prov
         return Err(StatusCode::BAD_REQUEST);
     }
     let provider = normalize_callback_provider(event.provider.as_deref().unwrap_or("manual")).ok_or(StatusCode::BAD_REQUEST)?;
-    let mut store = state.store.write().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if store.payment_events.values().any(|record| same_provider(&record.provider, &provider) && record.provider_event_id == event_id) {
-        return Ok(Json(ProviderCallbackResponse { accepted: true, duplicate: true, order_id: event.order_id }));
-    }
-    let order = store.orders.get_mut(&event.order_id).ok_or(StatusCode::NOT_FOUND)?;
-    if order.amount_rub != event.amount_rub {
-        return Err(StatusCode::BAD_REQUEST);
-    }
     let status = normalize_payment_status(&event.status).ok_or(StatusCode::BAD_REQUEST)?;
-    if matches!(status, PaymentEventStatus::Succeeded) {
-        order.status = OrderStatus::Paid;
-    }
-    let record_id = Uuid::new_v4();
-    store.payment_events.insert(record_id, PaymentEventRecord {
-        id: record_id,
+    let record = PaymentEventRecord {
+        id: Uuid::new_v4(),
         order_id: event.order_id,
         provider,
         provider_event_id: event_id.to_string(),
@@ -54,8 +45,22 @@ async fn provider_callback(State(state): State<AppState>, Json(event): Json<Prov
         status,
         amount_rub: event.amount_rub,
         received_at: OffsetDateTime::now_utc(),
-    });
-    Ok(Json(ProviderCallbackResponse { accepted: true, duplicate: false, order_id: event.order_id }))
+    };
+    let outcome = state.store.record_payment_event_for_order(record).map_err(store_error_status)?;
+    Ok(Json(ProviderCallbackResponse {
+        accepted: true,
+        duplicate: matches!(outcome, PaymentEventWriteOutcome::Duplicate),
+        order_id: event.order_id,
+    }))
+}
+
+fn store_error_status(error: StoreError) -> StatusCode {
+    match error {
+        StoreError::Conflict => StatusCode::CONFLICT,
+        StoreError::Invalid(_) => StatusCode::BAD_REQUEST,
+        StoreError::NotFound => StatusCode::NOT_FOUND,
+        StoreError::Poisoned => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }
 
 pub fn normalize_payment_status(value: &str) -> Option<PaymentEventStatus> {
