@@ -15,6 +15,20 @@ on:
 jobs:
   rust-license:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dokkomplekt
+          POSTGRES_PASSWORD: dokkomplekt
+          POSTGRES_DB: dokkomplekt_license
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: rust
@@ -28,6 +42,15 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+
+      - name: Validate PostgreSQL migration
+        shell: bash
+        env:
+          PGPASSWORD: dokkomplekt
+        run: |
+          psql -h 127.0.0.1 -U dokkomplekt -d dokkomplekt_license -v ON_ERROR_STOP=1 -f crates/dokkomplekt-license-server/migrations/0001_license_schema.sql
+          psql -h 127.0.0.1 -U dokkomplekt -d dokkomplekt_license -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('license_orders','billing_events','license_documents','license_machines','license_audit_events');" > postgres-migration.log
+          cat postgres-migration.log
 
       - name: Cargo test
         shell: bash
@@ -53,6 +76,7 @@ jobs:
         with:
           name: rust-ci-logs
           path: |
+            rust/postgres-migration.log
             rust/rust-test.log
             rust/rust-clippy.log
           if-no-files-found: ignore
