@@ -16,7 +16,7 @@ pub struct PostgresStore {
 impl PostgresStore {
     pub fn connect(database_url: &str) -> anyhow::Result<Self> {
         let mut client = Client::connect(database_url, NoTls)?;
-        client.batch_execute(SCHEMA_V1)?;
+        apply_migrations(&mut client)?;
         Ok(Self { client: Arc::new(Mutex::new(client)) })
     }
 
@@ -142,6 +142,23 @@ impl LicenseStore for PostgresStore {
     }
 }
 
+fn apply_migrations(client: &mut Client) -> anyhow::Result<()> {
+    client.batch_execute(MIGRATION_LEDGER_SCHEMA)?;
+    let already_applied: bool = client.query_one(
+        "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)",
+        &[&SCHEMA_VERSION],
+    )?.get(0);
+    if already_applied {
+        return Ok(());
+    }
+    client.batch_execute(SCHEMA_V1)?;
+    client.execute(
+        "INSERT INTO schema_migrations (version, applied_at) VALUES ($1, NOW()) ON CONFLICT (version) DO NOTHING",
+        &[&SCHEMA_VERSION],
+    )?;
+    Ok(())
+}
+
 fn insert_payment_event(client: &mut impl GenericClient, record: &PaymentEventRecord) -> Result<(), StoreError> {
     let provider = payment_provider_to_str(&record.provider);
     let status = payment_status_to_str(&record.status);
@@ -226,4 +243,6 @@ fn pg_err(error: postgres::Error) -> StoreError {
     StoreError::Invalid(error.to_string())
 }
 
+const SCHEMA_VERSION: &str = "0001_license_schema";
+const MIGRATION_LEDGER_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL);";
 const SCHEMA_V1: &str = include_str!("../../migrations/0001_license_schema.sql");
