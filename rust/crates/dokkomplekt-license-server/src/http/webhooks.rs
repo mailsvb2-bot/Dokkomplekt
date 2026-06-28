@@ -64,3 +64,22 @@ pub fn normalize_payment_status(value: &str) -> Option<PaymentEventStatus> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn payment_status_values_are_normalized() {
+        assert!(matches!(normalize_payment_status("succeeded"), Some(PaymentEventStatus::Succeeded)));
+        assert!(matches!(normalize_payment_status(" pending "), Some(PaymentEventStatus::Pending)));
+        assert!(matches!(normalize_payment_status("canceled"), Some(PaymentEventStatus::Cancelled)));
+        assert!(matches!(normalize_payment_status("cancelled"), Some(PaymentEventStatus::Cancelled)));
+        assert!(matches!(normalize_payment_status("rejected"), Some(PaymentEventStatus::Rejected)));
+    }
+
+    #[test]
+    fn unknown_payment_status_is_rejected() {
+        assert!(normalize_payment_status("unexpected-state").is_none());
+    }
+}
