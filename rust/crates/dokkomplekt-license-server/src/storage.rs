@@ -3,7 +3,7 @@
 use crate::config::ServerConfig;
 use crate::state::{ActivationRecord, MemoryStore, OrderRecord, OrderStatus};
 use postgres::error::SqlState;
-use postgres::{Client, NoTls};
+use postgres::{Client, GenericClient, NoTls, Row};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex, RwLock};
 use time::OffsetDateTime;
@@ -23,27 +23,14 @@ pub struct PaymentEventRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PaymentProvider {
-    Manual,
-    YooKassa,
-    Sbp,
-    BankInvoice,
-}
+pub enum PaymentProvider { Manual, YooKassa, Sbp, BankInvoice }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PaymentEventStatus {
-    Pending,
-    Succeeded,
-    Cancelled,
-    Rejected,
-}
+pub enum PaymentEventStatus { Pending, Succeeded, Cancelled, Rejected }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PaymentEventWriteOutcome {
-    Recorded,
-    Duplicate,
-}
+pub enum PaymentEventWriteOutcome { Recorded, Duplicate }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LicenseRecord {
@@ -77,105 +64,39 @@ pub trait LicenseStore: Send + Sync + 'static {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StoreError {
-    Poisoned,
-    NotFound,
-    Conflict,
-    Invalid(String),
-}
+pub enum StoreError { Poisoned, NotFound, Conflict, Invalid(String) }
 
 impl std::fmt::Display for StoreError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{:?}", self) }
 }
-
 impl std::error::Error for StoreError {}
 
 #[derive(Clone)]
-pub enum StoreBackend {
-    Memory(Arc<RwLock<MemoryStore>>),
-    Postgres(PostgresStore),
-}
+pub enum StoreBackend { Memory(Arc<RwLock<MemoryStore>>), Postgres(PostgresStore) }
 
 impl StoreBackend {
     pub fn from_config(config: &ServerConfig) -> anyhow::Result<Self> {
-        match config.database_url.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
-            Some(database_url) => Ok(Self::Postgres(PostgresStore::connect(database_url)?)),
-            None => Ok(Self::Memory(Arc::new(RwLock::new(MemoryStore::default())))),
-        }
+        Ok(match config.database_url.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+            Some(url) => Self::Postgres(PostgresStore::connect(url)?),
+            None => Self::Memory(Arc::new(RwLock::new(MemoryStore::default()))),
+        })
     }
 }
 
 impl LicenseStore for StoreBackend {
-    fn create_order(&self, record: OrderRecord) -> Result<(), StoreError> {
-        match self {
-            Self::Memory(store) => store.create_order(record),
-            Self::Postgres(store) => store.create_order(record),
-        }
-    }
-
-    fn get_order(&self, order_id: Uuid) -> Result<Option<OrderRecord>, StoreError> {
-        match self {
-            Self::Memory(store) => store.get_order(order_id),
-            Self::Postgres(store) => store.get_order(order_id),
-        }
-    }
-
-    fn update_order_status(&self, order_id: Uuid, status: OrderStatus) -> Result<(), StoreError> {
-        match self {
-            Self::Memory(store) => store.update_order_status(order_id, status),
-            Self::Postgres(store) => store.update_order_status(order_id, status),
-        }
-    }
-
-    fn create_activation(&self, record: ActivationRecord) -> Result<(), StoreError> {
-        match self {
-            Self::Memory(store) => store.create_activation(record),
-            Self::Postgres(store) => store.create_activation(record),
-        }
-    }
-
-    fn create_activation_for_order(&self, record: ActivationRecord, max_machines: u32) -> Result<OrderRecord, StoreError> {
-        match self {
-            Self::Memory(store) => store.create_activation_for_order(record, max_machines),
-            Self::Postgres(store) => store.create_activation_for_order(record, max_machines),
-        }
-    }
-
-    fn record_payment_event(&self, record: PaymentEventRecord) -> Result<(), StoreError> {
-        match self {
-            Self::Memory(store) => store.record_payment_event(record),
-            Self::Postgres(store) => store.record_payment_event(record),
-        }
-    }
-
-    fn record_payment_event_for_order(&self, record: PaymentEventRecord) -> Result<PaymentEventWriteOutcome, StoreError> {
-        match self {
-            Self::Memory(store) => store.record_payment_event_for_order(record),
-            Self::Postgres(store) => store.record_payment_event_for_order(record),
-        }
-    }
-
-    fn store_license(&self, record: LicenseRecord) -> Result<(), StoreError> {
-        match self {
-            Self::Memory(store) => store.store_license(record),
-            Self::Postgres(store) => store.store_license(record),
-        }
-    }
-
-    fn audit(&self, record: AuditEventRecord) -> Result<(), StoreError> {
-        match self {
-            Self::Memory(store) => store.audit(record),
-            Self::Postgres(store) => store.audit(record),
-        }
-    }
+    fn create_order(&self, r: OrderRecord) -> Result<(), StoreError> { match self { Self::Memory(s) => s.create_order(r), Self::Postgres(s) => s.create_order(r) } }
+    fn get_order(&self, id: Uuid) -> Result<Option<OrderRecord>, StoreError> { match self { Self::Memory(s) => s.get_order(id), Self::Postgres(s) => s.get_order(id) } }
+    fn update_order_status(&self, id: Uuid, st: OrderStatus) -> Result<(), StoreError> { match self { Self::Memory(s) => s.update_order_status(id, st), Self::Postgres(s) => s.update_order_status(id, st) } }
+    fn create_activation(&self, r: ActivationRecord) -> Result<(), StoreError> { match self { Self::Memory(s) => s.create_activation(r), Self::Postgres(s) => s.create_activation(r) } }
+    fn create_activation_for_order(&self, r: ActivationRecord, max: u32) -> Result<OrderRecord, StoreError> { match self { Self::Memory(s) => s.create_activation_for_order(r, max), Self::Postgres(s) => s.create_activation_for_order(r, max) } }
+    fn record_payment_event(&self, r: PaymentEventRecord) -> Result<(), StoreError> { match self { Self::Memory(s) => s.record_payment_event(r), Self::Postgres(s) => s.record_payment_event(r) } }
+    fn record_payment_event_for_order(&self, r: PaymentEventRecord) -> Result<PaymentEventWriteOutcome, StoreError> { match self { Self::Memory(s) => s.record_payment_event_for_order(r), Self::Postgres(s) => s.record_payment_event_for_order(r) } }
+    fn store_license(&self, r: LicenseRecord) -> Result<(), StoreError> { match self { Self::Memory(s) => s.store_license(r), Self::Postgres(s) => s.store_license(r) } }
+    fn audit(&self, r: AuditEventRecord) -> Result<(), StoreError> { match self { Self::Memory(s) => s.audit(r), Self::Postgres(s) => s.audit(r) } }
 }
 
 #[derive(Clone)]
-pub struct PostgresStore {
-    client: Arc<Mutex<Client>>,
-}
+pub struct PostgresStore { client: Arc<Mutex<Client>> }
 
 impl PostgresStore {
     pub fn connect(database_url: &str) -> anyhow::Result<Self> {
@@ -183,247 +104,125 @@ impl PostgresStore {
         client.batch_execute(SCHEMA_V1)?;
         Ok(Self { client: Arc::new(Mutex::new(client)) })
     }
-
-    fn client(&self) -> Result<std::sync::MutexGuard<'_, Client>, StoreError> {
-        self.client.lock().map_err(|_| StoreError::Poisoned)
-    }
+    fn client(&self) -> Result<std::sync::MutexGuard<'_, Client>, StoreError> { self.client.lock().map_err(|_| StoreError::Poisoned) }
 }
 
 impl LicenseStore for PostgresStore {
-    fn create_order(&self, record: OrderRecord) -> Result<(), StoreError> {
-        let mut client = self.client()?;
-        let amount_rub = amount_to_i64(record.amount_rub)?;
-        let status = order_status_to_str(&record.status);
-        let machine_hash = record.machine_hash.as_deref();
-        client
-            .execute(
-                "INSERT INTO license_orders (id, plan, amount_rub, status, machine_hash, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
-                &[&record.id, &record.plan, &amount_rub, &status, &machine_hash, &record.created_at],
-            )
-            .map_err(map_postgres_error)?;
+    fn create_order(&self, r: OrderRecord) -> Result<(), StoreError> {
+        let mut c = self.client()?;
+        let amount = amount_to_i64(r.amount_rub)?;
+        let status = order_status_to_str(&r.status);
+        let machine_hash = r.machine_hash.as_deref();
+        c.execute("INSERT INTO license_orders (id, plan, amount_rub, status, machine_hash, created_at) VALUES ($1, $2, $3, $4, $5, $6)", &[&r.id, &r.plan, &amount, &status, &machine_hash, &r.created_at]).map_err(pg_err)?;
         Ok(())
     }
 
-    fn get_order(&self, order_id: Uuid) -> Result<Option<OrderRecord>, StoreError> {
-        let mut client = self.client()?;
-        let row = client
-            .query_opt(
-                "SELECT id, plan, amount_rub, status, machine_hash, created_at FROM license_orders WHERE id = $1",
-                &[&order_id],
-            )
-            .map_err(map_postgres_error)?;
-        row.map(order_from_row).transpose()
+    fn get_order(&self, id: Uuid) -> Result<Option<OrderRecord>, StoreError> {
+        let mut c = self.client()?;
+        c.query_opt("SELECT id, plan, amount_rub, status, machine_hash, created_at FROM license_orders WHERE id = $1", &[&id]).map_err(pg_err)?.map(order_from_row).transpose()
     }
 
-    fn update_order_status(&self, order_id: Uuid, status: OrderStatus) -> Result<(), StoreError> {
-        let mut client = self.client()?;
-        let status = order_status_to_str(&status);
-        let changed = client
-            .execute("UPDATE license_orders SET status = $2 WHERE id = $1", &[&order_id, &status])
-            .map_err(map_postgres_error)?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
+    fn update_order_status(&self, id: Uuid, st: OrderStatus) -> Result<(), StoreError> {
+        let mut c = self.client()?;
+        let status = order_status_to_str(&st);
+        let n = c.execute("UPDATE license_orders SET status = $2 WHERE id = $1", &[&id, &status]).map_err(pg_err)?;
+        if n == 0 { Err(StoreError::NotFound) } else { Ok(()) }
+    }
+
+    fn create_activation(&self, r: ActivationRecord) -> Result<(), StoreError> {
+        let mut c = self.client()?;
+        c.execute("INSERT INTO license_machines (id, order_id, machine_hash, created_at) VALUES ($1, $2, $3, $4)", &[&r.id, &r.order_id, &r.machine_hash, &r.created_at]).map_err(pg_err)?;
         Ok(())
     }
 
-    fn create_activation(&self, record: ActivationRecord) -> Result<(), StoreError> {
-        let mut client = self.client()?;
-        client
-            .execute(
-                "INSERT INTO license_machines (id, order_id, machine_hash, created_at) VALUES ($1, $2, $3, $4)",
-                &[&record.id, &record.order_id, &record.machine_hash, &record.created_at],
-            )
-            .map_err(map_postgres_error)?;
-        Ok(())
-    }
-
-    fn create_activation_for_order(&self, record: ActivationRecord, max_machines: u32) -> Result<OrderRecord, StoreError> {
-        let mut client = self.client()?;
-        let mut transaction = client.transaction().map_err(map_postgres_error)?;
-        let order_row = transaction
-            .query_opt(
-                "SELECT id, plan, amount_rub, status, machine_hash, created_at FROM license_orders WHERE id = $1 FOR UPDATE",
-                &[&record.order_id],
-            )
-            .map_err(map_postgres_error)?
-            .ok_or(StoreError::NotFound)?;
-        let order = order_from_row(order_row)?;
-        if !matches!(order.status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
-            return Err(StoreError::Conflict);
-        }
-        let active_count: i64 = transaction
-            .query_one("SELECT COUNT(*) FROM license_machines WHERE order_id = $1", &[&record.order_id])
-            .map_err(map_postgres_error)?
-            .get(0);
-        if active_count < 0 || active_count as u32 >= max_machines {
-            return Err(StoreError::Conflict);
-        }
-        transaction
-            .execute(
-                "INSERT INTO license_machines (id, order_id, machine_hash, created_at) VALUES ($1, $2, $3, $4)",
-                &[&record.id, &record.order_id, &record.machine_hash, &record.created_at],
-            )
-            .map_err(map_postgres_error)?;
-        transaction.commit().map_err(map_postgres_error)?;
+    fn create_activation_for_order(&self, r: ActivationRecord, max: u32) -> Result<OrderRecord, StoreError> {
+        let mut c = self.client()?;
+        let mut tx = c.transaction().map_err(pg_err)?;
+        let row = tx.query_opt("SELECT id, plan, amount_rub, status, machine_hash, created_at FROM license_orders WHERE id = $1 FOR UPDATE", &[&r.order_id]).map_err(pg_err)?.ok_or(StoreError::NotFound)?;
+        let order = order_from_row(row)?;
+        if !matches!(order.status, OrderStatus::Paid | OrderStatus::LicenseIssued) { return Err(StoreError::Conflict); }
+        let count: i64 = tx.query_one("SELECT COUNT(*) FROM license_machines WHERE order_id = $1", &[&r.order_id]).map_err(pg_err)?.get(0);
+        if count < 0 || count as u32 >= max { return Err(StoreError::Conflict); }
+        tx.execute("INSERT INTO license_machines (id, order_id, machine_hash, created_at) VALUES ($1, $2, $3, $4)", &[&r.id, &r.order_id, &r.machine_hash, &r.created_at]).map_err(pg_err)?;
+        tx.commit().map_err(pg_err)?;
         Ok(order)
     }
 
-    fn record_payment_event(&self, record: PaymentEventRecord) -> Result<(), StoreError> {
-        let mut client = self.client()?;
-        insert_payment_event(&mut client, &record)?;
-        Ok(())
+    fn record_payment_event(&self, r: PaymentEventRecord) -> Result<(), StoreError> {
+        let mut c = self.client()?;
+        insert_payment_event(&mut *c, &r)
     }
 
-    fn record_payment_event_for_order(&self, record: PaymentEventRecord) -> Result<PaymentEventWriteOutcome, StoreError> {
-        let mut client = self.client()?;
-        let mut transaction = client.transaction().map_err(map_postgres_error)?;
-        let provider = payment_provider_to_str(&record.provider);
-        let existing = transaction
-            .query_opt(
-                "SELECT id FROM billing_events WHERE provider = $1 AND provider_event_id = $2",
-                &[&provider, &record.provider_event_id],
-            )
-            .map_err(map_postgres_error)?;
-        if existing.is_some() {
+    fn record_payment_event_for_order(&self, r: PaymentEventRecord) -> Result<PaymentEventWriteOutcome, StoreError> {
+        let mut c = self.client()?;
+        let mut tx = c.transaction().map_err(pg_err)?;
+        let provider = payment_provider_to_str(&r.provider);
+        if tx.query_opt("SELECT id FROM billing_events WHERE provider = $1 AND provider_event_id = $2", &[&provider, &r.provider_event_id]).map_err(pg_err)?.is_some() {
             return Ok(PaymentEventWriteOutcome::Duplicate);
         }
-        let order_row = transaction
-            .query_opt(
-                "SELECT id, plan, amount_rub, status, machine_hash, created_at FROM license_orders WHERE id = $1 FOR UPDATE",
-                &[&record.order_id],
-            )
-            .map_err(map_postgres_error)?
-            .ok_or(StoreError::NotFound)?;
-        let order = order_from_row(order_row)?;
-        if order.amount_rub != record.amount_rub {
-            return Err(StoreError::Invalid("amount_mismatch".to_string()));
+        let row = tx.query_opt("SELECT id, plan, amount_rub, status, machine_hash, created_at FROM license_orders WHERE id = $1 FOR UPDATE", &[&r.order_id]).map_err(pg_err)?.ok_or(StoreError::NotFound)?;
+        let order = order_from_row(row)?;
+        if order.amount_rub != r.amount_rub { return Err(StoreError::Invalid("amount_mismatch".to_string())); }
+        if matches!(r.status, PaymentEventStatus::Succeeded) {
+            let paid = order_status_to_str(&OrderStatus::Paid);
+            tx.execute("UPDATE license_orders SET status = $2 WHERE id = $1", &[&r.order_id, &paid]).map_err(pg_err)?;
         }
-        if matches!(record.status, PaymentEventStatus::Succeeded) {
-            let status = order_status_to_str(&OrderStatus::Paid);
-            transaction
-                .execute("UPDATE license_orders SET status = $2 WHERE id = $1", &[&record.order_id, &status])
-                .map_err(map_postgres_error)?;
-        }
-        insert_payment_event(&mut transaction, &record)?;
-        transaction.commit().map_err(map_postgres_error)?;
+        insert_payment_event(&mut tx, &r)?;
+        tx.commit().map_err(pg_err)?;
         Ok(PaymentEventWriteOutcome::Recorded)
     }
 
-    fn store_license(&self, record: LicenseRecord) -> Result<(), StoreError> {
-        let mut client = self.client()?;
-        client
-            .execute(
-                "INSERT INTO license_documents (id, order_id, license_id, document_json, issued_at, revoked_at) VALUES ($1, $2, $3, $4, $5, $6)",
-                &[&record.id, &record.order_id, &record.license_id, &record.document_json, &record.issued_at, &record.revoked_at],
-            )
-            .map_err(map_postgres_error)?;
+    fn store_license(&self, r: LicenseRecord) -> Result<(), StoreError> {
+        let mut c = self.client()?;
+        c.execute("INSERT INTO license_documents (id, order_id, license_id, document_json, issued_at, revoked_at) VALUES ($1, $2, $3, $4, $5, $6)", &[&r.id, &r.order_id, &r.license_id, &r.document_json, &r.issued_at, &r.revoked_at]).map_err(pg_err)?;
         Ok(())
     }
 
-    fn audit(&self, record: AuditEventRecord) -> Result<(), StoreError> {
-        let mut client = self.client()?;
-        client
-            .execute(
-                "INSERT INTO license_audit_events (id, entity_id, event_type, happened_at, details_json) VALUES ($1, $2, $3, $4, $5)",
-                &[&record.id, &record.entity_id, &record.event_type, &record.happened_at, &record.details_json],
-            )
-            .map_err(map_postgres_error)?;
+    fn audit(&self, r: AuditEventRecord) -> Result<(), StoreError> {
+        let mut c = self.client()?;
+        c.execute("INSERT INTO license_audit_events (id, entity_id, event_type, happened_at, details_json) VALUES ($1, $2, $3, $4, $5)", &[&r.id, &r.entity_id, &r.event_type, &r.happened_at, &r.details_json]).map_err(pg_err)?;
         Ok(())
     }
 }
 
-fn insert_payment_event(client: &mut impl postgres::GenericClient, record: &PaymentEventRecord) -> Result<(), StoreError> {
-    let provider = payment_provider_to_str(&record.provider);
-    let status = payment_status_to_str(&record.status);
-    let amount_rub = amount_to_i64(record.amount_rub)?;
-    let provider_reference_id = record.provider_payment_id.as_deref();
-    client
-        .execute(
-            "INSERT INTO billing_events (id, order_id, provider, provider_event_id, provider_reference_id, status, amount_rub, received_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            &[
-                &record.id,
-                &record.order_id,
-                &provider,
-                &record.provider_event_id,
-                &provider_reference_id,
-                &status,
-                &amount_rub,
-                &record.received_at,
-            ],
-        )
-        .map_err(map_postgres_error)?;
+fn insert_payment_event(c: &mut impl GenericClient, r: &PaymentEventRecord) -> Result<(), StoreError> {
+    let provider = payment_provider_to_str(&r.provider);
+    let status = payment_status_to_str(&r.status);
+    let amount = amount_to_i64(r.amount_rub)?;
+    let provider_ref = r.provider_payment_id.as_deref();
+    c.execute("INSERT INTO billing_events (id, order_id, provider, provider_event_id, provider_reference_id, status, amount_rub, received_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", &[&r.id, &r.order_id, &provider, &r.provider_event_id, &provider_ref, &status, &amount, &r.received_at]).map_err(pg_err)?;
     Ok(())
 }
 
-fn order_from_row(row: postgres::Row) -> Result<OrderRecord, StoreError> {
-    let amount_rub: i64 = row.get("amount_rub");
+fn order_from_row(row: Row) -> Result<OrderRecord, StoreError> {
+    let amount: i64 = row.get("amount_rub");
     let status: String = row.get("status");
-    Ok(OrderRecord {
-        id: row.get("id"),
-        plan: row.get("plan"),
-        amount_rub: amount_from_i64(amount_rub)?,
-        status: order_status_from_str(&status)?,
-        machine_hash: row.get("machine_hash"),
-        created_at: row.get("created_at"),
-    })
+    Ok(OrderRecord { id: row.get("id"), plan: row.get("plan"), amount_rub: amount_from_i64(amount)?, status: order_status_from_str(&status)?, machine_hash: row.get("machine_hash"), created_at: row.get("created_at") })
 }
 
-fn amount_to_i64(amount: u64) -> Result<i64, StoreError> {
-    i64::try_from(amount).map_err(|_| StoreError::Invalid("amount_overflow".to_string()))
-}
-
-fn amount_from_i64(amount: i64) -> Result<u64, StoreError> {
-    u64::try_from(amount).map_err(|_| StoreError::Invalid("amount_negative".to_string()))
-}
+fn amount_to_i64(amount: u64) -> Result<i64, StoreError> { i64::try_from(amount).map_err(|_| StoreError::Invalid("amount_overflow".to_string())) }
+fn amount_from_i64(amount: i64) -> Result<u64, StoreError> { u64::try_from(amount).map_err(|_| StoreError::Invalid("amount_negative".to_string())) }
 
 fn order_status_to_str(status: &OrderStatus) -> &'static str {
-    match status {
-        OrderStatus::Draft => "draft",
-        OrderStatus::WaitingPayment => "waiting_payment",
-        OrderStatus::Paid => "paid",
-        OrderStatus::LicenseIssued => "license_issued",
-        OrderStatus::Cancelled => "cancelled",
-    }
+    match status { OrderStatus::Draft => "draft", OrderStatus::WaitingPayment => "waiting_payment", OrderStatus::Paid => "paid", OrderStatus::LicenseIssued => "license_issued", OrderStatus::Cancelled => "cancelled" }
 }
 
 fn order_status_from_str(value: &str) -> Result<OrderStatus, StoreError> {
-    match value {
-        "draft" => Ok(OrderStatus::Draft),
-        "waiting_payment" => Ok(OrderStatus::WaitingPayment),
-        "paid" => Ok(OrderStatus::Paid),
-        "license_issued" => Ok(OrderStatus::LicenseIssued),
-        "cancelled" => Ok(OrderStatus::Cancelled),
-        other => Err(StoreError::Invalid(format!("unknown_order_status:{other}"))),
-    }
+    match value { "draft" => Ok(OrderStatus::Draft), "waiting_payment" => Ok(OrderStatus::WaitingPayment), "paid" => Ok(OrderStatus::Paid), "license_issued" => Ok(OrderStatus::LicenseIssued), "cancelled" => Ok(OrderStatus::Cancelled), other => Err(StoreError::Invalid(format!("unknown_order_status:{other}"))) }
 }
 
 fn payment_provider_to_str(provider: &PaymentProvider) -> &'static str {
-    match provider {
-        PaymentProvider::Manual => "manual",
-        PaymentProvider::YooKassa => "yookassa",
-        PaymentProvider::Sbp => "sbp",
-        PaymentProvider::BankInvoice => "bank_invoice",
-    }
+    match provider { PaymentProvider::Manual => "manual", PaymentProvider::YooKassa => "yookassa", PaymentProvider::Sbp => "sbp", PaymentProvider::BankInvoice => "bank_invoice" }
 }
 
 fn payment_status_to_str(status: &PaymentEventStatus) -> &'static str {
-    match status {
-        PaymentEventStatus::Pending => "pending",
-        PaymentEventStatus::Succeeded => "succeeded",
-        PaymentEventStatus::Cancelled => "cancelled",
-        PaymentEventStatus::Rejected => "rejected",
-    }
+    match status { PaymentEventStatus::Pending => "pending", PaymentEventStatus::Succeeded => "succeeded", PaymentEventStatus::Cancelled => "cancelled", PaymentEventStatus::Rejected => "rejected" }
 }
 
-fn map_postgres_error(error: postgres::Error) -> StoreError {
-    if let Some(db_error) = error.as_db_error() {
-        if db_error.code() == &SqlState::UNIQUE_VIOLATION {
-            return StoreError::Conflict;
-        }
-        if db_error.code() == &SqlState::FOREIGN_KEY_VIOLATION {
-            return StoreError::NotFound;
-        }
+fn pg_err(error: postgres::Error) -> StoreError {
+    if let Some(db) = error.as_db_error() {
+        if db.code() == &SqlState::UNIQUE_VIOLATION { return StoreError::Conflict; }
+        if db.code() == &SqlState::FOREIGN_KEY_VIOLATION { return StoreError::NotFound; }
     }
     StoreError::Invalid(error.to_string())
 }
@@ -436,33 +235,12 @@ mod tests {
 
     #[test]
     fn postgres_store_roundtrip_when_database_url_is_present() {
-        let Ok(database_url) = std::env::var("DATABASE_URL") else {
-            return;
-        };
-        let store = PostgresStore::connect(&database_url).unwrap();
+        let Ok(url) = std::env::var("DATABASE_URL") else { return; };
+        let store = PostgresStore::connect(&url).unwrap();
         let order_id = Uuid::new_v4();
-        let order = OrderRecord {
-            id: order_id,
-            plan: "doctor_pro".to_string(),
-            amount_rub: 3900,
-            status: OrderStatus::WaitingPayment,
-            machine_hash: None,
-            created_at: OffsetDateTime::now_utc(),
-        };
-        store.create_order(order).unwrap();
+        store.create_order(OrderRecord { id: order_id, plan: "doctor_pro".to_string(), amount_rub: 3900, status: OrderStatus::WaitingPayment, machine_hash: None, created_at: OffsetDateTime::now_utc() }).unwrap();
         assert!(matches!(store.get_order(order_id).unwrap().unwrap().status, OrderStatus::WaitingPayment));
-
-        let event = PaymentEventRecord {
-            id: Uuid::new_v4(),
-            order_id,
-            provider: PaymentProvider::Manual,
-            provider_event_id: format!("evt-{order_id}"),
-            provider_payment_id: None,
-            status: PaymentEventStatus::Succeeded,
-            amount_rub: 3900,
-            received_at: OffsetDateTime::now_utc(),
-        };
-        assert_eq!(store.record_payment_event_for_order(event).unwrap(), PaymentEventWriteOutcome::Recorded);
+        store.record_payment_event_for_order(PaymentEventRecord { id: Uuid::new_v4(), order_id, provider: PaymentProvider::Manual, provider_event_id: format!("evt-{order_id}"), provider_payment_id: None, status: PaymentEventStatus::Succeeded, amount_rub: 3900, received_at: OffsetDateTime::now_utc() }).unwrap();
         assert!(matches!(store.get_order(order_id).unwrap().unwrap().status, OrderStatus::Paid));
     }
 }
