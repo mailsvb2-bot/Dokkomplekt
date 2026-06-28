@@ -1,5 +1,5 @@
 use crate::state::{AppState, OrderRecord, OrderStatus};
-use crate::storage::{LicenseStore, StoreError};
+use crate::storage::{StoreError};
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -38,7 +38,7 @@ async fn create_order(State(state): State<AppState>, Json(request): Json<CreateO
         machine_hash: request.machine_hash,
         created_at: OffsetDateTime::now_utc(),
     };
-    state.store.create_order(record.clone()).map_err(store_error_status)?;
+    state.store.create_order_async(record.clone()).await.map_err(store_error_status)?;
     let provider = state.config.payment_provider.clone();
     let payment_url = payment_url_for(&state.config.public_base_url, &provider, order_id);
     let qr_url = qr_url_for(&state.config.public_base_url, &provider, order_id);
