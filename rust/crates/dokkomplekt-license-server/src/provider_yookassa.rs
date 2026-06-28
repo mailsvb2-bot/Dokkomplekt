@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::providers::{
     CreatePaymentRequest, CreatePaymentResponse, PaymentProvider, ProviderError, ProviderEvent,
     ProviderKind,
