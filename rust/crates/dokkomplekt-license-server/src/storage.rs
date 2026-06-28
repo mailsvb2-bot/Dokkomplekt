@@ -35,6 +35,12 @@ pub enum PaymentEventStatus {
     Rejected,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaymentEventWriteOutcome {
+    Recorded,
+    Duplicate,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LicenseRecord {
     pub id: Uuid,
@@ -59,7 +65,9 @@ pub trait LicenseStore: Send + Sync + 'static {
     fn get_order(&self, order_id: Uuid) -> Result<Option<OrderRecord>, StoreError>;
     fn update_order_status(&self, order_id: Uuid, status: OrderStatus) -> Result<(), StoreError>;
     fn create_activation(&self, record: ActivationRecord) -> Result<(), StoreError>;
+    fn create_activation_for_order(&self, record: ActivationRecord, max_machines: u32) -> Result<OrderRecord, StoreError>;
     fn record_payment_event(&self, record: PaymentEventRecord) -> Result<(), StoreError>;
+    fn record_payment_event_for_order(&self, record: PaymentEventRecord) -> Result<PaymentEventWriteOutcome, StoreError>;
     fn store_license(&self, record: LicenseRecord) -> Result<(), StoreError>;
     fn audit(&self, record: AuditEventRecord) -> Result<(), StoreError>;
 }
