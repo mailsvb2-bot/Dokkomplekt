@@ -52,8 +52,13 @@ async fn call(app: Router, method: Method, uri: String, body: Option<Value>) -> 
 #[tokio::test]
 async fn postgres_http_order_payment_activation_flow_when_database_url_is_present() {
     let Ok(database_url) = std::env::var("DATABASE_URL") else { return; };
-    let app = build_app(AppState::try_new(postgres_config(database_url.clone())).unwrap());
-    assert_schema_version_recorded(&database_url);
+    let state_url = database_url.clone();
+    let state = tokio::task::spawn_blocking(move || AppState::try_new(postgres_config(state_url)).unwrap())
+        .await
+        .unwrap();
+    let assertion_url = database_url.clone();
+    tokio::task::spawn_blocking(move || assert_schema_version_recorded(&assertion_url)).await.unwrap();
+    let app = build_app(state);
 
     let (status, health) = call(app.clone(), Method::GET, "/healthz".to_string(), None).await;
     assert_eq!(status, StatusCode::OK);
