@@ -127,7 +127,12 @@ jobs:
           python smoke_full_patient_replay.py
 
       - name: Run release gate
-        run: python release_check.py
+        shell: pwsh
+        run: |
+          python release_check.py *> release-gate.log
+          $code=$LASTEXITCODE
+          Get-Content release-gate.log -Tail 160
+          exit $code
 
       - name: Prebuild native license verifier for EXE
         shell: pwsh
@@ -175,6 +180,14 @@ jobs:
         with:
           name: python-production-audit-logs
           path: python-production-audit.log
+          if-no-files-found: ignore
+
+      - name: Upload release gate logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-logs
+          path: release-gate.log
           if-no-files-found: ignore
 
       - name: Upload packaged native verifier logs
