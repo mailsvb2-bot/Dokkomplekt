@@ -9,6 +9,8 @@ use uuid::Uuid;
 pub struct ProviderCallbackRequest {
     pub order_id: Uuid,
     pub provider_event_id: String,
+    pub provider_payment_id: Option<String>,
+    pub provider: Option<String>,
     pub status: String,
     pub amount_rub: u64,
 }
@@ -29,6 +31,7 @@ async fn provider_callback(State(state): State<AppState>, Json(event): Json<Prov
     if event_id.is_empty() || event.amount_rub == 0 {
         return Err(StatusCode::BAD_REQUEST);
     }
+    let provider = normalize_callback_provider(event.provider.as_deref().unwrap_or("manual")).ok_or(StatusCode::BAD_REQUEST)?;
     let mut store = state.store.write().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if store.payment_events.values().any(|record| record.provider_event_id == event_id) {
         return Ok(Json(ProviderCallbackResponse { accepted: true, duplicate: true, order_id: event.order_id }));
@@ -45,9 +48,9 @@ async fn provider_callback(State(state): State<AppState>, Json(event): Json<Prov
     store.payment_events.insert(record_id, PaymentEventRecord {
         id: record_id,
         order_id: event.order_id,
-        provider: PaymentProvider::Manual,
+        provider,
         provider_event_id: event_id.to_string(),
-        provider_payment_id: None,
+        provider_payment_id: event.provider_payment_id,
         status,
         amount_rub: event.amount_rub,
         received_at: OffsetDateTime::now_utc(),
@@ -61,6 +64,16 @@ pub fn normalize_payment_status(value: &str) -> Option<PaymentEventStatus> {
         "pending" => Some(PaymentEventStatus::Pending),
         "cancelled" | "canceled" => Some(PaymentEventStatus::Cancelled),
         "rejected" => Some(PaymentEventStatus::Rejected),
+        _ => None,
+    }
+}
+
+pub fn normalize_callback_provider(value: &str) -> Option<PaymentProvider> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "manual" => Some(PaymentProvider::Manual),
+        "yookassa" => Some(PaymentProvider::YooKassa),
+        "sbp" => Some(PaymentProvider::Sbp),
+        "bank_invoice" => Some(PaymentProvider::BankInvoice),
         _ => None,
     }
 }
@@ -81,5 +94,18 @@ mod tests {
     #[test]
     fn unknown_payment_status_is_rejected() {
         assert!(normalize_payment_status("unexpected-state").is_none());
+    }
+
+    #[test]
+    fn callback_provider_values_are_normalized() {
+        assert!(matches!(normalize_callback_provider(" manual "), Some(PaymentProvider::Manual)));
+        assert!(matches!(normalize_callback_provider("YooKassa"), Some(PaymentProvider::YooKassa)));
+        assert!(matches!(normalize_callback_provider("SBP"), Some(PaymentProvider::Sbp)));
+        assert!(matches!(normalize_callback_provider("bank_invoice"), Some(PaymentProvider::BankInvoice)));
+    }
+
+    #[test]
+    fn unknown_callback_provider_is_rejected() {
+        assert!(normalize_callback_provider("unknown-pay").is_none());
     }
 }
