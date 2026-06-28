@@ -33,10 +33,11 @@ async fn call(app: Router, method: Method, uri: String, body: Option<Value>) -> 
     (status, body)
 }
 
-async fn assert_order_payment_activation_flow(app: Router, expected_backend: &str) {
+async fn assert_order_payment_activation_flow(app: Router, expected_backend: &str, expected_database_connected: bool) {
     let (status, health) = call(app.clone(), Method::GET, "/healthz".to_string(), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(health["storage_backend"], expected_backend);
+    assert_eq!(health["database_connected"], expected_database_connected);
 
     let (status, order) = call(app.clone(), Method::POST, "/api/orders".to_string(), Some(json!({ "plan": "doctor_pro", "amount_rub": 3900, "machine_hash": "machine-a" }))).await;
     assert_eq!(status, StatusCode::OK);
@@ -66,7 +67,7 @@ async fn assert_order_payment_activation_flow(app: Router, expected_backend: &st
 #[tokio::test]
 async fn memory_http_order_payment_activation_flow() {
     let app = build_app(AppState::try_new(base_config(None)).unwrap());
-    assert_order_payment_activation_flow(app, "memory").await;
+    assert_order_payment_activation_flow(app, "memory", false).await;
 }
 
 #[tokio::test]
@@ -75,7 +76,7 @@ async fn postgres_http_order_payment_activation_flow_when_database_url_is_presen
     let app = tokio::task::spawn_blocking(move || build_app(AppState::try_new(base_config(Some(database_url))).unwrap()))
         .await
         .unwrap();
-    assert_order_payment_activation_flow(app.clone(), "postgres").await;
+    assert_order_payment_activation_flow(app.clone(), "postgres", true).await;
     std::mem::forget(app);
 }
 
@@ -85,6 +86,10 @@ fn postgres_runtime_migration_records_schema_version_when_database_url_is_presen
     let store = PostgresStore::connect(&database_url).unwrap();
     assert_eq!(store.pool_size(), 4);
     let mut client = Client::connect(&database_url, NoTls).unwrap();
-    let applied: bool = client.query_one("SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0001_license_schema')", &[]).unwrap().get(0);
+    let row = client.query_one("SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0001_license_schema'), checksum FROM schema_migrations WHERE version = '0001_license_schema'", &[]).unwrap();
+    let applied: bool = row.get(0);
+    let checksum: String = row.get(1);
     assert!(applied);
+    assert_eq!(checksum.len(), 64);
+    assert!(checksum.chars().all(|value| value.is_ascii_hexdigit()));
 }
