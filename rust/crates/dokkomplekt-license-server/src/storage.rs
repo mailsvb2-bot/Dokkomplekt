@@ -57,6 +57,12 @@ pub struct LicenseRecord {
     pub revoked_at: Option<OffsetDateTime>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LicenseIssueOutcome {
+    pub record: LicenseRecord,
+    pub reused: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEventRecord {
     pub id: Uuid,
@@ -75,6 +81,7 @@ pub trait LicenseStore: Send + Sync + 'static {
     fn record_payment_event(&self, record: PaymentEventRecord) -> Result<(), StoreError>;
     fn record_payment_event_for_order(&self, record: PaymentEventRecord) -> Result<PaymentEventWriteOutcome, StoreError>;
     fn store_license(&self, record: LicenseRecord) -> Result<(), StoreError>;
+    fn issue_license_for_paid_order(&self, record: LicenseRecord) -> Result<LicenseIssueOutcome, StoreError>;
     fn audit(&self, record: AuditEventRecord) -> Result<(), StoreError>;
 }
 
@@ -188,6 +195,16 @@ impl StoreBackend {
             }
         }
     }
+
+    pub async fn issue_license_for_paid_order_async(&self, record: LicenseRecord) -> Result<LicenseIssueOutcome, StoreError> {
+        match self {
+            Self::Memory(store) => store.issue_license_for_paid_order(record),
+            Self::Postgres(store) => {
+                let store = store.clone();
+                tokio::task::spawn_blocking(move || store.issue_license_for_paid_order(record)).await.map_err(|_| StoreError::Poisoned)?
+            }
+        }
+    }
 }
 
 impl LicenseStore for StoreBackend {
@@ -247,6 +264,13 @@ impl LicenseStore for StoreBackend {
         }
     }
 
+    fn issue_license_for_paid_order(&self, record: LicenseRecord) -> Result<LicenseIssueOutcome, StoreError> {
+        match self {
+            Self::Memory(store) => store.issue_license_for_paid_order(record),
+            Self::Postgres(store) => store.issue_license_for_paid_order(record),
+        }
+    }
+
     fn audit(&self, record: AuditEventRecord) -> Result<(), StoreError> {
         match self {
             Self::Memory(store) => store.audit(record),
@@ -293,6 +317,17 @@ mod tests {
         }
     }
 
+    fn license_record(order_id: Uuid, license_id: &str) -> LicenseRecord {
+        LicenseRecord {
+            id: Uuid::new_v4(),
+            order_id,
+            license_id: license_id.to_string(),
+            document_json: format!(r#"{{"license_id":"{license_id}"}}"#),
+            issued_at: OffsetDateTime::now_utc(),
+            revoked_at: None,
+        }
+    }
+
     fn assert_license_store_contract(store: StoreBackend) {
         let order_id = Uuid::new_v4();
         store.create_order(order_record(order_id, OrderStatus::WaitingPayment)).unwrap();
@@ -315,19 +350,22 @@ mod tests {
         assert_eq!(store.create_activation_for_order(activation(unpaid_order_id, "machine-c"), 1).unwrap_err(), StoreError::Conflict);
 
         let license_id = format!("license-{order_id}");
-        let license = LicenseRecord {
-            id: Uuid::new_v4(),
-            order_id,
-            license_id: license_id.clone(),
-            document_json: "{}".to_string(),
-            issued_at: OffsetDateTime::now_utc(),
-            revoked_at: None,
-        };
+        let license = license_record(order_id, &license_id);
         store.store_license(license.clone()).unwrap();
         assert_eq!(
             store.store_license(LicenseRecord { id: Uuid::new_v4(), ..license }).unwrap_err(),
             StoreError::Conflict,
         );
+
+        let issue_order_id = Uuid::new_v4();
+        store.create_order(order_record(issue_order_id, OrderStatus::Paid)).unwrap();
+        let issued = store.issue_license_for_paid_order(license_record(issue_order_id, "license-issued")).unwrap();
+        assert!(!issued.reused);
+        assert_eq!(issued.record.license_id, "license-issued");
+        assert!(matches!(store.get_order(issue_order_id).unwrap().unwrap().status, OrderStatus::LicenseIssued));
+        let reused = store.issue_license_for_paid_order(license_record(issue_order_id, "license-new-but-ignored")).unwrap();
+        assert!(reused.reused);
+        assert_eq!(reused.record.license_id, "license-issued");
 
         let audit = AuditEventRecord {
             id: Uuid::new_v4(),
