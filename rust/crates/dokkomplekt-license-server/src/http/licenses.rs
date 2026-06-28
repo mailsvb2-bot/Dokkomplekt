@@ -1,6 +1,6 @@
 use crate::issuer::{issue_license, IssueLicenseInput};
 use crate::state::{AppState, OrderStatus};
-use crate::storage::{LicenseRecord, LicenseStore, StoreError};
+use crate::storage::{LicenseRecord, StoreError};
 use axum::{extract::{Path, State}, http::StatusCode, routing::post, Json, Router};
 use dokkomplekt_license_core::models::PlanId;
 use serde::Deserialize;
@@ -25,7 +25,7 @@ async fn issue_for_order(
     if request.machine_hash.trim().is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let order = state.store.get_order(order_id).map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
+    let order = state.store.get_order_async(order_id).await.map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
     if !matches!(order.status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
         return Err(StatusCode::CONFLICT);
     }
@@ -52,8 +52,8 @@ async fn issue_for_order(
         issued_at: document.license.payload.issued_at,
         revoked_at: None,
     };
-    state.store.store_license(license_record).map_err(store_error_status)?;
-    state.store.update_order_status(order_id, OrderStatus::LicenseIssued).map_err(store_error_status)?;
+    state.store.store_license_async(license_record).await.map_err(store_error_status)?;
+    state.store.update_order_status_async(order_id, OrderStatus::LicenseIssued).await.map_err(store_error_status)?;
     Ok(Json(document))
 }
 
