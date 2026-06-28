@@ -83,16 +83,6 @@ pub fn normalize_callback_provider(value: &str) -> Option<PaymentProvider> {
     }
 }
 
-pub fn same_provider(left: &PaymentProvider, right: &PaymentProvider) -> bool {
-    matches!(
-        (left, right),
-        (PaymentProvider::Manual, PaymentProvider::Manual)
-            | (PaymentProvider::YooKassa, PaymentProvider::YooKassa)
-            | (PaymentProvider::Sbp, PaymentProvider::Sbp)
-            | (PaymentProvider::BankInvoice, PaymentProvider::BankInvoice)
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,11 +112,5 @@ mod tests {
     #[test]
     fn unknown_callback_provider_is_rejected() {
         assert!(normalize_callback_provider("unknown-pay").is_none());
-    }
-
-    #[test]
-    fn provider_identity_is_exact() {
-        assert!(same_provider(&PaymentProvider::YooKassa, &PaymentProvider::YooKassa));
-        assert!(!same_provider(&PaymentProvider::YooKassa, &PaymentProvider::Sbp));
     }
 }
