@@ -5,23 +5,39 @@ use super::{
 use crate::state::{ActivationRecord, OrderRecord, OrderStatus};
 use postgres::error::SqlState;
 use postgres::{Client, GenericClient, NoTls, Row};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct PostgresStore {
-    client: Arc<Mutex<Client>>,
+    pool: Arc<PostgresPool>,
+}
+
+struct PostgresPool {
+    clients: Vec<Mutex<Client>>,
+    next: AtomicUsize,
 }
 
 impl PostgresStore {
     pub fn connect(database_url: &str) -> anyhow::Result<Self> {
-        let mut client = Client::connect(database_url, NoTls)?;
-        apply_migrations(&mut client)?;
-        Ok(Self { client: Arc::new(Mutex::new(client)) })
+        let mut clients = Vec::with_capacity(POSTGRES_POOL_SIZE);
+        let mut bootstrap_client = Client::connect(database_url, NoTls)?;
+        apply_migrations(&mut bootstrap_client)?;
+        clients.push(Mutex::new(bootstrap_client));
+        for _ in 1..POSTGRES_POOL_SIZE {
+            clients.push(Mutex::new(Client::connect(database_url, NoTls)?));
+        }
+        Ok(Self { pool: Arc::new(PostgresPool { clients, next: AtomicUsize::new(0) }) })
     }
 
-    fn client(&self) -> Result<std::sync::MutexGuard<'_, Client>, StoreError> {
-        self.client.lock().map_err(|_| StoreError::Poisoned)
+    pub fn pool_size(&self) -> usize {
+        self.pool.clients.len()
+    }
+
+    fn client(&self) -> Result<MutexGuard<'_, Client>, StoreError> {
+        let index = self.pool.next.fetch_add(1, Ordering::Relaxed) % self.pool.clients.len();
+        self.pool.clients[index].lock().map_err(|_| StoreError::Poisoned)
     }
 }
 
@@ -252,6 +268,7 @@ fn pg_err(error: postgres::Error) -> StoreError {
     StoreError::Invalid(error.to_string())
 }
 
+const POSTGRES_POOL_SIZE: usize = 4;
 const SCHEMA_VERSION: &str = "0001_license_schema";
 const MIGRATION_LOCK_ID: i64 = 4_207_301_001;
 const MIGRATION_LEDGER_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL);";
