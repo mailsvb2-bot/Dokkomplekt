@@ -18,7 +18,11 @@ pub fn max_machines_for_plan(plan: &PlanId) -> u32 {
     }
 }
 
-pub fn evaluate_machine_activation(plan: &PlanId, active_machines: u32, requested_machines: u32) -> ActivationDecision {
+pub fn evaluate_machine_activation(
+    plan: &PlanId,
+    active_machines: u32,
+    requested_machines: u32,
+) -> ActivationDecision {
     let max_machines = max_machines_for_plan(plan);
     let projected = active_machines.saturating_add(requested_machines);
     if projected <= max_machines {
