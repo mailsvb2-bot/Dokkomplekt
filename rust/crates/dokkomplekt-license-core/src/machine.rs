@@ -32,7 +32,9 @@ impl MachineFingerprint {
     }
 
     pub fn matches_any(&self, allowed: &[String]) -> bool {
-        allowed.iter().any(|item| constant_time_eq(self.0.as_bytes(), item.as_bytes()))
+        allowed
+            .iter()
+            .any(|item| constant_time_eq(self.0.as_bytes(), item.as_bytes()))
     }
 }
 
