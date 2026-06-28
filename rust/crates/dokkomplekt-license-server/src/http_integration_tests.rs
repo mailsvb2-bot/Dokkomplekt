@@ -4,6 +4,7 @@ use axum::{
     http::{header::CONTENT_TYPE, Method, Request, StatusCode},
     Router,
 };
+use postgres::{Client, NoTls};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -18,6 +19,18 @@ fn postgres_config(database_url: String) -> ServerConfig {
         storage_mode: "postgres".to_string(),
         database_url: Some(database_url),
     }
+}
+
+fn assert_schema_version_recorded(database_url: &str) {
+    let mut client = Client::connect(database_url, NoTls).unwrap();
+    let applied: bool = client
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0001_license_schema')",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert!(applied);
 }
 
 async fn call(app: Router, method: Method, uri: String, body: Option<Value>) -> (StatusCode, Value) {
@@ -39,7 +52,8 @@ async fn call(app: Router, method: Method, uri: String, body: Option<Value>) -> 
 #[tokio::test]
 async fn postgres_http_order_payment_activation_flow_when_database_url_is_present() {
     let Ok(database_url) = std::env::var("DATABASE_URL") else { return; };
-    let app = build_app(AppState::try_new(postgres_config(database_url)).unwrap());
+    let app = build_app(AppState::try_new(postgres_config(database_url.clone())).unwrap());
+    assert_schema_version_recorded(&database_url);
 
     let (status, health) = call(app.clone(), Method::GET, "/healthz".to_string(), None).await;
     assert_eq!(status, StatusCode::OK);
