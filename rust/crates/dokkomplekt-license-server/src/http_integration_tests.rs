@@ -33,13 +33,10 @@ async fn call(app: Router, method: Method, uri: String, body: Option<Value>) -> 
     (status, body)
 }
 
-#[tokio::test]
-async fn memory_http_order_payment_activation_flow() {
-    let app = build_app(AppState::try_new(base_config(None)).unwrap());
-
+async fn assert_order_payment_activation_flow(app: Router, expected_backend: &str) {
     let (status, health) = call(app.clone(), Method::GET, "/healthz".to_string(), None).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(health["storage_backend"], "memory");
+    assert_eq!(health["storage_backend"], expected_backend);
 
     let (status, order) = call(app.clone(), Method::POST, "/api/orders".to_string(), Some(json!({ "plan": "doctor_pro", "amount_rub": 3900, "machine_hash": "machine-a" }))).await;
     assert_eq!(status, StatusCode::OK);
@@ -61,9 +58,25 @@ async fn memory_http_order_payment_activation_flow() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "paid");
 
-    let (status, body) = call(app, Method::POST, format!("/api/orders/{order_id}/activate-machine"), Some(json!({ "machine_hash": "machine-a" }))).await;
+    let (status, body) = call(app.clone(), Method::POST, format!("/api/orders/{order_id}/activate-machine"), Some(json!({ "machine_hash": "machine-a" }))).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "paid");
+}
+
+#[tokio::test]
+async fn memory_http_order_payment_activation_flow() {
+    let app = build_app(AppState::try_new(base_config(None)).unwrap());
+    assert_order_payment_activation_flow(app, "memory").await;
+}
+
+#[tokio::test]
+async fn postgres_http_order_payment_activation_flow_when_database_url_is_present() {
+    let Ok(database_url) = std::env::var("DATABASE_URL") else { return; };
+    let app = tokio::task::spawn_blocking(move || build_app(AppState::try_new(base_config(Some(database_url))).unwrap()))
+        .await
+        .unwrap();
+    assert_order_payment_activation_flow(app.clone(), "postgres").await;
+    std::mem::forget(app);
 }
 
 #[test]
