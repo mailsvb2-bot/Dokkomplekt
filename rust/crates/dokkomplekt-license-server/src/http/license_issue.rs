@@ -2,7 +2,7 @@ use crate::issuer::{issue_license, IssueLicenseInput};
 use crate::state::{AppState, OrderStatus};
 use crate::storage::{LicenseRecord, StoreError};
 use axum::{extract::{Path, State}, http::StatusCode, routing::post, Json, Router};
-use dokkomplekt_license_core::{models::PlanId, LicenseDocument};
+use dokkomplekt_license_core::models::{LicenseDocument, PlanId};
 use serde::Deserialize;
 use uuid::Uuid;
 
