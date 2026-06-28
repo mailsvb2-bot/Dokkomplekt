@@ -1,6 +1,7 @@
 use crate::state::{ActivationRecord, AppState, OrderStatus};
+use crate::storage::{LicenseStore, StoreError};
 use axum::{extract::{Path, State}, http::StatusCode, routing::{get, post}, Json, Router};
-use dokkomplekt_license_core::{evaluate_machine_activation, PlanId};
+use dokkomplekt_license_core::{max_machines_for_plan, PlanId};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -25,9 +26,8 @@ pub fn router() -> Router<AppState> {
 }
 
 async fn order_status(State(state): State<AppState>, Path(order_id): Path<Uuid>) -> Result<Json<ActivationResponse>, StatusCode> {
-    let store = state.store.read().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let order = store.orders.get(&order_id).ok_or(StatusCode::NOT_FOUND)?;
-    Ok(Json(ActivationResponse { activation_id: Uuid::nil(), order_id, status: order.status.clone(), message: "order status".to_string() }))
+    let order = state.store.get_order(order_id).map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(ActivationResponse { activation_id: Uuid::nil(), order_id, status: order.status, message: "order status".to_string() }))
 }
 
 async fn activate_machine(
@@ -39,29 +39,32 @@ async fn activate_machine(
     if machine_hash.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let mut store = state.store.write().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let order = store.orders.get(&order_id).ok_or(StatusCode::NOT_FOUND)?.clone();
+    let order = state.store.get_order(order_id).map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
     if !matches!(order.status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
         return Err(StatusCode::CONFLICT);
     }
     let plan = parse_plan(&order.plan).ok_or(StatusCode::BAD_REQUEST)?;
-    let active_count = store
-        .activations
-        .values()
-        .filter(|activation| activation.order_id == order_id)
-        .count() as u32;
-    let decision = evaluate_machine_activation(&plan, active_count, 1);
-    if !decision.allowed {
-        return Err(StatusCode::CONFLICT);
-    }
     let activation_id = Uuid::new_v4();
-    store.activations.insert(activation_id, ActivationRecord {
+    let record = ActivationRecord {
         id: activation_id,
         order_id,
         machine_hash: machine_hash.to_string(),
         created_at: OffsetDateTime::now_utc(),
-    });
-    Ok(Json(ActivationResponse { activation_id, order_id, status: order.status, message: decision.code.to_string() }))
+    };
+    let stored_order = state
+        .store
+        .create_activation_for_order(record, max_machines_for_plan(&plan))
+        .map_err(store_error_status)?;
+    Ok(Json(ActivationResponse { activation_id, order_id, status: stored_order.status, message: "slot_available".to_string() }))
+}
+
+fn store_error_status(error: StoreError) -> StatusCode {
+    match error {
+        StoreError::Conflict => StatusCode::CONFLICT,
+        StoreError::Invalid(_) => StatusCode::BAD_REQUEST,
+        StoreError::NotFound => StatusCode::NOT_FOUND,
+        StoreError::Poisoned => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }
 
 fn parse_plan(value: &str) -> Option<PlanId> {
