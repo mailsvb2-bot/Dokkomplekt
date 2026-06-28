@@ -1,17 +1,22 @@
 use crate::state::AppState;
-use axum::{routing::get, Json, Router};
+use axum::{extract::State, routing::get, Json, Router};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 struct HealthResponse {
     status: &'static str,
     service: &'static str,
+    storage_mode: String,
 }
 
 pub fn router() -> Router<AppState> {
     Router::new().route("/healthz", get(healthz))
 }
 
-async fn healthz() -> Json<HealthResponse> {
-    Json(HealthResponse { status: "ok", service: "dokkomplekt-license-server" })
+async fn healthz(State(state): State<AppState>) -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "ok",
+        service: "dokkomplekt-license-server",
+        storage_mode: state.config.storage_mode.clone(),
+    })
 }
