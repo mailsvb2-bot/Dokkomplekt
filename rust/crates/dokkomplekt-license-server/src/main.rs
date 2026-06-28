@@ -1,6 +1,8 @@
 mod config;
 mod http;
 mod issuer;
+#[path = "http/license_issue.rs"]
+mod license_issue;
 mod memory_store;
 mod provider_manual;
 mod provider_yookassa;
@@ -23,7 +25,7 @@ fn build_app(state: AppState) -> Router {
         .merge(http::health::router())
         .merge(http::orders::router())
         .merge(http::activations::router())
-        .merge(http::licenses::router())
+        .merge(license_issue::router())
         .merge(http::webhooks::router())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
