@@ -1,4 +1,5 @@
 use crate::config::ServerConfig;
+use crate::storage::PaymentEventRecord;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
@@ -21,6 +22,7 @@ impl AppState {
 pub struct MemoryStore {
     pub orders: BTreeMap<Uuid, OrderRecord>,
     pub activations: BTreeMap<Uuid, ActivationRecord>,
+    pub payment_events: BTreeMap<Uuid, PaymentEventRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
