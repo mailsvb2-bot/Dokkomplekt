@@ -15,7 +15,9 @@ pub struct ClockGuard {
 
 impl Default for ClockGuard {
     fn default() -> Self {
-        Self { rollback_tolerance_seconds: 48 * 60 * 60 }
+        Self {
+            rollback_tolerance_seconds: 48 * 60 * 60,
+        }
     }
 }
 
