@@ -7,6 +7,7 @@ struct HealthResponse {
     status: &'static str,
     service: &'static str,
     storage_mode: String,
+    database_configured: bool,
 }
 
 pub fn router() -> Router<AppState> {
@@ -18,5 +19,6 @@ async fn healthz(State(state): State<AppState>) -> Json<HealthResponse> {
         status: "ok",
         service: "dokkomplekt-license-server",
         storage_mode: state.config.storage_mode.clone(),
+        database_configured: state.config.database_url.is_some(),
     })
 }
