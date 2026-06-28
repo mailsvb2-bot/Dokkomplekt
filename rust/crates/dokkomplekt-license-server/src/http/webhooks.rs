@@ -33,7 +33,7 @@ async fn provider_callback(State(state): State<AppState>, Json(event): Json<Prov
     }
     let provider = normalize_callback_provider(event.provider.as_deref().unwrap_or("manual")).ok_or(StatusCode::BAD_REQUEST)?;
     let mut store = state.store.write().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if store.payment_events.values().any(|record| record.provider_event_id == event_id) {
+    if store.payment_events.values().any(|record| same_provider(&record.provider, &provider) && record.provider_event_id == event_id) {
         return Ok(Json(ProviderCallbackResponse { accepted: true, duplicate: true, order_id: event.order_id }));
     }
     let order = store.orders.get_mut(&event.order_id).ok_or(StatusCode::NOT_FOUND)?;
@@ -78,6 +78,16 @@ pub fn normalize_callback_provider(value: &str) -> Option<PaymentProvider> {
     }
 }
 
+pub fn same_provider(left: &PaymentProvider, right: &PaymentProvider) -> bool {
+    matches!(
+        (left, right),
+        (PaymentProvider::Manual, PaymentProvider::Manual)
+            | (PaymentProvider::YooKassa, PaymentProvider::YooKassa)
+            | (PaymentProvider::Sbp, PaymentProvider::Sbp)
+            | (PaymentProvider::BankInvoice, PaymentProvider::BankInvoice)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,5 +117,11 @@ mod tests {
     #[test]
     fn unknown_callback_provider_is_rejected() {
         assert!(normalize_callback_provider("unknown-pay").is_none());
+    }
+
+    #[test]
+    fn provider_identity_is_exact() {
+        assert!(same_provider(&PaymentProvider::YooKassa, &PaymentProvider::YooKassa));
+        assert!(!same_provider(&PaymentProvider::YooKassa, &PaymentProvider::Sbp));
     }
 }
