@@ -15,6 +15,7 @@ pub struct CreateOrderRequest {
 pub struct CreateOrderResponse {
     pub order_id: Uuid,
     pub status: OrderStatus,
+    pub provider: String,
     pub payment_url: String,
     pub qr_url: String,
 }
@@ -37,7 +38,43 @@ async fn create_order(State(state): State<AppState>, Json(request): Json<CreateO
         created_at: OffsetDateTime::now_utc(),
     };
     state.store.write().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.orders.insert(order_id, record.clone());
-    let payment_url = format!("{}/pay/{}", state.config.public_base_url, order_id);
-    let qr_url = format!("{}/api/orders/{}/qr", state.config.public_base_url, order_id);
-    Ok(Json(CreateOrderResponse { order_id, status: record.status, payment_url, qr_url }))
+    let provider = state.config.payment_provider.clone();
+    let payment_url = payment_url_for(&state.config.public_base_url, &provider, order_id);
+    let qr_url = qr_url_for(&state.config.public_base_url, &provider, order_id);
+    Ok(Json(CreateOrderResponse { order_id, status: record.status, provider, payment_url, qr_url }))
+}
+
+pub fn payment_url_for(base_url: &str, provider: &str, order_id: Uuid) -> String {
+    format!("{}/pay/{}/{}", base_url.trim_end_matches('/'), provider, order_id)
+}
+
+pub fn qr_url_for(base_url: &str, provider: &str, order_id: Uuid) -> String {
+    match provider {
+        "sbp" => format!("{}/api/orders/{}/qr", base_url.trim_end_matches('/'), order_id),
+        _ => "".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn yookassa_payment_url_uses_provider_namespace() {
+        let order_id = Uuid::nil();
+        assert_eq!(
+            payment_url_for("https://lic.example/", "yookassa", order_id),
+            "https://lic.example/pay/yookassa/00000000-0000-0000-0000-000000000000",
+        );
+    }
+
+    #[test]
+    fn sbp_gets_qr_url_and_manual_does_not() {
+        let order_id = Uuid::nil();
+        assert_eq!(
+            qr_url_for("https://lic.example", "sbp", order_id),
+            "https://lic.example/api/orders/00000000-0000-0000-0000-000000000000/qr",
+        );
+        assert_eq!(qr_url_for("https://lic.example", "manual", order_id), "");
+    }
 }
