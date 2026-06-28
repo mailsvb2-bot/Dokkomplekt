@@ -1,5 +1,6 @@
 use crate::config::ServerConfig;
-use crate::storage::{AuditEventRecord, LicenseRecord, LicenseStore, PaymentEventRecord};
+use crate::storage::{AuditEventRecord, LicenseRecord, PaymentEventRecord};
+use crate::storage_postgres::StoreBackend;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
@@ -9,16 +10,20 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct AppState {
     pub config: ServerConfig,
-    pub store: Arc<dyn LicenseStore>,
+    pub store: StoreBackend,
 }
 
 impl AppState {
     pub fn new(config: ServerConfig) -> Self {
-        Self::with_store(config, Arc::new(RwLock::new(MemoryStore::default())))
+        Self {
+            config,
+            store: StoreBackend::Memory(Arc::new(RwLock::new(MemoryStore::default()))),
+        }
     }
 
-    pub fn with_store(config: ServerConfig, store: Arc<dyn LicenseStore>) -> Self {
-        Self { config, store }
+    pub fn from_config(config: ServerConfig) -> anyhow::Result<Self> {
+        let store = StoreBackend::from_config(&config)?;
+        Ok(Self { config, store })
     }
 }
 
