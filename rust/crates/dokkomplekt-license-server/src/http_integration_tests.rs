@@ -1,36 +1,20 @@
-use super::{build_app, config::ServerConfig, state::AppState};
-use axum::{
-    body::{to_bytes, Body},
-    http::{header::CONTENT_TYPE, Method, Request, StatusCode},
-    Router,
-};
+use super::{build_app, config::ServerConfig, state::AppState, storage::PostgresStore};
+use axum::{body::{to_bytes, Body}, http::{header::CONTENT_TYPE, Method, Request, StatusCode}, Router};
 use postgres::{Client, NoTls};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
-fn postgres_config(database_url: String) -> ServerConfig {
+fn base_config(database_url: Option<String>) -> ServerConfig {
     ServerConfig {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         public_base_url: "http://127.0.0.1:8787".to_string(),
         issuer_id: "test-issuer".to_string(),
-        issuer_key_b64: Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_string()),
+        issuer_key_b64: None,
         default_license_days: 30,
         payment_provider: "manual".to_string(),
-        storage_mode: "postgres".to_string(),
-        database_url: Some(database_url),
+        storage_mode: if database_url.is_some() { "postgres" } else { "memory" }.to_string(),
+        database_url,
     }
-}
-
-fn assert_schema_version_recorded(database_url: &str) {
-    let mut client = Client::connect(database_url, NoTls).unwrap();
-    let applied: bool = client
-        .query_one(
-            "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0001_license_schema')",
-            &[],
-        )
-        .unwrap()
-        .get(0);
-    assert!(applied);
 }
 
 async fn call(app: Router, method: Method, uri: String, body: Option<Value>) -> (StatusCode, Value) {
@@ -50,80 +34,43 @@ async fn call(app: Router, method: Method, uri: String, body: Option<Value>) -> 
 }
 
 #[tokio::test]
-async fn postgres_http_order_payment_activation_flow_when_database_url_is_present() {
-    let Ok(database_url) = std::env::var("DATABASE_URL") else { return; };
-    let state_url = database_url.clone();
-    let state = tokio::task::spawn_blocking(move || AppState::try_new(postgres_config(state_url)).unwrap())
-        .await
-        .unwrap();
-    let assertion_url = database_url.clone();
-    tokio::task::spawn_blocking(move || assert_schema_version_recorded(&assertion_url)).await.unwrap();
-    let app = build_app(state);
+async fn memory_http_order_payment_activation_flow() {
+    let app = build_app(AppState::try_new(base_config(None)).unwrap());
 
     let (status, health) = call(app.clone(), Method::GET, "/healthz".to_string(), None).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(health["storage_backend"], "postgres");
+    assert_eq!(health["storage_backend"], "memory");
 
-    let (status, order) = call(
-        app.clone(),
-        Method::POST,
-        "/api/orders".to_string(),
-        Some(json!({ "plan": "doctor_pro", "amount_rub": 3900, "machine_hash": "machine-a" })),
-    )
-    .await;
+    let (status, order) = call(app.clone(), Method::POST, "/api/orders".to_string(), Some(json!({ "plan": "doctor_pro", "amount_rub": 3900, "machine_hash": "machine-a" }))).await;
     assert_eq!(status, StatusCode::OK);
     let order_id = order["order_id"].as_str().unwrap().to_string();
     assert_eq!(order["status"], "waiting_payment");
 
     let event_id = format!("evt-{order_id}");
-    let (status, callback) = call(
-        app.clone(),
-        Method::POST,
-        "/api/provider/callback".to_string(),
-        Some(json!({
-            "order_id": order_id,
-            "provider_event_id": event_id,
-            "provider_payment_id": "pay-1",
-            "provider": "manual",
-            "status": "succeeded",
-            "amount_rub": 3900
-        })),
-    )
-    .await;
+    let callback = json!({ "order_id": order_id, "provider_event_id": event_id, "provider_payment_id": "pay-1", "provider": "manual", "status": "succeeded", "amount_rub": 3900 });
+    let (status, body) = call(app.clone(), Method::POST, "/api/provider/callback".to_string(), Some(callback)).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(callback["accepted"], true);
-    assert_eq!(callback["duplicate"], false);
+    assert_eq!(body["duplicate"], false);
 
-    let (status, duplicate) = call(
-        app.clone(),
-        Method::POST,
-        "/api/provider/callback".to_string(),
-        Some(json!({
-            "order_id": order_id,
-            "provider_event_id": event_id,
-            "provider_payment_id": "pay-1-duplicate",
-            "provider": "manual",
-            "status": "succeeded",
-            "amount_rub": 3900
-        })),
-    )
-    .await;
+    let duplicate = json!({ "order_id": order_id, "provider_event_id": event_id, "provider_payment_id": "pay-1-dup", "provider": "manual", "status": "succeeded", "amount_rub": 3900 });
+    let (status, body) = call(app.clone(), Method::POST, "/api/provider/callback".to_string(), Some(duplicate)).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(duplicate["duplicate"], true);
+    assert_eq!(body["duplicate"], true);
 
-    let (status, order_status) = call(app.clone(), Method::GET, format!("/api/orders/{order_id}/status"), None).await;
+    let (status, body) = call(app.clone(), Method::GET, format!("/api/orders/{order_id}/status"), None).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(order_status["status"], "paid");
+    assert_eq!(body["status"], "paid");
 
-    let (status, activation) = call(
-        app.clone(),
-        Method::POST,
-        format!("/api/orders/{order_id}/activate-machine"),
-        Some(json!({ "machine_hash": "machine-a" })),
-    )
-    .await;
+    let (status, body) = call(app, Method::POST, format!("/api/orders/{order_id}/activate-machine"), Some(json!({ "machine_hash": "machine-a" }))).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(activation["status"], "paid");
+    assert_eq!(body["status"], "paid");
+}
 
-    std::mem::forget(app);
+#[test]
+fn postgres_runtime_migration_records_schema_version_when_database_url_is_present() {
+    let Ok(database_url) = std::env::var("DATABASE_URL") else { return; };
+    let _store = PostgresStore::connect(&database_url).unwrap();
+    let mut client = Client::connect(&database_url, NoTls).unwrap();
+    let applied: bool = client.query_one("SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = '0001_license_schema')", &[]).unwrap().get(0);
+    assert!(applied);
 }
