@@ -16,10 +16,6 @@ impl AppState {
         let store = StoreBackend::from_config(&config)?;
         Ok(Self { config, store })
     }
-
-    pub fn new(config: ServerConfig) -> Self {
-        Self::try_new(config).expect("license store backend must initialize")
-    }
 }
 
 #[derive(Debug, Default)]
