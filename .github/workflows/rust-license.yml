@@ -32,6 +32,8 @@ jobs:
     defaults:
       run:
         working-directory: rust
+    env:
+      DATABASE_URL: postgres://dokkomplekt:dokkomplekt@127.0.0.1:5432/dokkomplekt_license
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,8 +47,6 @@ jobs:
 
       - name: Validate PostgreSQL migration
         shell: bash
-        env:
-          DATABASE_URL: postgres://dokkomplekt:dokkomplekt@127.0.0.1:5432/dokkomplekt_license
         run: |
           bash tools/apply_postgres_migration.sh > postgres-migration.log 2>&1
           cat postgres-migration.log
