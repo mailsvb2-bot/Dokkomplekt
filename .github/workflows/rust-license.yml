@@ -45,6 +45,10 @@ jobs:
         with:
           components: clippy
 
+      - name: Validate storage boundary
+        shell: bash
+        run: bash tools/check_storage_boundary.sh
+
       - name: Validate PostgreSQL migration
         shell: bash
         run: |
