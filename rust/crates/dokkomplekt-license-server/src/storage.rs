@@ -273,8 +273,8 @@ impl LicenseStore for StoreBackend {
 
 fn issue_license_for_memory(store: &Arc<RwLock<MemoryStore>>, record: LicenseRecord) -> Result<LicenseIssueOutcome, StoreError> {
     let mut store = store.write().map_err(|_| StoreError::Poisoned)?;
-    let order = store.orders.get_mut(&record.order_id).ok_or(StoreError::NotFound)?;
-    if !matches!(order.status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
+    let status = store.orders.get(&record.order_id).ok_or(StoreError::NotFound)?.status.clone();
+    if !matches!(status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
         return Err(StoreError::Conflict);
     }
     if let Some(existing) = store.licenses.values().find(|license| license.order_id == record.order_id).cloned() {
@@ -285,6 +285,7 @@ fn issue_license_for_memory(store: &Arc<RwLock<MemoryStore>>, record: LicenseRec
     {
         return Err(StoreError::Conflict);
     }
+    let order = store.orders.get_mut(&record.order_id).ok_or(StoreError::NotFound)?;
     order.status = OrderStatus::LicenseIssued;
     store.licenses.insert(record.id, record.clone());
     Ok(LicenseIssueOutcome { record, reused: false })
