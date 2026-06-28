@@ -1,7 +1,6 @@
 use crate::state::AppState;
 use crate::storage::{
-    LicenseStore, PaymentEventRecord, PaymentEventStatus, PaymentEventWriteOutcome, PaymentProvider,
-    StoreError,
+    PaymentEventRecord, PaymentEventStatus, PaymentEventWriteOutcome, PaymentProvider, StoreError,
 };
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
@@ -46,7 +45,7 @@ async fn provider_callback(State(state): State<AppState>, Json(event): Json<Prov
         amount_rub: event.amount_rub,
         received_at: OffsetDateTime::now_utc(),
     };
-    let outcome = state.store.record_payment_event_for_order(record).map_err(store_error_status)?;
+    let outcome = state.store.record_payment_event_for_order_async(record).await.map_err(store_error_status)?;
     Ok(Json(ProviderCallbackResponse {
         accepted: true,
         duplicate: matches!(outcome, PaymentEventWriteOutcome::Duplicate),
