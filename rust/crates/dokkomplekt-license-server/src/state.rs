@@ -1,20 +1,24 @@
 use crate::config::ServerConfig;
-use crate::storage::{AuditEventRecord, LicenseRecord, PaymentEventRecord};
+use crate::storage::{AuditEventRecord, LicenseRecord, LicenseStore, PaymentEventRecord};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AppState {
     pub config: ServerConfig,
-    pub store: Arc<RwLock<MemoryStore>>,
+    pub store: Arc<dyn LicenseStore>,
 }
 
 impl AppState {
     pub fn new(config: ServerConfig) -> Self {
-        Self { config, store: Arc::new(RwLock::new(MemoryStore::default())) }
+        Self::with_store(config, Arc::new(RwLock::new(MemoryStore::default())))
+    }
+
+    pub fn with_store(config: ServerConfig, store: Arc<dyn LicenseStore>) -> Self {
+        Self { config, store }
     }
 }
 
