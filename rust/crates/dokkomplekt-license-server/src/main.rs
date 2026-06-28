@@ -1,6 +1,7 @@
 mod config;
 mod http;
 mod issuer;
+mod memory_store;
 mod provider_manual;
 mod provider_yookassa;
 mod providers;
