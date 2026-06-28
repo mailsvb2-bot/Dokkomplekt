@@ -5,6 +5,7 @@ use super::{
 use crate::state::{ActivationRecord, OrderRecord, OrderStatus};
 use postgres::error::SqlState;
 use postgres::{Client, GenericClient, NoTls, Row};
+use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use uuid::Uuid;
@@ -21,11 +22,12 @@ struct PostgresPool {
 
 impl PostgresStore {
     pub fn connect(database_url: &str) -> anyhow::Result<Self> {
-        let mut clients = Vec::with_capacity(POSTGRES_POOL_SIZE);
+        let pool_size = configured_pool_size();
+        let mut clients = Vec::with_capacity(pool_size);
         let mut bootstrap_client = Client::connect(database_url, NoTls)?;
         apply_migrations(&mut bootstrap_client)?;
         clients.push(Mutex::new(bootstrap_client));
-        for _ in 1..POSTGRES_POOL_SIZE {
+        for _ in 1..pool_size {
             clients.push(Mutex::new(Client::connect(database_url, NoTls)?));
         }
         Ok(Self { pool: Arc::new(PostgresPool { clients, next: AtomicUsize::new(0) }) })
@@ -33,6 +35,12 @@ impl PostgresStore {
 
     pub fn pool_size(&self) -> usize {
         self.pool.clients.len()
+    }
+
+    pub fn check_ready(&self) -> Result<(), StoreError> {
+        let mut client = self.client()?;
+        let value: i32 = client.query_one("SELECT 1", &[]).map_err(pg_err)?.get(0);
+        if value == 1 { Ok(()) } else { Err(StoreError::Invalid("postgres_readiness_failed".to_string())) }
     }
 
     fn client(&self) -> Result<MutexGuard<'_, Client>, StoreError> {
@@ -169,19 +177,50 @@ fn apply_migrations(client: &mut Client) -> anyhow::Result<()> {
 
 fn apply_migrations_locked(client: &mut Client) -> anyhow::Result<()> {
     client.batch_execute(MIGRATION_LEDGER_SCHEMA)?;
-    let already_applied: bool = client.query_one(
-        "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)",
+    client.batch_execute(MIGRATION_LEDGER_CHECKSUM_COLUMN)?;
+    let checksum = schema_checksum();
+    let existing = client.query_opt(
+        "SELECT checksum FROM schema_migrations WHERE version = $1",
         &[&SCHEMA_VERSION],
-    )?.get(0);
-    if already_applied {
-        return Ok(());
+    )?;
+    if let Some(row) = existing {
+        let stored_checksum: Option<String> = row.get(0);
+        match stored_checksum.as_deref() {
+            Some(value) if value == checksum => return Ok(()),
+            Some(value) => anyhow::bail!(
+                "migration checksum mismatch for {SCHEMA_VERSION}: stored {value}, expected {checksum}"
+            ),
+            None => {
+                client.execute(
+                    "UPDATE schema_migrations SET checksum = $2 WHERE version = $1",
+                    &[&SCHEMA_VERSION, &checksum],
+                )?;
+                return Ok(());
+            }
+        }
     }
     client.batch_execute(SCHEMA_V1)?;
     client.execute(
-        "INSERT INTO schema_migrations (version, applied_at) VALUES ($1, NOW()) ON CONFLICT (version) DO NOTHING",
-        &[&SCHEMA_VERSION],
+        "INSERT INTO schema_migrations (version, checksum, applied_at) VALUES ($1, $2, NOW())",
+        &[&SCHEMA_VERSION, &checksum],
     )?;
     Ok(())
+}
+
+fn schema_checksum() -> String {
+    let digest = Sha256::digest(SCHEMA_V1.as_bytes());
+    hex::encode(digest)
+}
+
+fn configured_pool_size() -> usize {
+    configured_pool_size_from(std::env::var(POSTGRES_POOL_SIZE_ENV).ok().as_deref())
+}
+
+fn configured_pool_size_from(value: Option<&str>) -> usize {
+    value
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .unwrap_or(DEFAULT_POSTGRES_POOL_SIZE)
+        .clamp(MIN_POSTGRES_POOL_SIZE, MAX_POSTGRES_POOL_SIZE)
 }
 
 fn insert_payment_event(client: &mut impl GenericClient, record: &PaymentEventRecord) -> Result<(), StoreError> {
@@ -268,8 +307,35 @@ fn pg_err(error: postgres::Error) -> StoreError {
     StoreError::Invalid(error.to_string())
 }
 
-const POSTGRES_POOL_SIZE: usize = 4;
+const POSTGRES_POOL_SIZE_ENV: &str = "DKK_LICENSE_POSTGRES_POOL_SIZE";
+const DEFAULT_POSTGRES_POOL_SIZE: usize = 4;
+const MIN_POSTGRES_POOL_SIZE: usize = 1;
+const MAX_POSTGRES_POOL_SIZE: usize = 16;
 const SCHEMA_VERSION: &str = "0001_license_schema";
 const MIGRATION_LOCK_ID: i64 = 4_207_301_001;
-const MIGRATION_LEDGER_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL);";
+const MIGRATION_LEDGER_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, checksum TEXT, applied_at TIMESTAMPTZ NOT NULL);";
+const MIGRATION_LEDGER_CHECKSUM_COLUMN: &str = "ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum TEXT;";
 const SCHEMA_V1: &str = include_str!("../../migrations/0001_license_schema.sql");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_pool_size_uses_default_and_clamps_bounds() {
+        assert_eq!(configured_pool_size_from(None), DEFAULT_POSTGRES_POOL_SIZE);
+        assert_eq!(configured_pool_size_from(Some("")), DEFAULT_POSTGRES_POOL_SIZE);
+        assert_eq!(configured_pool_size_from(Some("invalid")), DEFAULT_POSTGRES_POOL_SIZE);
+        assert_eq!(configured_pool_size_from(Some("0")), MIN_POSTGRES_POOL_SIZE);
+        assert_eq!(configured_pool_size_from(Some("1")), MIN_POSTGRES_POOL_SIZE);
+        assert_eq!(configured_pool_size_from(Some("4")), 4);
+        assert_eq!(configured_pool_size_from(Some("64")), MAX_POSTGRES_POOL_SIZE);
+    }
+
+    #[test]
+    fn migration_checksum_is_hex_sha256() {
+        let checksum = schema_checksum();
+        assert_eq!(checksum.len(), 64);
+        assert!(checksum.chars().all(|value| value.is_ascii_hexdigit()));
+    }
+}
