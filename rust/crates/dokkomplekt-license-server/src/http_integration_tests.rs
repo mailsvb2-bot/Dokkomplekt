@@ -125,5 +125,5 @@ async fn postgres_http_order_payment_activation_flow_when_database_url_is_presen
     assert_eq!(status, StatusCode::OK);
     assert_eq!(activation["status"], "paid");
 
-    tokio::task::spawn_blocking(move || drop(app)).await.unwrap();
+    std::mem::forget(app);
 }
