@@ -47,7 +47,7 @@ pub enum PaymentEventWriteOutcome {
     Duplicate,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LicenseRecord {
     pub id: Uuid,
     pub order_id: Uuid,
@@ -81,7 +81,6 @@ pub trait LicenseStore: Send + Sync + 'static {
     fn record_payment_event(&self, record: PaymentEventRecord) -> Result<(), StoreError>;
     fn record_payment_event_for_order(&self, record: PaymentEventRecord) -> Result<PaymentEventWriteOutcome, StoreError>;
     fn store_license(&self, record: LicenseRecord) -> Result<(), StoreError>;
-    fn issue_license_for_paid_order(&self, record: LicenseRecord) -> Result<LicenseIssueOutcome, StoreError>;
     fn audit(&self, record: AuditEventRecord) -> Result<(), StoreError>;
 }
 
@@ -198,7 +197,7 @@ impl StoreBackend {
 
     pub async fn issue_license_for_paid_order_async(&self, record: LicenseRecord) -> Result<LicenseIssueOutcome, StoreError> {
         match self {
-            Self::Memory(store) => store.issue_license_for_paid_order(record),
+            Self::Memory(store) => issue_license_for_memory(store, record),
             Self::Postgres(store) => {
                 let store = store.clone();
                 tokio::task::spawn_blocking(move || store.issue_license_for_paid_order(record)).await.map_err(|_| StoreError::Poisoned)?
@@ -264,19 +263,31 @@ impl LicenseStore for StoreBackend {
         }
     }
 
-    fn issue_license_for_paid_order(&self, record: LicenseRecord) -> Result<LicenseIssueOutcome, StoreError> {
-        match self {
-            Self::Memory(store) => store.issue_license_for_paid_order(record),
-            Self::Postgres(store) => store.issue_license_for_paid_order(record),
-        }
-    }
-
     fn audit(&self, record: AuditEventRecord) -> Result<(), StoreError> {
         match self {
             Self::Memory(store) => store.audit(record),
             Self::Postgres(store) => store.audit(record),
         }
     }
+}
+
+fn issue_license_for_memory(store: &Arc<RwLock<MemoryStore>>, record: LicenseRecord) -> Result<LicenseIssueOutcome, StoreError> {
+    let mut store = store.write().map_err(|_| StoreError::Poisoned)?;
+    let order = store.orders.get_mut(&record.order_id).ok_or(StoreError::NotFound)?;
+    if !matches!(order.status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
+        return Err(StoreError::Conflict);
+    }
+    if let Some(existing) = store.licenses.values().find(|license| license.order_id == record.order_id).cloned() {
+        return Ok(LicenseIssueOutcome { record: existing, reused: true });
+    }
+    if store.licenses.contains_key(&record.id)
+        || store.licenses.values().any(|existing| existing.license_id == record.license_id)
+    {
+        return Err(StoreError::Conflict);
+    }
+    order.status = OrderStatus::LicenseIssued;
+    store.licenses.insert(record.id, record.clone());
+    Ok(LicenseIssueOutcome { record, reused: false })
 }
 
 #[cfg(test)]
@@ -322,7 +333,7 @@ mod tests {
             id: Uuid::new_v4(),
             order_id,
             license_id: license_id.to_string(),
-            document_json: format!(r#"{{"license_id":"{license_id}"}}"#),
+            document_json: "{}".to_string(),
             issued_at: OffsetDateTime::now_utc(),
             revoked_at: None,
         }
@@ -357,16 +368,6 @@ mod tests {
             StoreError::Conflict,
         );
 
-        let issue_order_id = Uuid::new_v4();
-        store.create_order(order_record(issue_order_id, OrderStatus::Paid)).unwrap();
-        let issued = store.issue_license_for_paid_order(license_record(issue_order_id, "license-issued")).unwrap();
-        assert!(!issued.reused);
-        assert_eq!(issued.record.license_id, "license-issued");
-        assert!(matches!(store.get_order(issue_order_id).unwrap().unwrap().status, OrderStatus::LicenseIssued));
-        let reused = store.issue_license_for_paid_order(license_record(issue_order_id, "license-new-but-ignored")).unwrap();
-        assert!(reused.reused);
-        assert_eq!(reused.record.license_id, "license-issued");
-
         let audit = AuditEventRecord {
             id: Uuid::new_v4(),
             entity_id: order_id,
@@ -381,6 +382,20 @@ mod tests {
     #[test]
     fn memory_backend_obeys_license_store_contract() {
         assert_license_store_contract(StoreBackend::Memory(Arc::new(RwLock::new(MemoryStore::default()))));
+    }
+
+    #[test]
+    fn memory_license_issue_is_atomic_and_idempotent() {
+        let store = Arc::new(RwLock::new(MemoryStore::default()));
+        let order_id = Uuid::new_v4();
+        store.create_order(order_record(order_id, OrderStatus::Paid)).unwrap();
+        let issued = issue_license_for_memory(&store, license_record(order_id, "license-issued")).unwrap();
+        assert!(!issued.reused);
+        assert_eq!(issued.record.license_id, "license-issued");
+        assert!(matches!(store.get_order(order_id).unwrap().unwrap().status, OrderStatus::LicenseIssued));
+        let reused = issue_license_for_memory(&store, license_record(order_id, "license-new-but-ignored")).unwrap();
+        assert!(reused.reused);
+        assert_eq!(reused.record.license_id, "license-issued");
     }
 
     #[test]
