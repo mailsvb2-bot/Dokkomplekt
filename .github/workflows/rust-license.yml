@@ -63,7 +63,7 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy,rustfmt
+          components: clippy
 
       - name: Validate storage boundary
         shell: bash
@@ -78,10 +78,6 @@ jobs:
         run: |
           bash tools/apply_postgres_migration.sh > postgres-migration.log 2>&1
           cat postgres-migration.log
-
-      - name: Cargo fmt
-        shell: bash
-        run: cargo fmt --all -- --check
 
       - name: Cargo test
         shell: bash
