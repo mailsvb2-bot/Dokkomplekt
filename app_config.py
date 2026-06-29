@@ -1,40 +1,36 @@
 from __future__ import annotations
 
-APP_TITLE = "Медицинский автозаполнитель"
+APP_TITLE = "Dokkomplekt"
 APP_VERSION = "v1.4.89_release_gate_runtime_isolation_SOURCE"
 
-# Цветовая схема точно по референсу: глубокий navy-midnight, cyan-акцент, card-стиль блоков.
-BG = "#07111d"
-BG_2 = "#050d18"
-PANEL = "#071827"      # фон карточек секций (блоки 01-04)
-PANEL_2 = "#0a1b2b"   # фон элементов внутри карточек (чекбоксы)
-PANEL_3 = "#0c2b47"   # кнопки «Выбрать», активные состояния
-SECTION_SIDE = "#071626"  # левая боковая колонка
-SECTION_SIDE_2 = "#09243a"
-BORDER = "#126493"
-BORDER_SOFT = "#153e5f"
-BORDER_FAINT = "#15314a"
-ACCENT = "#5bd0ff"    # cyan-blue из референса
-ACCENT_2 = "#08a7df"  # кнопка «печать» — ярче
-ACCENT_3 = "#94bdd7"
-TEXT = "#e8f4ff"
-MUTED = "#92a8bc"
-MUTED_2 = "#5e7a91"
-WARN = "#ffd166"
-ERROR = "#ff7a9c"
-SUCCESS = "#6fd4a8"
-SAVE_ACCENT = "#0f3354"   # тёмная кнопка «сохранить без печати»
-SAVE_ACCENT_ACTIVE = "#173f66"
-PRINT_ACCENT = "#1096cc"  # синяя кнопка «печатать»
-PRINT_ACCENT_ACTIVE = "#18a8dd"
-FIELD = "#06101b"     # поля ввода — очень тёмные
-FIELD_BORDER = "#193a56"
-GLOW = "#39c9ff"
-DEEP = "#030912"      # самый тёмный — фон окна и шапка
+BG = "#f3f6fb"
+BG_2 = "#edf2f8"
+PANEL = "#ffffff"
+PANEL_2 = "#f7faff"
+PANEL_3 = "#eef5ff"
+SECTION_SIDE = "#f8fbff"
+SECTION_SIDE_2 = "#eef5ff"
+BORDER = "#d8e2ef"
+BORDER_SOFT = "#e4ebf5"
+BORDER_FAINT = "#edf2f8"
+ACCENT = "#2f73e8"
+ACCENT_2 = "#2f73e8"
+ACCENT_3 = "#8aa4c8"
+TEXT = "#172033"
+MUTED = "#667085"
+MUTED_2 = "#8a94a6"
+WARN = "#b7791f"
+ERROR = "#c2415d"
+SUCCESS = "#14804a"
+SAVE_ACCENT = "#2f73e8"
+SAVE_ACCENT_ACTIVE = "#1f5fd0"
+PRINT_ACCENT = "#2f73e8"
+PRINT_ACCENT_ACTIVE = "#1f5fd0"
+FIELD = "#f8fbff"
+FIELD_BORDER = "#d6e1ee"
+GLOW = "#6aa2ff"
+DEEP = "#ffffff"
 
-# Backwards-compatible re-export facade for UI modules and old smoke scripts.
-# Domain modules must import these constants from diary_constants/medical_constants
-# directly; architecture_contracts.py enforces that app_config stays UI-facing.
 from diary_constants import (
     DIARY_KIND,
     DIARY_LABEL,
