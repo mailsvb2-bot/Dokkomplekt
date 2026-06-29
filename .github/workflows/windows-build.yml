@@ -47,7 +47,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          python -m pytest tests --cov=medical_parser --cov=universal_scanner --cov=diary_template_discovery --cov=icd10_f_search --cov=error_taxonomy --cov=doctor_action_journal --cov-report=term-missing --cov-report=xml --cov-fail-under=50 > python-headless-tests.log 2>&1
+          python -m pytest tests --cov=medical_parser --cov=universal_scanner --cov=diary_template_discovery --cov=icd10_f_search --cov=error_taxonomy --cov=doctor_action_journal --cov=product_access --cov=product_access_native --cov-report=term-missing --cov-report=xml --cov-fail-under=50 > python-headless-tests.log 2>&1
           code=$?
           tail -160 python-headless-tests.log
           exit $code
@@ -179,22 +179,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: python-production-audit-logs
-          path: python-production-audit.log
-          if-no-files-found: ignore
-
-      - name: Upload release gate logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-gate-logs
-          path: ${{ runner.temp }}/release-gate.log
-          if-no-files-found: ignore
-
-      - name: Upload packaged native verifier logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: packaged-native-verifier-logs
-          path: packaged-native-verifier.log
+          name: production-audit-logs
+          path: |
+            python-production-audit.log
+            packaged-native-verifier.log
           if-no-files-found: ignore
