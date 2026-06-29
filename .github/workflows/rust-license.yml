@@ -1,20 +1,40 @@
 name: Rust License Workspace
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - "rust/**"
+      - "product_access/**"
+      - "product_access_native/**"
+      - "tests/test_product_licensing_contract.py"
+      - "tests/test_product_access_hardening.py"
       - ".github/workflows/rust-license.yml"
   push:
     branches:
+      - main
       - rust-license-core-and-server
+      - product-licensing-roadmap-implementation
+      - "codex/**"
     paths:
       - "rust/**"
+      - "product_access/**"
+      - "product_access_native/**"
+      - "tests/test_product_licensing_contract.py"
+      - "tests/test_product_access_hardening.py"
       - ".github/workflows/rust-license.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-license-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   rust-license:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -43,7 +63,7 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy,rustfmt
 
       - name: Validate storage boundary
         shell: bash
@@ -58,6 +78,10 @@ jobs:
         run: |
           bash tools/apply_postgres_migration.sh > postgres-migration.log 2>&1
           cat postgres-migration.log
+
+      - name: Cargo fmt
+        shell: bash
+        run: cargo fmt --all -- --check
 
       - name: Cargo test
         shell: bash
