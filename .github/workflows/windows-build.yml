@@ -44,7 +44,13 @@ jobs:
         run: python -m mypy --config-file pyproject.toml
 
       - name: Run headless unit tests with coverage
-        run: python -m pytest tests --cov=medical_parser --cov=universal_scanner --cov=diary_template_discovery --cov=icd10_f_search --cov=error_taxonomy --cov=doctor_action_journal --cov-report=term-missing --cov-report=xml --cov-fail-under=50
+        shell: bash
+        run: |
+          set +e
+          python -m pytest tests --cov=medical_parser --cov=universal_scanner --cov=diary_template_discovery --cov=icd10_f_search --cov=error_taxonomy --cov=doctor_action_journal --cov-report=term-missing --cov-report=xml --cov-fail-under=50 > python-headless-tests.log 2>&1
+          code=$?
+          tail -160 python-headless-tests.log
+          exit $code
 
       - name: Run strict regression contour
         run: python tools/run_regression_contour.py
@@ -55,6 +61,14 @@ jobs:
           name: MedicalDiaryAutofill-coverage-xml
           path: coverage.xml
           if-no-files-found: error
+
+      - name: Upload Python headless logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-headless-logs
+          path: python-headless-tests.log
+          if-no-files-found: ignore
 
   build:
     runs-on: windows-latest
@@ -73,6 +87,9 @@ jobs:
             requirements*.txt
             pyproject.toml
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install build and gate dependencies
         run: |
           python -m pip install --upgrade pip
@@ -82,7 +99,12 @@ jobs:
         run: python project_auditor.py . --ci --quiet
 
       - name: Run production audit
-        run: python prod_audit.py
+        shell: pwsh
+        run: |
+          python prod_audit.py *> python-production-audit.log
+          $code=$LASTEXITCODE
+          Get-Content python-production-audit.log -Tail 160
+          exit $code
 
       - name: Run strict regression contour
         run: python tools/run_regression_contour.py
@@ -105,13 +127,36 @@ jobs:
           python smoke_full_patient_replay.py
 
       - name: Run release gate
-        run: python release_check.py
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP "release-gate.log"
+          python release_check.py *> $log
+          $code=$LASTEXITCODE
+          Get-Content $log -Tail 160
+          exit $code
+
+      - name: Prebuild native license verifier for EXE
+        shell: pwsh
+        run: |
+          python -m venv .venv_build
+          .\.venv_build\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv_build\Scripts\python.exe -m pip install -r requirements_build.txt
+          .\.venv_build\Scripts\python.exe -m pip install .\rust\crates\dokkomplekt-license-python
+          .\.venv_build\Scripts\python.exe -c "import dokkomplekt_license_native as n; print(n.native_core_version())"
 
       - name: Build EXE
         shell: cmd
         env:
           MEDICAL_AUTOFILL_SKIP_BUILD_PRECHECKS: '1'
         run: build_exe_windows.bat
+
+      - name: Smoke packaged EXE native verifier
+        shell: pwsh
+        run: |
+          & .\dist\MedicalDiaryAutofill.exe --check-native-license-core *> packaged-native-verifier.log
+          $code=$LASTEXITCODE
+          Get-Content packaged-native-verifier.log
+          exit $code
 
       - name: Build clean source archive
         run: python make_release_zip.py
@@ -129,3 +174,27 @@ jobs:
           name: MedicalDiaryAutofill-Production-Source
           path: release/MedicalDiaryAutofill_PRODUCTION_SOURCE.zip
           if-no-files-found: error
+
+      - name: Upload production audit logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-production-audit-logs
+          path: python-production-audit.log
+          if-no-files-found: ignore
+
+      - name: Upload release gate logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-logs
+          path: ${{ runner.temp }}/release-gate.log
+          if-no-files-found: ignore
+
+      - name: Upload packaged native verifier logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-native-verifier-logs
+          path: packaged-native-verifier.log
+          if-no-files-found: ignore

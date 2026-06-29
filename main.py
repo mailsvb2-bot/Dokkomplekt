@@ -8,6 +8,7 @@ numbered diary-template discovery, drag-and-drop, and creation actions.
 
 from __future__ import annotations
 
+import json
 import sys
 import traceback
 
@@ -26,10 +27,42 @@ def __getattr__(name: str):
         raise AttributeError(name) from exc
 
 
+def _check_native_license_core() -> int:
+    """CLI/EXE diagnostic that stays GUI-free and checks packaged Rust verifier."""
+    result = {
+        "check": "native_license_core",
+        "module": "dokkomplekt_license_native",
+        "ok": False,
+        "version": None,
+        "functions": {},
+        "error": None,
+    }
+    try:
+        import dokkomplekt_license_native as native
+
+        version = native.native_core_version()
+        functions = {
+            "native_core_version": callable(getattr(native, "native_core_version", None)),
+            "license_plan": callable(getattr(native, "license_plan", None)),
+            "proof_ok": callable(getattr(native, "proof_ok", None)),
+            "access_decision": callable(getattr(native, "access_decision", None)),
+        }
+        result["version"] = str(version)
+        result["functions"] = functions
+        result["ok"] = version == "0.1.0" and all(functions.values())
+    except Exception as exc:  # pragma: no cover - used by packaged EXE smoke
+        result["error"] = repr(exc)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
 def main() -> None:
-    # Background mode must stay GUI-free: check it before importing Tk/app.
-    # This keeps Windows autostart lighter and avoids hidden GUI dependency
-    # failures when the watcher is launched by pythonw.exe or the packaged EXE.
+    # Background and diagnostic modes must stay GUI-free: check them before importing Tk/app.
+    # This keeps Windows autostart lighter and avoids hidden GUI dependency failures when
+    # launched by pythonw.exe or the packaged EXE.
+    if "--check-native-license-core" in sys.argv:
+        raise SystemExit(_check_native_license_core())
+
     if "--install-intake-agent" in sys.argv:
         from desktop_intake_agent import install_agent_autostart
 

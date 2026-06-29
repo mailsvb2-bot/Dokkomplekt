@@ -1,0 +1,4 @@
+-- Deprecated placeholder.
+--
+-- The canonical license server schema is 0001_license_schema.sql.
+-- Keep this file table-free so CI and runtime cannot drift onto a second schema.

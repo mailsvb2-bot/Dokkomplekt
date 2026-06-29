@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/dokkomplekt-license-core",
+    "crates/dokkomplekt-license-server",
+    "crates/dokkomplekt-license-python",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+rust-version = "1.78"
+
+[workspace.dependencies]
+anyhow = "1"
+axum = "0.7"
+base64 = "0.22"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+hex = "0.4"
+postgres = { version = "0.19", features = ["with-time-0_3", "with-uuid-1"] }
+pyo3 = { version = "0.22", features = ["extension-module"] }
+rand_core = "0.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+time = { version = "0.3", features = ["formatting", "macros", "parsing", "serde", "serde-well-known"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["v4", "serde"] }
