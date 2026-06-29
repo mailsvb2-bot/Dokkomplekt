@@ -19,6 +19,8 @@ from diagnosis_widget import DiagnosisWidgetMixin
 from ui_file_rows import UiFileRowsMixin
 from diary_template_discovery import DiaryTemplateDiscoveryMixin
 from diary_template_selection import DiaryTemplateSelectionMixin
+from product_access import ProductAccessMixin, ProductLicenseMixin
+from product_access_native import NativeProductAccessMixin
 
 
 class WidgetsMixin(UiCardsMixin, UiIconsMixin, UiButtonsMixin, UiFieldsMixin, DiagnosisWidgetMixin, UiFileRowsMixin):
@@ -29,6 +31,21 @@ class DiaryTemplateMixin(DiaryTemplateDiscoveryMixin, DiaryTemplateSelectionMixi
     """Aggregates diary-template discovery/selection without an extra shim module."""
 
 
-class CombinedMedicalDiaryApp(AppInitializationMixin, SettingsMixin, DesktopIntakeMixin, WindowMixin, LayoutMixin, DialogsMixin, WidgetsMixin, FilesMixin, DiaryTemplateMixin, DragDropMixin, ActionsMixin):
+class CombinedMedicalDiaryApp(
+    NativeProductAccessMixin,
+    ProductAccessMixin,
+    ProductLicenseMixin,
+    AppInitializationMixin,
+    SettingsMixin,
+    DesktopIntakeMixin,
+    WindowMixin,
+    LayoutMixin,
+    DialogsMixin,
+    WidgetsMixin,
+    FilesMixin,
+    DiaryTemplateMixin,
+    DragDropMixin,
+    ActionsMixin,
+):
     def __init__(self, root: tk.Tk):
         self._initialize_app(root)

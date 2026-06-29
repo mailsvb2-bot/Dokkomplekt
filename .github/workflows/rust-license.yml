@@ -1,0 +1,89 @@
+name: Rust License Workspace
+
+on:
+  pull_request:
+    paths:
+      - "rust/**"
+      - ".github/workflows/rust-license.yml"
+  push:
+    branches:
+      - rust-license-core-and-server
+    paths:
+      - "rust/**"
+      - ".github/workflows/rust-license.yml"
+
+jobs:
+  rust-license:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dokkomplekt
+          POSTGRES_PASSWORD: dokkomplekt
+          POSTGRES_DB: dokkomplekt_license
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: rust
+    env:
+      DATABASE_URL: postgres://dokkomplekt:dokkomplekt@127.0.0.1:5432/dokkomplekt_license
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          show-progress: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Validate storage boundary
+        shell: bash
+        run: bash tools/check_storage_boundary.sh
+
+      - name: Validate HTTP async storage boundary
+        shell: bash
+        run: bash tools/check_http_storage_async_boundary.sh
+
+      - name: Validate PostgreSQL migration
+        shell: bash
+        run: |
+          bash tools/apply_postgres_migration.sh > postgres-migration.log 2>&1
+          cat postgres-migration.log
+
+      - name: Cargo test
+        shell: bash
+        run: |
+          set +e
+          cargo test --workspace > rust-test.log 2>&1
+          code=$?
+          tail -160 rust-test.log
+          exit $code
+
+      - name: Cargo clippy
+        shell: bash
+        run: |
+          set +e
+          cargo clippy --workspace --all-targets -- -D warnings > rust-clippy.log 2>&1
+          code=$?
+          tail -160 rust-clippy.log
+          exit $code
+
+      - name: Upload Rust CI logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-ci-logs
+          path: |
+            rust/postgres-migration.log
+            rust/rust-test.log
+            rust/rust-clippy.log
+          if-no-files-found: ignore
