@@ -33,6 +33,17 @@ async fn call(app: Router, method: Method, uri: String, body: Option<Value>) -> 
     (status, body)
 }
 
+async fn create_paid_order(app: Router, machine_hash: &str) -> String {
+    let (status, order) = call(app.clone(), Method::POST, "/api/orders".to_string(), Some(json!({ "plan": "doctor_pro", "amount_rub": 3900, "machine_hash": machine_hash }))).await;
+    assert_eq!(status, StatusCode::OK);
+    let order_id = order["order_id"].as_str().unwrap().to_string();
+    let event_id = format!("evt-{order_id}");
+    let callback = json!({ "order_id": order_id, "provider_event_id": event_id, "provider_payment_id": "pay-1", "provider": "manual", "status": "succeeded", "amount_rub": 3900 });
+    let (status, _) = call(app, Method::POST, "/api/provider/callback".to_string(), Some(callback)).await;
+    assert_eq!(status, StatusCode::OK);
+    order_id
+}
+
 async fn assert_order_payment_activation_flow(app: Router, expected_backend: &str, expected_database_connected: bool) {
     let (status, health) = call(app.clone(), Method::GET, "/healthz".to_string(), None).await;
     assert_eq!(status, StatusCode::OK);
@@ -68,6 +79,40 @@ async fn assert_order_payment_activation_flow(app: Router, expected_backend: &st
 async fn memory_http_order_payment_activation_flow() {
     let app = build_app(AppState::try_new(base_config(None)).unwrap());
     assert_order_payment_activation_flow(app, "memory", false).await;
+}
+
+#[tokio::test]
+async fn memory_readyz_is_not_ready_without_database() {
+    let app = build_app(AppState::try_new(base_config(None)).unwrap());
+    let (status, body) = call(app, Method::GET, "/readyz".to_string(), None).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["storage_backend"], "memory");
+}
+
+#[tokio::test]
+async fn order_rejects_client_side_price_forgery() {
+    let app = build_app(AppState::try_new(base_config(None)).unwrap());
+    let (status, _) = call(app, Method::POST, "/api/orders".to_string(), Some(json!({ "plan": "doctor_pro", "amount_rub": 1, "machine_hash": "machine-a" }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn unimplemented_external_provider_callback_is_rejected() {
+    let app = build_app(AppState::try_new(base_config(None)).unwrap());
+    let (status, order) = call(app.clone(), Method::POST, "/api/orders".to_string(), Some(json!({ "plan": "doctor_pro", "amount_rub": 3900, "machine_hash": "machine-a" }))).await;
+    assert_eq!(status, StatusCode::OK);
+    let order_id = order["order_id"].as_str().unwrap().to_string();
+    let callback = json!({ "order_id": order_id, "provider_event_id": "fake-yoo", "provider_payment_id": "fake-pay", "provider": "yookassa", "status": "succeeded", "amount_rub": 3900 });
+    let (status, _) = call(app, Method::POST, "/api/provider/callback".to_string(), Some(callback)).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+}
+
+#[tokio::test]
+async fn license_issue_rejects_different_machine_hash() {
+    let app = build_app(AppState::try_new(base_config(None)).unwrap());
+    let order_id = create_paid_order(app.clone(), "machine-a").await;
+    let (status, _) = call(app, Method::POST, format!("/api/orders/{order_id}/license"), Some(json!({ "machine_hash": "machine-b" }))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
 }
 
 #[tokio::test]
