@@ -16,5 +16,10 @@ class LegacyWordFileMixin:
             if path:
                 messagebox.showwarning("Word file required", "Choose DOC, DOCX or DOCM.")
             return
+        try:
+            from files_mixin import PRIMARY_DOCUMENT_SUFFIXES
+            PRIMARY_DOCUMENT_SUFFIXES.update(SUPPORTED_WORD_SUFFIXES)
+        except Exception:
+            pass
         path = sync_selected_primary_document_path(self, candidate)
         super()._apply_primary_document_path(path, prompt_for_referral=prompt_for_referral)
