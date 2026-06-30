@@ -11,28 +11,29 @@ class ActionsDiaryFlowMixin:
     def _create_diaries_impl(self):
         """Create the doctor-selected diary output for the current patient case.
 
-        The current production contract prefers text diaries over table-only
-        output: selected diary text files become dated paragraphs, while legacy
-        table settings stay available for compatibility inside ``fill_diary_batch``.
-        The UI path still reuses one patient source of truth for admission date,
-        gender adaptation and optional sick-leave dynamic epicrisis entries.
+        The production diary contract is ``Тексты + Даты``.  Doctor-owned text
+        files provide the diary wording and doctor-owned date/table templates
+        provide the document shape and date principle.  Plain text diary output is
+        kept only as a fallback when no date/table template is available.
         """
         primary_path = selected_primary_document_path(self)
         diary_admission_value = self._sync_admission_date_from_title(force=True)
         if primary_path is not None and not diary_admission_value:
             raise ValueError("Не удалось найти дату поступления в первичном документе.")
-        text_output = True
-        self._diary_text_output_enabled = True
         if not self.status_files:
             self._auto_select_diary_text_by_diagnosis(ask_folder=False)
         if not self.status_files:
             self.choose_status_files()
         if not self.status_files:
             raise ValueError("Выберите файл(ы) с текстами дневников. Тексты можно выбирать из DOCX/DOCM/DOC.")
+        if not getattr(self, "diary_files", None):
+            self._auto_select_numbered_diary_template(ask_folder=False)
+        text_output = not bool(getattr(self, "diary_files", None))
+        self._diary_text_output_enabled = bool(text_output)
         try:
             from diary_creation_wizard import confirm_diary_creation
             if not confirm_diary_creation(self):
-                raise ValueError("Создание дневников остановлено мастером дневников: проверьте дату госпитализации и тексты дневников.")
+                raise ValueError("Создание дневников остановлено мастером дневников: проверьте дату госпитализации, тексты и шаблон дат дневников.")
         except ValueError:
             raise
         except Exception as exc:
