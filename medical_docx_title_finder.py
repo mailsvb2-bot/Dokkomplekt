@@ -18,6 +18,7 @@ from medical_docx_title_context import (
     _is_strong_birth_date_context,
 )
 from medical_docx_xml_fragments import _docx_xml_text_fragments
+from medical_word_format import ensure_docx_compatible
 
 
 def _best_title_date_in_text(value: str) -> str:
@@ -47,6 +48,7 @@ def _best_title_date_in_text(value: str) -> str:
     if not matches:
         return ""
     return sorted(matches, key=lambda item: item[0])[0][1]
+
 
 def _admission_date_from_filename(path: str | Path) -> str:
     """Return admission date from file/folder name when date is written next to document name.
@@ -80,6 +82,7 @@ def _admission_date_from_filename(path: str | Path) -> str:
                     return normalized
     return ""
 
+
 def extract_admission_date_from_title_docx(path: str | Path) -> str:
     """Return admission date only from the document title/header area.
 
@@ -96,9 +99,11 @@ def extract_admission_date_from_title_docx(path: str | Path) -> str:
 
     structured_entries: list[str] = []
     row_entries: list[list[str]] = []
+    compatible_path = Path(path)
 
     try:
-        doc = Document(str(path))
+        compatible_path = ensure_docx_compatible(path, label="первичный документ")
+        doc = Document(str(compatible_path))
     except Exception as exc:
         record_soft_exception("medical_docx_title_finder.open_docx", exc, detail=str(path))
         doc = None
@@ -203,7 +208,7 @@ def extract_admission_date_from_title_docx(path: str | Path) -> str:
 
     # 4) Raw XML fallback: headers/textboxes/shapes. Это закрывает случаи,
     # когда python-docx не видит текст заголовка.
-    xml_fragments = _docx_xml_text_fragments(path)
+    xml_fragments = _docx_xml_text_fragments(compatible_path)
     for entry in xml_fragments[:180]:
         value = _best_title_date_in_text(entry)
         if value:
