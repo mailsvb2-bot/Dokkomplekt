@@ -14,6 +14,7 @@ from typing import Sequence
 
 from docx import Document
 
+from diary_calendar import next_working_day
 from diary_gender import adapt_text_to_patient_gender
 from diary_paths import available_path, make_diary_output_name, safe_filename_part
 from diary_text_parser import clean_status_text
@@ -71,7 +72,10 @@ def dynamic_epicrisis_dates(admission: date, *, discharge_date: date | None = No
     while len(result) < limit:
         if discharge_date is not None and current > discharge_date:
             break
-        result.append(current)
+        adjusted = next_working_day(current, used=result)
+        if discharge_date is not None and adjusted > discharge_date:
+            break
+        result.append(adjusted)
         current += timedelta(days=10)
     return tuple(result)
 
