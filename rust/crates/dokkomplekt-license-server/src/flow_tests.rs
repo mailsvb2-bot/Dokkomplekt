@@ -14,6 +14,9 @@ fn config(database_url: Option<String>) -> ServerConfig {
         payment_provider: "manual".to_string(),
         storage_mode: if database_url.is_some() { "postgres" } else { "memory" }.to_string(),
         database_url,
+        environment: "test".to_string(),
+        provider_callback_secret: None,
+        license_issue_secret: None,
     }
 }
 
@@ -47,6 +50,7 @@ async fn emulate(app: Router, storage_backend: &str, database_connected: bool) {
     assert_eq!(status, StatusCode::OK);
     let order_id = order["order_id"].as_str().unwrap().to_string();
     assert_eq!(order["status"], "waiting_payment");
+    assert_eq!(order["amount_rub"], 3900);
 
     let event_id = format!("evt-{order_id}");
     let callback = json!({ "order_id": order_id, "provider_event_id": event_id, "provider_payment_id": "pay-1", "provider": "manual", "status": "succeeded", "amount_rub": 3900 });
@@ -97,4 +101,42 @@ async fn postgres_flow_when_database_url_is_present() {
         .unwrap();
     emulate(app.clone(), "postgres", true).await;
     std::mem::forget(app);
+}
+
+#[tokio::test]
+async fn configured_license_issue_token_is_required() {
+    let mut config = config(None);
+    config.license_issue_secret = Some("issue-secret".to_string());
+    let app = build_app(AppState::try_new(config).unwrap());
+
+    let (status, order) = call(app.clone(), Method::POST, "/api/orders".to_string(), Some(json!({ "plan": "doctor_pro", "amount_rub": 3900, "machine_hash": "machine-a" }))).await;
+    assert_eq!(status, StatusCode::OK);
+    let order_id = order["order_id"].as_str().unwrap().to_string();
+    let callback = json!({ "order_id": order_id, "provider_event_id": "evt-license-token", "provider": "manual", "status": "succeeded", "amount_rub": 3900 });
+    let (status, _) = call(app.clone(), Method::POST, "/api/provider/callback".to_string(), Some(callback)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let issue_body = json!({ "owner_name": "User", "organization_name": "Org", "machine_hash": "machine-a" });
+    let (status, _) = call(app.clone(), Method::POST, format!("/api/orders/{order_id}/license"), Some(issue_body)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let issue_body = json!({ "owner_name": "User", "organization_name": "Org", "machine_hash": "machine-a", "issue_token": "issue-secret" });
+    let (status, license) = call(app.clone(), Method::POST, format!("/api/orders/{order_id}/license"), Some(issue_body)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(license["license"]["payload"]["allowed_machines"][0], "machine-a");
+}
+
+#[tokio::test]
+async fn license_issue_rejects_machine_mismatch() {
+    let app = build_app(AppState::try_new(config(None)).unwrap());
+    let (status, order) = call(app.clone(), Method::POST, "/api/orders".to_string(), Some(json!({ "plan": "doctor_pro", "amount_rub": 3900, "machine_hash": "machine-a" }))).await;
+    assert_eq!(status, StatusCode::OK);
+    let order_id = order["order_id"].as_str().unwrap().to_string();
+    let callback = json!({ "order_id": order_id, "provider_event_id": "evt-machine-mismatch", "provider": "manual", "status": "succeeded", "amount_rub": 3900 });
+    let (status, _) = call(app.clone(), Method::POST, "/api/provider/callback".to_string(), Some(callback)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let issue_body = json!({ "owner_name": "User", "organization_name": "Org", "machine_hash": "machine-b" });
+    let (status, _) = call(app.clone(), Method::POST, format!("/api/orders/{order_id}/license"), Some(issue_body)).await;
+    assert_eq!(status, StatusCode::CONFLICT);
 }
