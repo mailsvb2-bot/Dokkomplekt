@@ -14,6 +14,8 @@ fn config(database_url: Option<String>) -> ServerConfig {
         payment_provider: "manual".to_string(),
         storage_mode: if database_url.is_some() { "postgres" } else { "memory" }.to_string(),
         database_url,
+        provider_callback_secret: None,
+        license_issue_secret: None,
     }
 }
 

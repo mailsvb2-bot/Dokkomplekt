@@ -11,7 +11,7 @@ from medical_primary_document_state import selected_primary_document_path_text
 from medical_date_state import current_semantic_date
 from diagnostic_logging import record_soft_exception
 from dialog_fields_popup import DialogDiagnosisPopup
-from dialog_fields_core import call_prompt_fields_compatible
+from dialog_fields_core import call_prompt_fields_compatible, attach_additional_info_buttons, choose_epi_file_for_app
 
 
 class DialogDocumentDetailsMixin:
@@ -126,6 +126,21 @@ class DialogDocumentDetailsMixin:
             )
             btn.grid(row=0, column=idx, sticky="ew", padx=(0 if idx == 0 else 6, 0))
         add_entry("Военкомат / организация направления", military_var, width=64)
+        epi_frame = tk.Frame(frame, bg=PANEL)
+        epi_frame.grid(row=row, column=0, sticky="ew", pady=(0, 10))
+        epi_frame.grid_columnconfigure(1, weight=1)
+        epi_status_var = tk.StringVar(value=(Path(self.epi_path_var.get()).name if self.epi_path_var.get().strip() else "ЭПИ не добавлен"))
+        def add_epi() -> None:
+            if choose_epi_file_for_app(self, parent=win):
+                epi_status_var.set(Path(self.epi_path_var.get()).name if self.epi_path_var.get().strip() else "ЭПИ не добавлен")
+        tk.Button(epi_frame, text="Добавить ЭПИ", command=add_epi, bg=FIELD, fg=TEXT, activebackground=ACCENT, activeforeground="#03101f", relief="flat", padx=10, pady=6, cursor="hand2").grid(row=0, column=0, sticky="w")
+        tk.Label(epi_frame, textvariable=epi_status_var, bg=PANEL, fg=TEXT, font=self._font(9), anchor="w").grid(row=0, column=1, sticky="ew", padx=(10, 0))
+        row += 1
+        try:
+            attach_additional_info_buttons(self, win, frame, row=row, columnspan=1)
+            row += 1
+        except Exception as exc:
+            record_soft_exception("dialog_document_details.rvk_additional_info", exc)
         buttons = tk.Frame(frame, bg=PANEL)
         buttons.grid(row=row, column=0, sticky="e")
         def ok() -> None:

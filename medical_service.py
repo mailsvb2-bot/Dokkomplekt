@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from diagnostic_logging import record_soft_exception
+import os
 import copy
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,9 +23,9 @@ from medical_formatting import redact_technical_text, technical_ref
 
 
 _TEXT_ENCODINGS = ("utf-8-sig", "utf-8", "cp1251")
-_PRIMARY_SUFFIXES = {".docx", ".docm"}
+_PRIMARY_SUFFIXES = {".docx", ".docm", ".doc"}
 _EPI_TEXT_SUFFIXES = {".txt"}
-_EPI_DOCX_SUFFIXES = {".docx", ".docm"}
+_EPI_DOCX_SUFFIXES = {".docx", ".docm", ".doc"}
 
 
 def _normalize_yes_no_text(value: str) -> str:
@@ -34,6 +35,20 @@ def _normalize_yes_no_text(value: str) -> str:
     if normalized in {"нет", "н", "no", "n", "0", "-", "не нужен", "не нужна", "не нужно", "не работает"}:
         return "нет"
     return ""
+
+
+def _ensure_word_compatible_for_service(path: Path) -> Path:
+    if path.suffix.lower() != ".doc":
+        return path
+    try:
+        from medical_docx_xml_fragments import ensure_docx_compatible
+        return ensure_docx_compatible(path)
+    except Exception as exc:
+        raise ValueError("Файл .doc требует локального Microsoft Word/конвертера для чтения. Сохраните документ как .docx или установите Microsoft Word на этот компьютер.") from exc
+
+
+def legacy_fixed_template_backend_enabled() -> bool:
+    return os.environ.get("DOKKOMPLEKT_DISABLE_LEGACY_FIXED_TEMPLATES", "").strip().lower() not in {"1", "true", "yes", "да"}
 
 
 class MedicalDocumentService:
@@ -52,6 +67,7 @@ class MedicalDocumentService:
 все отмеченные в UI документы.
         """
         primary_path = self._existing_file(path, "первичный документ", allowed_suffixes=_PRIMARY_SUFFIXES)
+        primary_path = _ensure_word_compatible_for_service(primary_path)
         return self.parser.parse_docx(primary_path)
 
     def parse_navigation(self, path: str | Path) -> PatientData:
@@ -293,7 +309,7 @@ class MedicalDocumentService:
             return ""
         path = self._existing_file(path, "ЭПИ", allowed_suffixes=_EPI_DOCX_SUFFIXES | _EPI_TEXT_SUFFIXES)
         if path.suffix.lower() in _EPI_DOCX_SUFFIXES:
-            text = extract_docx_text(path)
+            text = extract_docx_text(_ensure_word_compatible_for_service(path))
         else:
             text = self._read_text_file(path)
         return strip_leading_epi_label(text)
@@ -317,6 +333,8 @@ class MedicalDocumentService:
     ) -> Tuple[List[Path], PatientData]:
         selected = self._normalize_selected_docs(selected_docs)
         primary_path = self._existing_file(navigation_path, "первичный документ", allowed_suffixes=_PRIMARY_SUFFIXES)
+        primary_path = _ensure_word_compatible_for_service(primary_path)
+        primary_path = _ensure_word_compatible_for_service(primary_path)
         normalized_discharge_date = self._normalize_discharge_date(discharge_date)
 
         data = copy.deepcopy(override_data) if override_data is not None else self.parse_primary_document(primary_path)
@@ -331,6 +349,8 @@ class MedicalDocumentService:
 
         output_path_root = self._resolve_output_dir(output_dir, primary_path.parent)
 
+        if not legacy_fixed_template_backend_enabled():
+            raise RuntimeError("Старый fixed-template backend отключён. Используйте doctor-owned шаблоны/профиль документов.")
         template_paths = {kind: bundled_template_path(kind) for kind in selected}
         missing = [path for path in template_paths.values() if not path.exists()]
         if missing:
@@ -445,7 +465,7 @@ def save_batch_generation_report(result: BatchGenerationResult, path: str | Path
 
 
 def discover_primary_documents(folder: str | Path) -> tuple[Path, ...]:
-    """Discover candidate primary DOCX/DOCM files for batch generation.
+    """Discover candidate primary DOC/DOCX/DOCM files for batch generation.
 
     Temporary Word files, profile templates and generated output/history folders
     are skipped so the doctor can safely choose a normal working folder without
@@ -460,7 +480,7 @@ def discover_primary_documents(folder: str | Path) -> tuple[Path, ...]:
             continue
         if path.name.startswith("~$"):
             continue
-        if path.suffix.lower() not in {".docx", ".docm"}:
+        if path.suffix.lower() not in {".docx", ".docm", ".doc"}:
             continue
         if any(part.startswith("_medical_autofill_history") for part in path.parts):
             continue
@@ -517,7 +537,7 @@ def create_documents_batch(
         seen_sources.add(resolved)
         normalized_sources.append(source_path)
     if not normalized_sources:
-        raise ValueError("В пакетной обработке нет ни одного первичного DOCX/DOCM документа пациента.")
+        raise ValueError("В пакетной обработке нет ни одного первичного DOC/DOCX/DOCM документа пациента.")
 
     items: list[BatchItemResult] = []
     for source_path in normalized_sources:
@@ -563,7 +583,7 @@ def _batch_patient_dir_name(patient: PatientData, source_path: Path, folder_nami
 
 def _safe_docx_probe_text(path: Path) -> str:
     try:
-        return extract_docx_text(path)[:2000]
+        return extract_docx_text(_ensure_word_compatible_for_service(path))[:2000]
     except Exception as exc:
         record_soft_exception("medical_service.safe_docx_probe", exc, detail=str(path))
         return ""

@@ -221,6 +221,8 @@ class AppInitializationMixin:
         self.labs_date_policy_var = tk.StringVar(value="preserve_found_dates")
         self.labs_explicit_date_var = tk.StringVar()
         self.labs_without_var = tk.BooleanVar(value=False)
+        self.additional_info_text_var = tk.StringVar()
+        self.additional_info_source_path_var = tk.StringVar()
 
         # Даты popup-окон ВК/комиссий не должны переноситься между разными
         # документами. Например, дата комиссионного осмотра и дата Акта/ВК

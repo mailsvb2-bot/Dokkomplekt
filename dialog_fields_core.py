@@ -118,6 +118,11 @@ def prompt_fields_dialog(
             record_soft_exception("dialog_fields_core.labs_popup_block", exc)
             labs_rows = 0
 
+    try:
+        attach_additional_info_buttons(self, win, body, row=len(rows) + 1 + labs_rows, columnspan=2)
+    except Exception as exc:
+        record_soft_exception("dialog_fields_core.additional_info_block", exc)
+
     attach_linked_field_mirroring(entry_vars, entry_auto_values, linked_groups)
 
     error_label = tk.Label(footer, text="", bg=PANEL, fg=ERROR, font=("Segoe UI", 8))
@@ -430,7 +435,7 @@ def open_labs_selection_scanner(app, *, parent: tk.Toplevel, refresh=None) -> No
     """Implement the open_labs_selection_scanner workflow with validation, UI state updates and diagnostics."""
     path = filedialog.askopenfilename(
         title="Выберите документ, где нужно выделить анализы",
-        filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("All files", "*.*")],
+        filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docx *.docm"), ("All files", "*.*")],
         parent=parent,
     )
     if not path:
@@ -705,8 +710,8 @@ def open_external_word_selection_scanner_dialog(
 
     owner = parent or getattr(app, "root", None)
     path = filedialog.askopenfilename(
-        title="Выберите DOCX/DOCM, который нужно показать сканеру",
-        filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("All files", "*.*")],
+        title="Выберите DOC/DOCX/DOCM, который нужно показать сканеру",
+        filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docx *.docm"), ("All files", "*.*")],
         parent=owner,
     )
     if not path:
@@ -847,7 +852,7 @@ def open_visual_scanner_dialog(
     owner = parent or getattr(app, "root", None)
     path = filedialog.askopenfilename(
         title="Выберите DOCX/DOCM для цветной разметки",
-        filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("All files", "*.*")],
+        filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docx *.docm"), ("All files", "*.*")],
         parent=owner,
     )
     if not path:
@@ -1046,3 +1051,130 @@ def _visual_radio(parent, text: str, value: str, variable: tk.StringVar) -> tk.R
         wraplength=360,
         font=("Segoe UI", 8),
     )
+
+
+# --- Additional information popup helpers; inlined to preserve architecture file budget. ---
+
+
+def ensure_additional_info_state(app):
+    if not hasattr(app, "additional_info_text_var"):
+        app.additional_info_text_var = tk.StringVar()
+    if not hasattr(app, "additional_info_source_path_var"):
+        app.additional_info_source_path_var = tk.StringVar()
+
+def _read_text_file_for_additional_info(path):
+    raw = Path(path).read_bytes()
+    for enc in ("utf-8-sig", "utf-8", "cp1251"):
+        try:
+            return raw.decode(enc).strip()
+        except UnicodeDecodeError:
+            pass
+    return raw.decode("utf-8", errors="replace").strip()
+
+def read_additional_info_file(path):
+    candidate = Path(path).expanduser()
+    if not candidate.exists() or not candidate.is_file():
+        raise FileNotFoundError(f"Не найден файл дополнительной информации: {candidate}")
+    suffix = candidate.suffix.lower()
+    if suffix in {".txt", ".csv"}:
+        return _read_text_file_for_additional_info(candidate)
+    if suffix in {".docx", ".docm", ".doc"}:
+        from medical_docx_reader import extract_docx_text
+        word_path = candidate
+        if suffix == ".doc":
+            try:
+                from medical_docx_xml_fragments import ensure_docx_compatible
+                word_path = ensure_docx_compatible(candidate)
+            except Exception:
+                word_path = candidate
+        return extract_docx_text(word_path).strip()
+    raise ValueError(f"Неверный формат файла дополнительной информации: {suffix or 'без расширения'}")
+
+def choose_additional_info_file(app, parent=None, title="Выберите файл дополнительной информации"):
+    ensure_additional_info_state(app)
+    owner = parent or getattr(app, "root", None)
+    path = filedialog.askopenfilename(title=title, filetypes=[("Word/Text", "*.doc *.docx *.docm *.txt *.csv"), ("All files", "*.*")], parent=owner)
+    if not path:
+        return False
+    try:
+        text = read_additional_info_file(path)
+    except Exception as exc:
+        record_soft_exception("dialog_fields_core.additional_info_file", exc, detail=path)
+        messagebox.showerror("Дополнительная информация", str(exc), parent=owner)
+        return False
+    if not text:
+        messagebox.showwarning("Дополнительная информация", "Выбранный файл пуст.", parent=owner)
+        return False
+    app.additional_info_text_var.set(text)
+    app.additional_info_source_path_var.set(str(Path(path).expanduser()))
+    return True
+
+def choose_epi_file_for_app(app, parent=None):
+    owner = parent or getattr(app, "root", None)
+    path = filedialog.askopenfilename(title="Добавить ЭПИ в акт РВК", filetypes=[("ЭПИ Word/Text", "*.doc *.docx *.docm *.txt"), ("All files", "*.*")], parent=owner)
+    if not path:
+        return False
+    try:
+        if hasattr(app, "service"):
+            app.service.load_epi_text(path)
+        else:
+            read_additional_info_file(path)
+    except Exception as exc:
+        record_soft_exception("dialog_fields_core.choose_epi", exc, detail=path)
+        messagebox.showerror("ЭПИ", str(exc), parent=owner)
+        return False
+    app.epi_path_var.set(str(Path(path).expanduser()))
+    return True
+
+def _additional_info_summary(app):
+    ensure_additional_info_state(app)
+    text = app.additional_info_text_var.get().strip()
+    source = app.additional_info_source_path_var.get().strip()
+    if not text:
+        return "Дополнительная информация не добавлена."
+    words = " ".join(text.split())
+    suffix = "..." if words[140:] else ""
+    source_text = f" Источник: {Path(source).name}." if source else ""
+    return "Добавлено: " + words[:140] + suffix + "." + source_text
+
+def open_additional_info(app, parent=None):
+    ensure_additional_info_state(app)
+    owner = parent or getattr(app, "root", None)
+    text = app.additional_info_text_var.get().strip()
+    if not text:
+        messagebox.showinfo("Дополнительная информация", "Дополнительная информация ещё не добавлена.", parent=owner)
+        return
+    win = tk.Toplevel(owner)
+    win.title("Дополнительная информация")
+    win.configure(bg=PANEL)
+    win.geometry("760x520")
+    win.grid_columnconfigure(0, weight=1)
+    win.grid_rowconfigure(0, weight=1)
+    box = tk.Text(win, bg=FIELD, fg=TEXT, insertbackground=TEXT, wrap="word", relief="flat", padx=10, pady=10)
+    box.grid(row=0, column=0, sticky="nsew", padx=12, pady=12)
+    box.insert("1.0", text)
+    box.configure(state="disabled")
+    tk.Button(win, text="Закрыть", command=win.destroy, bg=ACCENT_2, fg="#03101f", relief="flat", padx=18, pady=8).grid(row=1, column=0, sticky="e", padx=12, pady=(0, 12))
+    win.transient(owner)
+
+def attach_additional_info_buttons(app, parent, container, row, columnspan=2):
+    ensure_additional_info_state(app)
+    frame = tk.Frame(container, bg=PANEL_3, padx=10, pady=8)
+    frame.grid(row=row, column=0, columnspan=columnspan, sticky="ew", pady=(8, 8))
+    frame.grid_columnconfigure(0, weight=1)
+    frame.grid_columnconfigure(1, weight=1)
+    summary_var = tk.StringVar(value=_additional_info_summary(app))
+    tk.Label(frame, text="Дополнительная информация", bg=PANEL_3, fg=TEXT, font=("Segoe UI", 9, "bold"), anchor="w").grid(row=0, column=0, columnspan=2, sticky="ew")
+    tk.Label(frame, textvariable=summary_var, bg=PANEL_3, fg=MUTED, wraplength=620, justify="left", anchor="w", font=("Segoe UI", 8)).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(2, 8))
+    def refresh():
+        summary_var.set(_additional_info_summary(app))
+    def add_file():
+        if choose_additional_info_file(app, parent=parent):
+            refresh()
+    def open_file():
+        open_additional_info(app, parent=parent)
+        refresh()
+    tk.Button(frame, text="Добавить дополнительную информацию", command=add_file, bg=ACCENT_2, fg="#03101f", activebackground=ACCENT, activeforeground="#03101f", relief="flat", padx=8, pady=6, cursor="hand2", font=("Segoe UI", 8, "bold"), wraplength=220).grid(row=2, column=0, sticky="ew", padx=(0, 6))
+    tk.Button(frame, text="Открыть", command=open_file, bg=FIELD, fg=TEXT, activebackground=PANEL_3, activeforeground=TEXT, relief="flat", padx=8, pady=6, cursor="hand2", font=("Segoe UI", 8, "bold")).grid(row=2, column=1, sticky="ew", padx=(6, 0))
+    return 1
+

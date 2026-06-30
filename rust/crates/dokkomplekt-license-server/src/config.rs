@@ -10,6 +10,8 @@ pub struct ServerConfig {
     pub payment_provider: String,
     pub storage_mode: String,
     pub database_url: Option<String>,
+    pub provider_callback_secret: Option<String>,
+    pub license_issue_secret: Option<String>,
 }
 
 impl ServerConfig {
@@ -21,7 +23,7 @@ impl ServerConfig {
             .unwrap_or_else(|_| "http://127.0.0.1:8787".to_string());
         let issuer_id = std::env::var("DOKKOMPLEKT_LICENSE_ISSUER")
             .unwrap_or_else(|_| "dokkomplekt-license-server".to_string());
-        let issuer_key_b64 = std::env::var("DOKKOMPLEKT_LICENSE_ISSUER_KEY_B64").ok();
+        let issuer_key_b64 = non_empty_env("DOKKOMPLEKT_LICENSE_ISSUER_KEY_B64");
         let default_license_days = std::env::var("DOKKOMPLEKT_DEFAULT_LICENSE_DAYS")
             .ok()
             .and_then(|value| value.parse().ok())
@@ -34,9 +36,20 @@ impl ServerConfig {
         if strict_runtime && payment_provider == "manual" {
             anyhow::bail!("manual payment provider is not allowed for license server runtime");
         }
-        let database_url = std::env::var("DATABASE_URL").ok();
+        let database_url = non_empty_env("DATABASE_URL");
         if database_url.as_ref().map(|value| value.trim()).filter(|value| !value.is_empty()).is_none() && strict_runtime {
             anyhow::bail!("PostgreSQL connection is required for license server runtime");
+        }
+        let provider_callback_secret = non_empty_env("DOKKOMPLEKT_PROVIDER_CALLBACK_SECRET");
+        let license_issue_secret = non_empty_env("DOKKOMPLEKT_LICENSE_ISSUE_SECRET");
+        if strict_runtime && issuer_key_b64.is_none() {
+            anyhow::bail!("DOKKOMPLEKT_LICENSE_ISSUER_KEY_B64 is required for license server runtime");
+        }
+        if strict_runtime && provider_callback_secret.is_none() {
+            anyhow::bail!("DOKKOMPLEKT_PROVIDER_CALLBACK_SECRET is required for license server runtime");
+        }
+        if strict_runtime && license_issue_secret.is_none() {
+            anyhow::bail!("DOKKOMPLEKT_LICENSE_ISSUE_SECRET is required for license server runtime");
         }
         let storage_mode = match database_url.as_ref().map(|value| value.trim()).filter(|value| !value.is_empty()) {
             Some(_) => "postgres".to_string(),
@@ -51,12 +64,18 @@ impl ServerConfig {
             payment_provider,
             storage_mode,
             database_url,
+            provider_callback_secret,
+            license_issue_secret,
         })
     }
 }
 
+fn non_empty_env(name: &str) -> Option<String> {
+    std::env::var(name).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
+}
+
 fn strict_runtime_required() -> bool {
-    for name in ["DOKKOMPLEKT_LICENSE_ENV", "APP_ENV", "RUST_ENV", "ENV"] {
+    for name in ["DOKKOMPLEKT_ENV", "DOKKOMPLEKT_LICENSE_ENV", "APP_ENV", "RUST_ENV", "ENV"] {
         let value = std::env::var(name).unwrap_or_default().trim().to_ascii_lowercase();
         if matches!(value.as_str(), "production" | "prod") {
             return true;

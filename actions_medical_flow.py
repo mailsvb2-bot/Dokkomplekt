@@ -90,6 +90,13 @@ class ActionsMedicalFlowMixin:
             data.epi_text = self.service.load_epi_text(self.epi_path_var.get().strip())
         else:
             data.epi_text = ""
+        try:
+            data.additional_info_text = self.additional_info_text_var.get().strip()
+            data.additional_info_source = self.additional_info_source_path_var.get().strip()
+        except Exception as exc:
+            record_soft_exception("actions_medical_flow.additional_info", exc)
+            data.additional_info_text = ""
+            data.additional_info_source = ""
 
         # Универсальные анализы: врач может явно выбрать «без анализов»,
         # ввести текст, загрузить отдельный файл или выделить блок мышкой.

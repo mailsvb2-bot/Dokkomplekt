@@ -11,6 +11,7 @@ pub struct IssueRequest {
     pub owner_name: Option<String>,
     pub organization_name: Option<String>,
     pub machine_hash: String,
+    pub issue_token: Option<String>,
 }
 
 pub fn router() -> Router<AppState> {
@@ -25,6 +26,9 @@ async fn issue_for_order(
     let requested_machine = request.machine_hash.trim();
     if requested_machine.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
+    }
+    if !issue_token_matches(state.config.license_issue_secret.as_deref(), request.issue_token.as_deref()) {
+        return Err(StatusCode::UNAUTHORIZED);
     }
     let order = state.store.get_order_async(order_id).await.map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
     if !matches!(order.status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
@@ -59,6 +63,16 @@ async fn issue_for_order(
     let outcome = state.store.issue_license_for_paid_order_async(record).await.map_err(store_error_status)?;
     let response = serde_json::from_str(&outcome.record.document_json).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(response))
+}
+
+
+pub fn issue_token_matches(configured_secret: Option<&str>, supplied_token: Option<&str>) -> bool {
+    let Some(expected) = configured_secret.map(str::trim).filter(|value| !value.is_empty()) else { return true; };
+    supplied_token.map(str::trim).filter(|value| !value.is_empty()).is_some_and(|actual| constant_time_eq(actual.as_bytes(), expected.as_bytes()))
+}
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() { return false; }
+    left.iter().zip(right.iter()).fold(0u8, |acc, (a,b)| acc | (a ^ b)) == 0
 }
 
 fn store_error_status(error: StoreError) -> StatusCode {

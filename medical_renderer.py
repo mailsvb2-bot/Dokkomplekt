@@ -16,6 +16,21 @@ from medical_renderer_primary import MedicalRendererPrimaryMixin
 from medical_renderer_special import MedicalRendererSpecialMixin
 
 
+def _append_additional_info_to_docx(output_path: str | Path, data: PatientData) -> None:
+    text = str(getattr(data, "additional_info_text", "") or "").strip()
+    if not text:
+        return
+    from docx import Document
+    doc = Document(str(output_path))
+    doc.add_paragraph("")
+    doc.add_paragraph("Дополнительная информация:")
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            doc.add_paragraph(line)
+    doc.save(str(output_path))
+
+
 class MedicalDocumentRenderer(
     MedicalRendererPrimaryMixin,
     MedicalRendererCommissionMixin,
@@ -37,3 +52,4 @@ class MedicalDocumentRenderer(
             raise ValueError(f"Неизвестный тип медицинского документа: {kind}")
         gender_adapted_data = adapt_patient_data_to_gender(data)
         method(template_path, output_path, gender_adapted_data)
+        _append_additional_info_to_docx(output_path, gender_adapted_data)
