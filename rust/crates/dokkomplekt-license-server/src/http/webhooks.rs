@@ -15,6 +15,10 @@ pub struct ProviderCallbackRequest {
     pub provider: Option<String>,
     pub status: String,
     pub amount_rub: u64,
+    /// Shared callback token. In production ServerConfig requires
+    /// DOKKOMPLEKT_PROVIDER_CALLBACK_SECRET and every provider callback must echo
+    /// it here until a provider-specific signature verifier is wired.
+    pub callback_secret: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -31,6 +35,13 @@ pub fn router() -> Router<AppState> {
 async fn provider_callback(State(state): State<AppState>, Json(event): Json<ProviderCallbackRequest>) -> Result<Json<ProviderCallbackResponse>, StatusCode> {
     let event_id = event.provider_event_id.trim();
     if event_id.is_empty() || event.amount_rub == 0 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if !callback_secret_matches(state.config.provider_callback_secret.as_deref(), event.callback_secret.as_deref()) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let order = state.store.get_order_async(event.order_id).await.map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
+    if order.amount_rub != event.amount_rub {
         return Err(StatusCode::BAD_REQUEST);
     }
     let provider = normalize_callback_provider(event.provider.as_deref().unwrap_or("manual")).ok_or(StatusCode::BAD_REQUEST)?;
@@ -51,6 +62,23 @@ async fn provider_callback(State(state): State<AppState>, Json(event): Json<Prov
         duplicate: matches!(outcome, PaymentEventWriteOutcome::Duplicate),
         order_id: event.order_id,
     }))
+}
+
+pub fn callback_secret_matches(configured_secret: Option<&str>, supplied_secret: Option<&str>) -> bool {
+    let Some(expected) = configured_secret.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    supplied_secret
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some_and(|actual| constant_time_eq(actual.as_bytes(), expected.as_bytes()))
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter().zip(right.iter()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
 }
 
 fn store_error_status(error: StoreError) -> StatusCode {
@@ -111,5 +139,13 @@ mod tests {
     #[test]
     fn unknown_callback_provider_is_rejected() {
         assert!(normalize_callback_provider("unknown-pay").is_none());
+    }
+
+    #[test]
+    fn callback_secret_is_required_when_configured() {
+        assert!(callback_secret_matches(None, None));
+        assert!(!callback_secret_matches(Some("secret"), None));
+        assert!(!callback_secret_matches(Some("secret"), Some("wrong")));
+        assert!(callback_secret_matches(Some(" secret "), Some("secret")));
     }
 }
