@@ -11,6 +11,9 @@ pub struct IssueRequest {
     pub owner_name: Option<String>,
     pub organization_name: Option<String>,
     pub machine_hash: String,
+    /// Shared issuing token. In production ServerConfig requires
+    /// DOKKOMPLEKT_LICENSE_ISSUE_SECRET and the caller must provide it here.
+    pub issue_token: Option<String>,
 }
 
 pub fn router() -> Router<AppState> {
@@ -22,11 +25,18 @@ async fn issue_for_order(
     Path(order_id): Path<Uuid>,
     Json(request): Json<IssueRequest>,
 ) -> Result<Json<LicenseDocument>, StatusCode> {
-    if request.machine_hash.trim().is_empty() {
+    let machine_hash = request.machine_hash.trim().to_string();
+    if machine_hash.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
+    }
+    if !issue_token_matches(state.config.license_issue_secret.as_deref(), request.issue_token.as_deref()) {
+        return Err(StatusCode::UNAUTHORIZED);
     }
     let order = state.store.get_order_async(order_id).await.map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
     if !matches!(order.status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
+        return Err(StatusCode::CONFLICT);
+    }
+    if order.machine_hash.as_deref().is_some_and(|expected| expected != machine_hash) {
         return Err(StatusCode::CONFLICT);
     }
     let plan = parse_plan(&order.plan).ok_or(StatusCode::BAD_REQUEST)?;
@@ -37,7 +47,7 @@ async fn issue_for_order(
             plan,
             owner_name: request.owner_name,
             organization_name: request.organization_name,
-            allowed_machines: vec![request.machine_hash],
+            allowed_machines: vec![machine_hash],
             valid_days: state.config.default_license_days,
         },
         &state.config.issuer_id,
@@ -57,6 +67,23 @@ async fn issue_for_order(
     Ok(Json(response))
 }
 
+pub fn issue_token_matches(configured_secret: Option<&str>, supplied_token: Option<&str>) -> bool {
+    let Some(expected) = configured_secret.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    supplied_token
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some_and(|actual| constant_time_eq(actual.as_bytes(), expected.as_bytes()))
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter().zip(right.iter()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+}
+
 fn store_error_status(error: StoreError) -> StatusCode {
     match error {
         StoreError::Conflict => StatusCode::CONFLICT,
@@ -67,7 +94,7 @@ fn store_error_status(error: StoreError) -> StatusCode {
 }
 
 fn parse_plan(value: &str) -> Option<PlanId> {
-    match value.trim() {
+    match value.trim().to_ascii_lowercase().as_str() {
         "trial" => Some(PlanId::Trial),
         "doctor_start" => Some(PlanId::DoctorStart),
         "doctor_pro" => Some(PlanId::DoctorPro),
@@ -75,5 +102,18 @@ fn parse_plan(value: &str) -> Option<PlanId> {
         "clinic" => Some(PlanId::Clinic),
         "enterprise" => Some(PlanId::Enterprise),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn license_issue_token_is_required_when_configured() {
+        assert!(issue_token_matches(None, None));
+        assert!(!issue_token_matches(Some("secret"), None));
+        assert!(!issue_token_matches(Some("secret"), Some("wrong")));
+        assert!(issue_token_matches(Some(" secret "), Some("secret")));
     }
 }
