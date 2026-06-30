@@ -53,7 +53,13 @@ jobs:
           exit $code
 
       - name: Run strict regression contour
-        run: python tools/run_regression_contour.py
+        shell: bash
+        run: |
+          set +e
+          python tools/run_regression_contour.py > regression-contour.log 2>&1
+          code=$?
+          tail -200 regression-contour.log
+          exit $code
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
@@ -67,7 +73,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: python-headless-logs
-          path: python-headless-tests.log
+          path: |
+            python-headless-tests.log
+            regression-contour.log
           if-no-files-found: ignore
 
   build:
@@ -107,7 +115,12 @@ jobs:
           exit $code
 
       - name: Run strict regression contour
-        run: python tools/run_regression_contour.py
+        shell: pwsh
+        run: |
+          python tools/run_regression_contour.py *> regression-contour.log
+          $code=$LASTEXITCODE
+          Get-Content regression-contour.log -Tail 200
+          exit $code
 
       - name: Run full smoke suite
         run: |
@@ -180,7 +193,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: python-production-audit-logs
-          path: python-production-audit.log
+          path: |
+            python-production-audit.log
+            regression-contour.log
           if-no-files-found: ignore
 
       - name: Upload release gate logs
