@@ -1,8 +1,3 @@
-"""Разделённый слой заполнителя дневников.
-
-Файл создан при архитектурной нарезке бывшего diary_filler.py.
-"""
-
 from __future__ import annotations
 
 import re
@@ -11,6 +6,8 @@ from pathlib import Path
 from docx import Document
 
 from diary_constants import (DATE_PREFIX_RE, EXAMINEE_ANY_RE, EXAMINEE_STANDARD_STATE_RE, EXAMINEE_START_RE, MIN_STATUS_LEN, SIGNATURE_MARKERS, STATUS_DATE_PREFIX_RE, STATUS_LABEL_PREFIX_RE, STATUS_NUMBER_BEFORE_DATE_RE, STATUS_NUMBER_PREFIX_RE, STATUS_STANDALONE_DAY_PREFIX_RE, STRUCTURAL_DIARY_PREFIXES, WHITESPACE_RE)
+from medical_docx_xml_fragments import ensure_docx_compatible
+
 
 def normalize_text(text: str) -> str:
     text = (text or "")
@@ -22,14 +19,7 @@ def normalize_text(text: str) -> str:
 
 def strip_leading_status_metadata(text: str) -> str:
     value = normalize_text(text)
-    patterns = (
-        STATUS_LABEL_PREFIX_RE,
-        STATUS_NUMBER_BEFORE_DATE_RE,
-        STATUS_DATE_PREFIX_RE,
-        DATE_PREFIX_RE,
-        STATUS_NUMBER_PREFIX_RE,
-        STATUS_STANDALONE_DAY_PREFIX_RE,
-    )
+    patterns = (STATUS_LABEL_PREFIX_RE, STATUS_NUMBER_BEFORE_DATE_RE, STATUS_DATE_PREFIX_RE, DATE_PREFIX_RE, STATUS_NUMBER_PREFIX_RE, STATUS_STANDALONE_DAY_PREFIX_RE)
     for _ in range(12):
         before = value
         for pattern in patterns:
@@ -64,7 +54,6 @@ def clean_status_text(text: str) -> str:
 
 
 def is_signature_paragraph_text(text: str) -> bool:
-    """Return True for template signature paragraphs that must stay untouched."""
     low = normalize_text(text).lower().replace("ё", "е")
     return any(low.startswith(marker) for marker in SIGNATURE_MARKERS)
 
@@ -86,7 +75,8 @@ def looks_like_status(text: str) -> bool:
 
 
 def extract_statuses_from_docx(path: str | Path) -> list[str]:
-    doc = Document(str(path))
+    compatible_path = ensure_docx_compatible(path, label="diary texts")
+    doc = Document(str(compatible_path))
     statuses: list[str] = []
     seen_statuses: set[str] = set()
 
@@ -103,8 +93,6 @@ def extract_statuses_from_docx(path: str | Path) -> list[str]:
         for row in table.rows:
             seen_cells: set[int] = set()
             for cell in row.cells:
-                # Merged cells are exposed repeatedly by python-docx; process each
-                # physical cell once so one diary text does not consume several rows.
                 tc_id = id(cell._tc)
                 if tc_id in seen_cells:
                     continue
