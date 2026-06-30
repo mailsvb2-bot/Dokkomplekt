@@ -110,6 +110,8 @@ def _existing_docx_files(paths: Iterable[str | Path], label: str) -> list[Path]:
     result: list[Path] = []
     seen: set[Path] = set()
     for raw_path in paths:
+        if raw_path is None or str(raw_path).strip() == "":
+            raise ValueError(f"Пустой путь к файлу ({label}).")
         source = existing_word_file(raw_path, label)
         path = ensure_docx_compatible(source, label=label)
         key = path.resolve()
@@ -145,7 +147,9 @@ def open_folder(path: str | Path) -> bool:
     folder = Path(path).expanduser()
     try:
         from printer_platform import open_desktop_path
-        return bool(open_desktop_path(folder, require_dir=True))
+        if open_desktop_path(folder, require_dir=True):
+            return True
+        return False
     except Exception as exc:
         record_soft_exception("diary_batch.open_folder", exc, detail=str(folder))
         return False
