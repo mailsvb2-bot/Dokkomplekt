@@ -6,19 +6,15 @@ from pathlib import Path
 import tkinter as tk
 from typing import Dict, List
 
-from app_config import APP_TITLE, DEEP
+from app_config import DEEP
 from diary_constants import DIARY_KIND
+from diagnostic_logging import record_soft_exception
 from medical_constants import DOCUMENT_ORDER
 from medical_models import PatientData
-from diagnostic_logging import record_soft_exception
+from medical_word_format import ensure_docx_compatible
 
 
 class _LazyMedicalDocumentService:
-    """Create the DOCX service only when a file operation really needs it.
-
-    Startup should paint the UI quickly. Importing python-docx/renderers/templates
-    is deferred until the first primary-document parse or document generation.
-    """
     __slots__ = ("_service",)
 
     def __init__(self) -> None:
@@ -26,7 +22,7 @@ class _LazyMedicalDocumentService:
 
     def _get(self):
         if self._service is None:
-            from medical_service_doc_compat import MedicalDocumentService
+            from medical_service import MedicalDocumentService
             self._service = MedicalDocumentService()
         return self._service
 
@@ -47,17 +43,7 @@ class AppInitializationMixin:
         self._configure_root_window()
         self._bootstrap_ui()
 
-
     def _primary_document_cache_signature(self, path: Path) -> tuple[int, int, str]:
-        """Return a cache signature that survives coarse Windows timestamps.
-
-        The UI cache must be fast, but it must never reuse a parsed patient case
-        after the doctor or Word has rewritten the primary DOCX.  Some Windows /
-        cloud-synced folders round ``st_mtime_ns`` aggressively, and a same-size
-        rewrite can therefore look unchanged if the cache only keys by
-        modification time and file size.  A tiny full-file SHA-256 is still much
-        cheaper than reparsing DOCX repeatedly and closes that live regression.
-        """
         try:
             stat = path.stat()
             digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() and path.is_file() else ""
@@ -67,30 +53,21 @@ class AppInitializationMixin:
             return (0, -1, "")
 
     def _parse_primary_document(self, path: str | Path) -> PatientData:
-        """Parse a primary DOCX with a small content-aware cache for UI responsiveness.
-
-        Selecting a file, updating the preview, opening dialogs and creating files
-        can ask for the same primary document several times. Re-reading DOCX each
-        time makes the interface feel sticky. The cache is invalidated by
-        modification time, size and content digest, then returns a deep copy so
-        callers may safely mutate the PatientData for their own document flow.
-        """
         p = Path(path)
         key = str(p.resolve()) if p.exists() else str(p)
         signature = self._primary_document_cache_signature(p)
         cached = self._primary_parse_cache.get(key)
         if cached and cached[0] == signature:
             return copy.deepcopy(cached[1])
-        data = self.service.parse_primary_document(p)
+        parse_path = ensure_docx_compatible(p, label="primary document")
+        data = self.service.parse_primary_document(parse_path)
         self._primary_parse_cache[key] = (signature, copy.deepcopy(data))
-        # Keep cache tiny: the UI works with one current patient document.
         if len(self._primary_parse_cache) > 3:
             for old_key in list(self._primary_parse_cache)[:-3]:
                 self._primary_parse_cache.pop(old_key, None)
         return data
 
     def _init_core_state(self, root: tk.Tk) -> None:
-        """Implement the _init_core_state workflow with validation, UI state updates and diagnostics."""
         self.root = root
         self.service = _LazyMedicalDocumentService()
         self._primary_parse_cache: dict[str, tuple[tuple[int, int, str], PatientData]] = {}
@@ -100,41 +77,18 @@ class AppInitializationMixin:
         self.data = PatientData()
         self._last_patient_case_review = None
         self._hotkey_print_after = False
-
-        # Общая карточка пациента. ФИО в UI используется для названия файлов.
-        # ФИО внутри документов всегда берётся из выбранного первичного документа.
-        # На старте интерфейс всегда открывается «с чистого листа».
-        # Никакие данные пациента, даты, диагноз, папка результата или принтер
-        # не подставляются из прошлых запусков: пользователь явно выбирает файлы
-        # и вводит/подтверждает значения для текущего пациента.
         self.patient_name_var = tk.StringVar()
         self.admission_date_var = tk.StringVar()
         self.discharge_date_var = tk.StringVar()
         self.diagnosis_var = tk.StringVar()
-        # Диагноз и дата выписки, выбранные/введённые врачом в popup
-        # направления, имеют абсолютный приоритет над данными, распознанными
-        # из первичного DOCX. Особенно важно не дать повторному reparse_navigation()
-        # заменить дату выписки датой поступления.
         self._popup_diagnosis_override = ""
         self._popup_discharge_date_override = ""
-        # Accepted patient-level dates shared by every popup and renderer.
-        # Prevents one dialog from silently using a different discharge date than another.
         self._semantic_date_state: dict[str, str] = {}
         self.output_dir_var = tk.StringVar()
-        # Папка результата по умолчанию должна следовать за первичным
-        # документом пациента. Ручной выбор через кнопку/ручной ввод
-        # сохраняется и не перетирается автоматикой.
         self._suspend_output_dir_tracking = False
         self._manual_output_dir = False
-        # True only for a folder that was chosen automatically for one detected
-        # desktop-intake patient.  It prevents generation for that patient from
-        # escaping the patient subfolder, but must be released when the next
-        # primary document is selected so a new patient is not saved into the
-        # previous patient's folder.
         self._output_dir_auto_locked_to_patient = False
         self.output_dir_var.trace_add("write", lambda *_: self._mark_manual_output_dir())
-
-        # Печать: выбор принтера и сценарий "создать + сохранить + распечатать".
         self.printer_var = tk.StringVar()
         self.available_printers: list[str] = []
         self._printer_refresh_in_progress = False
@@ -148,32 +102,20 @@ class AppInitializationMixin:
         self.spellcheck_enabled_var = tk.BooleanVar(value=self._language_preferences.spellcheck_enabled)
 
     def _init_primary_and_expert_state(self) -> None:
-        # Тип входного первичного документа.
-        # - направление на госпитализацию: номер истории болезни, лечение и
-        #   диагноз подтверждаются вручную в popup;
-        # - первичный осмотр: popup не открывается, данные берутся из DOCX.
         self.primary_document_type_var = tk.StringVar(value="primary_exam")
         self.primary_document_type_display_var = tk.StringVar(value="Первичный осмотр")
         self.assigned_treatment_var = tk.StringVar()
         self.case_number_var = tk.StringVar()
-
-        # Экспертный анамнез / больничный лист.
-        # Видимый старт всегда пустой: значения задаются врачом для текущего случая
-        # через popup и затем идут в первичный осмотр, выписной эпикриз и комиссионный осмотр.
-        self.expert_work_status_var = tk.StringVar()  # да/нет: работает ли пациент
+        self.expert_work_status_var = tk.StringVar()
         self.expert_work_org_var = tk.StringVar()
         self.expert_position_var = tk.StringVar()
-        self.expert_sick_leave_needed_var = tk.StringVar(value="нет")  # да/нет
+        self.expert_sick_leave_needed_var = tk.StringVar(value="нет")
         self.expert_sick_leave_from_var = tk.StringVar()
         self.expert_sick_leave_number_var = tk.StringVar()
         self.expert_sick_leave_display_var = tk.StringVar(value="нет")
         self._primary_work_org_default = ""
         self._primary_work_position_default = ""
         self._work_details_manually_edited = False
-
-        # Защита ручного ввода UI. Некоторые файлы умеют подтягивать ФИО/дату/диагноз
-        # автоматически, но уже набранные врачом значения нельзя перетирать при выборе
-        # направления, ЭПИ или таблиц дневников.
         self._suspend_user_edit_tracking = False
         self._manual_patient_name = False
         self._manual_admission_date = False
@@ -185,8 +127,6 @@ class AppInitializationMixin:
         self.diagnosis_var.trace_add("write", lambda *_: self._mark_manual_field("diagnosis"))
 
     def _init_document_detail_state(self) -> None:
-        # Ручные реквизиты для отдельных документов. В UI они не занимают место:
-        # появляются маленькие окна при включении соответствующих галочек.
         self.rvk_act_number_var = tk.StringVar()
         default_rvk = ""
         try:
@@ -226,7 +166,6 @@ class AppInitializationMixin:
         self.output_vars[DIARY_KIND] = tk.BooleanVar(value=False)
 
     def _init_diary_state(self) -> None:
-        # Файлы дневников: тексты статусов и таблицы 01-31.
         self.status_files: List[str] = []
         self.diary_files: List[str] = []
         self._diary_files_auto_selected = False
