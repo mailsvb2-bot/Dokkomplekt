@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 import hashlib
+import importlib
 import os
 from pathlib import Path
 import tempfile
@@ -46,12 +47,7 @@ def existing_word_file(path: str | Path | None, label: str) -> Path:
 
 
 def ensure_docx_compatible(path: str | Path, *, label: str = "Word-документ") -> Path:
-    """Return a path that ``python-docx`` can open.
-
-    ``.docx`` and ``.docm`` are returned unchanged.  Legacy ``.doc`` files are
-    converted into a deterministic temporary ``.docx`` copy.  Conversion is
-    intentionally local-only and uses Microsoft Word COM when available.
-    """
+    """Return a path that ``python-docx`` can open."""
 
     source = existing_word_file(path, label)
     if source.suffix.lower() in OPENXML_WORD_SUFFIXES:
@@ -77,7 +73,7 @@ def convert_doc_to_docx(path: str | Path) -> Path:
             "Сохраните документ как .docx и повторите."
         )
     try:
-        import win32com.client  # type: ignore[import-not-found]
+        win32com_client = importlib.import_module("win32com.client")
     except Exception as exc:  # pragma: no cover - depends on real Windows/pywin32
         raise RuntimeError(
             "Для .doc нужен установленный Microsoft Word и pywin32. "
@@ -88,11 +84,10 @@ def convert_doc_to_docx(path: str | Path) -> Path:
     doc = None
     try:  # pragma: no cover - exercised only on real Windows with Word
         target.parent.mkdir(parents=True, exist_ok=True)
-        word = win32com.client.DispatchEx("Word.Application")
+        word = win32com_client.DispatchEx("Word.Application")
         word.Visible = False
         word.DisplayAlerts = 0
         doc = word.Documents.Open(str(source.resolve()), ReadOnly=True, AddToRecentFiles=False)
-        # 16 = wdFormatXMLDocument (.docx)
         doc.SaveAs2(str(target.resolve()), FileFormat=16)
         return target
     except Exception as exc:  # pragma: no cover - depends on local Word install
