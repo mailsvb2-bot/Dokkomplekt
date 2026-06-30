@@ -7,10 +7,20 @@ on:
       - ".github/workflows/rust-license.yml"
   push:
     branches:
+      - main
+      - master
       - rust-license-core-and-server
     paths:
       - "rust/**"
       - ".github/workflows/rust-license.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-license-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   rust-license:
