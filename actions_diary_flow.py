@@ -9,10 +9,7 @@ from medical_date_state import current_semantic_date
 
 class ActionsDiaryFlowMixin:
     def _create_diaries_impl(self):
-        # Для дневников дата поступления берётся строго из заголовка
-        # первичного документа/направления. Это значение затем передаётся в
-        # fill_diary_batch как обычная строка даты.
-        """Implement the _create_diaries_impl workflow with validation, UI state updates and diagnostics."""
+        """Create diary output from selected diary text files."""
         primary_path = selected_primary_document_path(self)
         diary_admission_value = self._sync_admission_date_from_title(force=True)
         if primary_path is not None and not diary_admission_value:
@@ -20,12 +17,8 @@ class ActionsDiaryFlowMixin:
                 "Не удалось найти дату поступления в первичном документе. "
                 "Добавьте строку вида «Дата поступления: 12.01.2026» или дату рядом с названием документа."
             )
-        if not self.diary_files or getattr(self, "_diary_files_auto_selected", False):
-            self._auto_select_numbered_diary_template(ask_folder=True)
-        # Новый текстовый режим дневников не зависит от таблицы дат, но старый
-        # табличный режим остаётся совместимым: если шаблон выбран, он будет
-        # использоваться; если нет — создаётся один DOCX с датированными текстами.
         text_output = True
+        self._diary_text_output_enabled = True
         if not self.status_files:
             self._auto_select_diary_text_by_diagnosis(ask_folder=False)
         if not self.status_files:
@@ -51,17 +44,14 @@ class ActionsDiaryFlowMixin:
                     diary_patient_name = source_patient_fio
                     self._set_ui_var(self.patient_name_var, diary_patient_name)
             except Exception as exc:
-                record_soft_exception("actions_diary_flow:parse_source_patient_fio", exc)
+                record_soft_exception("actions_diary_flow.parse_source_patient_fio", exc)
                 source_patient_fio = ""
         if not diary_patient_name:
             raise ValueError("Введите ФИО для названия файлов или выберите первичный документ с ФИО пациента.")
         if not diary_admission_value:
             diary_admission_value = current_semantic_date(self, "admission_date")
         if not diary_admission_value:
-            raise ValueError(
-                "Не удалось найти дату поступления в первичном документе. "
-                "Добавьте строку вида «Дата поступления: 12.01.2026» или дату рядом с названием документа."
-            )
+            raise ValueError("Не удалось найти дату поступления в первичном документе.")
         out_dir = str(self._result_output_dir())
         from diary_batch import fill_diary_batch
         diary_schedule = self._selected_profile_diary_schedule()
@@ -73,8 +63,6 @@ class ActionsDiaryFlowMixin:
             output_dir=out_dir,
             patient_name=diary_patient_name,
             admission_value=diary_admission_value,
-            # Род дневников определяется по ФИО из первичного документа,
-            # а UI-ФИО используется только для имени выходного файла.
             gender_source_name=source_patient_fio or diary_patient_name,
             discharge_value=current_semantic_date(self, "discharge_date"),
             repeat_statuses=self.repeat_statuses_var.get(),
