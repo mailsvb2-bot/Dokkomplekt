@@ -28,6 +28,13 @@ def iter_block_items(parent) -> Iterable[Paragraph | Table]:
 
 
 def extract_docx_text(path: str | Path) -> str:
+    """Extract visible Word text from body, tables, headers, footers and XML.
+
+    The primary-document and diary flows rely on this as a broad local scanner:
+    it keeps table order, avoids duplicate merged-cell text, includes header and
+    footer stories, then supplements python-docx output with raw XML fragments so
+    Word fields and less-common text containers are still discoverable.
+    """
     compatible_path = ensure_docx_compatible(path, label="Word document")
     doc = Document(str(compatible_path))
     lines: List[str] = []
