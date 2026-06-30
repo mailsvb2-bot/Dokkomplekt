@@ -31,6 +31,9 @@ impl ServerConfig {
         )
         .unwrap_or_else(|| "manual".to_string());
         let database_url = std::env::var("DATABASE_URL").ok();
+        if database_url.as_ref().map(|value| value.trim()).filter(|value| !value.is_empty()).is_none() && postgres_required_for_runtime() {
+            anyhow::bail!("PostgreSQL connection is required for license server runtime");
+        }
         let storage_mode = match database_url.as_ref().map(|value| value.trim()).filter(|value| !value.is_empty()) {
             Some(_) => "postgres".to_string(),
             None => "memory".to_string(),
@@ -46,6 +49,16 @@ impl ServerConfig {
             database_url,
         })
     }
+}
+
+fn postgres_required_for_runtime() -> bool {
+    for name in ["DOKKOMPLEKT_LICENSE_ENV", "APP_ENV", "RUST_ENV", "ENV"] {
+        let value = std::env::var(name).unwrap_or_default().trim().to_ascii_lowercase();
+        if matches!(value.as_str(), "production" | "prod") {
+            return true;
+        }
+    }
+    false
 }
 
 pub fn normalize_payment_provider(value: &str) -> Option<String> {
