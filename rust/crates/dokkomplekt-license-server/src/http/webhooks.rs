@@ -34,6 +34,9 @@ async fn provider_callback(State(state): State<AppState>, Json(event): Json<Prov
         return Err(StatusCode::BAD_REQUEST);
     }
     let provider = normalize_callback_provider(event.provider.as_deref().unwrap_or("manual")).ok_or(StatusCode::BAD_REQUEST)?;
+    if !matches!(provider, PaymentProvider::Manual) {
+        return Err(StatusCode::NOT_IMPLEMENTED);
+    }
     let status = normalize_payment_status(&event.status).ok_or(StatusCode::BAD_REQUEST)?;
     let record = PaymentEventRecord {
         id: Uuid::new_v4(),
