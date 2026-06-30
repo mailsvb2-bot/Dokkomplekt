@@ -18,7 +18,7 @@ class WindowCoreMixin:
         shell.pack(fill="both", expand=True, padx=0, pady=0)
 
         content = tk.Frame(shell, bg="#f3f6fb")
-        content.pack(fill="both", expand=True, padx=self._px(21, 12), pady=(self._px(14, 7), self._px(10, 4)))
+        content.pack(fill="both", expand=True, padx=self._px(12, 8), pady=(self._px(10, 6), self._px(8, 4)))
         content.grid_columnconfigure(0, weight=1)
         content.grid_rowconfigure(1, weight=1)
 
