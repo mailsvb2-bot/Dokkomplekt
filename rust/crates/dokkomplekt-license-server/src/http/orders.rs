@@ -1,5 +1,5 @@
 use crate::state::{AppState, OrderRecord, OrderStatus};
-use crate::storage::{StoreError};
+use crate::storage::StoreError;
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
