@@ -20,7 +20,7 @@ from diagnostic_logging import record_soft_exception
 from medical_docx_reader import extract_docx_text
 from medical_formatting import available_path, safe_filename
 
-DESKTOP_INTAKE_LOCK_VERSION = "v1.11"
+DESKTOP_INTAKE_LOCK_VERSION = "v1.12"
 DESKTOP_INTAKE_SETUP_PROMPT_VERSION = "v3-first-launch-required"
 DESKTOP_INTAKE_FOLDER_NAME = "Выписанные пациенты"
 DESKTOP_INTAKE_REQUIRES_RUNNING_APP = False
@@ -47,6 +47,7 @@ DESKTOP_INTAKE_MISSING_ENABLED_FOLDER_REASKS = True
 DESKTOP_INTAKE_IGNORES_HIDDEN_DOT_FILES = True
 DESKTOP_INTAKE_COPY_FALLBACK_TRIES_TO_UNLINK_SOURCE = True
 DESKTOP_INTAKE_RELAXED_PRIMARY_THRESHOLD_FOR_DOCTOR_FOLDER = True
+DESKTOP_INTAKE_TOP_LEVEL_DOCX_DROP_STARTS_APP = True
 _ALLOWED_PRIMARY_SUFFIXES = {".docx", ".docm"}
 _PRIMARY_MARKERS = (
     "первичный осмотр",
@@ -237,6 +238,11 @@ def _is_ignored_candidate_name(path: str | Path) -> bool:
     return name.startswith("~$") or name.startswith(".")
 
 
+def _is_supported_intake_document_name(path: str | Path) -> bool:
+    candidate = Path(path)
+    return candidate.suffix.lower() in _ALLOWED_PRIMARY_SUFFIXES and not _is_ignored_candidate_name(candidate)
+
+
 def _setting_bool(value: object) -> bool:
     """Normalize legacy JSON booleans stored as strings.
 
@@ -341,9 +347,7 @@ def scan_primary_candidates(folder: str | Path, seen_signatures: set[str]) -> tu
         return ()
     result: list[DesktopCandidate] = []
     for path in sorted(root.iterdir(), key=lambda item: item.name.lower()):
-        if not path.is_file() or path.suffix.lower() not in _ALLOWED_PRIMARY_SUFFIXES:
-            continue
-        if _is_ignored_candidate_name(path):
+        if not path.is_file() or not _is_supported_intake_document_name(path):
             continue
         try:
             stat = path.stat()
@@ -351,15 +355,16 @@ def scan_primary_candidates(folder: str | Path, seen_signatures: set[str]) -> tu
             continue
         if stat.st_size <= 0:
             continue
-        # Wait until file copy is likely complete before opening the DOCX.
-        # The old order parsed the Word zip first and only then checked mtime,
-        # which could produce noisy false negatives for a half-copied file.
+        # Wait until file copy is likely complete before touching the file.
+        # A doctor putting DOCX/DOCM into the dedicated «Выписанные пациенты»
+        # folder is already an explicit launch intent.  Do not require the
+        # background agent to parse hospital-specific wording before starting the
+        # GUI: that made real первичные документы invisible when templates used
+        # uncommon titles or sparse text.
         if time.time() - stat.st_mtime < 1.2:
             continue
         key = signature_key(path, stat.st_mtime_ns, stat.st_size)
         if key in seen_signatures:
-            continue
-        if not is_likely_primary_document(path):
             continue
         result.append(DesktopCandidate(path, (stat.st_mtime_ns, stat.st_size)))
     return tuple(result)
@@ -368,10 +373,9 @@ def scan_primary_candidates(folder: str | Path, seen_signatures: set[str]) -> tu
 def is_likely_primary_document(path: str | Path) -> bool:
     """Return True only for intake source documents, not generated templates.
 
-    The desktop folder watcher must not wake the doctor for every DOCX dropped
-    into the folder.  It is intentionally conservative: if a file looks like an
-    operation protocol, consent, consultation or discharge epicrisis, it is not
-    treated as a primary intake source.
+    This classifier is intentionally kept for diagnostics and manual role checks.
+    It is no longer a hard launch gate for the dedicated intake folder: the
+    watched folder itself is the doctor's explicit signal to start the workflow.
     """
 
     candidate = Path(path).expanduser()
@@ -454,7 +458,7 @@ def mark_seen(seen_signatures: set[str], candidate: DesktopCandidate) -> None:
 
 def assert_desktop_intake_lock() -> None:
     """Implement the assert_desktop_intake_lock workflow with validation, UI state updates and diagnostics."""
-    if DESKTOP_INTAKE_LOCK_VERSION != "v1.11":
+    if DESKTOP_INTAKE_LOCK_VERSION != "v1.12":
         raise AssertionError("Desktop intake lock changed unexpectedly")
     if DESKTOP_INTAKE_REQUIRES_RUNNING_APP:
         raise AssertionError("Desktop intake must support activation through the optional background agent")
@@ -463,7 +467,9 @@ def assert_desktop_intake_lock() -> None:
     if not DESKTOP_INTAKE_SCANS_TOP_LEVEL_ONLY:
         raise AssertionError("Desktop intake must scan top-level folder only to avoid output loops")
     if not DESKTOP_INTAKE_VALIDATES_PRIMARY_DOCUMENT_ROLE:
-        raise AssertionError("Desktop intake must ignore non-primary DOCX files")
+        raise AssertionError("Desktop intake must keep primary-document role checks available")
+    if not DESKTOP_INTAKE_TOP_LEVEL_DOCX_DROP_STARTS_APP:
+        raise AssertionError("Dropping DOCX/DOCM into the dedicated intake folder must start the app")
     if not DESKTOP_INTAKE_CREATES_PATIENT_FOLDER_AFTER_SELECTION:
         raise AssertionError("Desktop intake must not create empty patient folders before doctor selection")
     if not DESKTOP_INTAKE_MOVES_PRIMARY_INTO_PATIENT_FOLDER:
@@ -504,6 +510,14 @@ def assert_desktop_intake_lock() -> None:
         raise AssertionError("Desktop intake copy fallback must try to remove the top-level source")
     if not _is_ignored_candidate_name(Path(".hidden.docx")) or not _is_ignored_candidate_name(Path("~$temp.docx")):
         raise AssertionError("Desktop intake ignored-file predicate is broken")
+    if not _is_supported_intake_document_name(Path("Первичный осмотр.docx")):
+        raise AssertionError("Desktop intake must accept a top-level DOCX as launch intent")
+    if not _is_supported_intake_document_name(Path("Первичный осмотр.docm")):
+        raise AssertionError("Desktop intake must accept a top-level DOCM as launch intent")
+    if _is_supported_intake_document_name(Path("~$Первичный осмотр.docx")):
+        raise AssertionError("Desktop intake must not launch on Word temporary lock files")
+    if _is_supported_intake_document_name(Path("notes.txt")):
+        raise AssertionError("Desktop intake must ignore non-Word files")
     if normalize_intake_settings({"enabled": "false", "asked": "нет"})["enabled"]:
         raise AssertionError("String false must not enable desktop intake")
     if not should_prompt_intake_setup({}):
@@ -516,14 +530,3 @@ def assert_desktop_intake_lock() -> None:
         raise AssertionError("Generic discharge/hospitalization text must not trigger desktop intake")
     if len(signature_key("/tmp/Иванов.docx", 1, 2)) != 64:
         raise AssertionError("Desktop intake signatures must be hashed")
-
-
-def _available_dir(path: Path) -> Path:
-    if not path.exists():
-        return path
-    stem = path.name
-    for index in range(2, 10000):
-        candidate = path.with_name(f"{stem} ({index})")
-        if not candidate.exists():
-            return candidate
-    raise FileExistsError(f"Не удалось создать подпапку пациента: {path}")
