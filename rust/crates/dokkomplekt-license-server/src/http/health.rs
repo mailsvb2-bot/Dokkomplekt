@@ -22,7 +22,7 @@ async fn healthz(State(state): State<AppState>) -> Json<HealthResponse> {
 
 async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<HealthResponse>) {
     let response = health_response(&state).await;
-    let ready = !response.database_configured || response.database_connected;
+    let ready = response.database_configured && response.database_connected;
     let status = if ready { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
     (status, Json(response))
 }
