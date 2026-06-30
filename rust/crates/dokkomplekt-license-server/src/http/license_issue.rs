@@ -22,11 +22,15 @@ async fn issue_for_order(
     Path(order_id): Path<Uuid>,
     Json(request): Json<IssueRequest>,
 ) -> Result<Json<LicenseDocument>, StatusCode> {
-    if request.machine_hash.trim().is_empty() {
+    let requested_machine = request.machine_hash.trim();
+    if requested_machine.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
     let order = state.store.get_order_async(order_id).await.map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
     if !matches!(order.status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
+        return Err(StatusCode::CONFLICT);
+    }
+    if order.machine_hash.as_deref().map(str::trim) != Some(requested_machine) {
         return Err(StatusCode::CONFLICT);
     }
     let plan = parse_plan(&order.plan).ok_or(StatusCode::BAD_REQUEST)?;
@@ -37,7 +41,7 @@ async fn issue_for_order(
             plan,
             owner_name: request.owner_name,
             organization_name: request.organization_name,
-            allowed_machines: vec![request.machine_hash],
+            allowed_machines: vec![requested_machine.to_string()],
             valid_days: state.config.default_license_days,
         },
         &state.config.issuer_id,
@@ -68,7 +72,6 @@ fn store_error_status(error: StoreError) -> StatusCode {
 
 fn parse_plan(value: &str) -> Option<PlanId> {
     match value.trim() {
-        "trial" => Some(PlanId::Trial),
         "doctor_start" => Some(PlanId::DoctorStart),
         "doctor_pro" => Some(PlanId::DoctorPro),
         "department" => Some(PlanId::Department),
