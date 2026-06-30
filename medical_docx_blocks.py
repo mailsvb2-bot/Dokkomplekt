@@ -20,6 +20,8 @@ from docx.text.paragraph import Paragraph
 from medical_constants import DATE_FMT
 from medical_text_utils import normalize_match, normalize_text
 from diagnostic_logging import record_soft_exception
+from medical_word_format import ensure_docx_compatible
+
 
 def iter_block_items(parent) -> Iterable[Paragraph | Table]:
     if isinstance(parent, DocxDocument):
@@ -38,7 +40,8 @@ def iter_block_items(parent) -> Iterable[Paragraph | Table]:
 
 def extract_docx_text(path: str | Path) -> str:
     """Implement the extract_docx_text workflow with validation, UI state updates and diagnostics."""
-    doc = Document(str(path))
+    compatible_path = ensure_docx_compatible(path, label="Word-документ")
+    doc = Document(str(compatible_path))
     lines: List[str] = []
 
     def walk(parent):
@@ -81,9 +84,9 @@ def extract_docx_text(path: str | Path) -> str:
     try:
         from medical_docx_xml_fragments import _docx_xml_text_fragments
 
-        lines.extend(_docx_xml_text_fragments(path))
+        lines.extend(_docx_xml_text_fragments(compatible_path))
     except Exception as exc:
-        record_soft_exception("medical_docx_blocks.xml_fragments", exc, detail=str(path))
+        record_soft_exception("medical_docx_blocks.xml_fragments", exc, detail=str(compatible_path))
 
     deduped: list[str] = []
     seen: set[str] = set()
