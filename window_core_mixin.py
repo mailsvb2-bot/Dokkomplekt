@@ -12,25 +12,23 @@ class WindowCoreMixin:
     def _build_ui(self) -> None:
         self._setup_style()
 
-        # Нижняя служебная строка убрана по пользовательскому требованию.
-        # Скрытый label оставлен как безопасная цель для внутренних _set_status/_log,
-        # чтобы callback-контракты UI не ломались, но текст больше не виден в окне.
-        self._status_bar_label = tk.Label(self.root, text="", bg=DEEP, fg=MUTED, font=self._font(11))
+        self._status_bar_label = tk.Label(self.root, text="", bg="#ffffff", fg=MUTED, font=self._font(11))
 
-        shell = tk.Frame(self.root, bg=DEEP, highlightthickness=1, highlightbackground="#123958")
+        shell = tk.Frame(self.root, bg="#ffffff", highlightthickness=1, highlightbackground="#d8e2ef")
         shell.pack(fill="both", expand=True, padx=0, pady=0)
 
-        content = tk.Frame(shell, bg=DEEP)
+        content = tk.Frame(shell, bg="#f3f6fb")
         content.pack(fill="both", expand=True, padx=self._px(21, 12), pady=(self._px(14, 7), self._px(10, 4)))
-
         content.grid_columnconfigure(0, weight=1)
+        content.grid_rowconfigure(1, weight=1)
+
+        if hasattr(self, "_build_wizard_surface"):
+            self._build_wizard_surface(content)
+            return
+
         for row in range(5):
             content.grid_rowconfigure(row, weight=0)
-        # Все секции имеют естественную высоту, чтобы блок 03 не схлопывался при нехватке места.
-
         self._build_header(content)
-        # Логичный поток работы: источник данных + распознанные поля пациента,
-        # затем дополнительные входные файлы, затем список итоговых документов.
         self._build_patient_card(content)
         self._build_input_files_card(content)
         self._build_create_checklist_card(content)
@@ -45,8 +43,6 @@ class WindowCoreMixin:
         return ("Segoe UI", scaled, weight) if weight else ("Segoe UI", scaled)
 
     def _build_one_window_workspace(self, parent: tk.Frame) -> None:
-        # Оставлено для совместимости со старой внутренней структурой.
-        # Новый экран строит секции 02 и 03 напрямую, без двухколоночного разбиения.
         self._build_input_files_card(parent)
         self._build_create_checklist_card(parent)
 
