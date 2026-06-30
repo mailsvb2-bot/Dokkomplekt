@@ -11,6 +11,8 @@ from pathlib import Path
 from docx import Document
 
 from diary_constants import (DATE_PREFIX_RE, EXAMINEE_ANY_RE, EXAMINEE_STANDARD_STATE_RE, EXAMINEE_START_RE, MIN_STATUS_LEN, SIGNATURE_MARKERS, STATUS_DATE_PREFIX_RE, STATUS_LABEL_PREFIX_RE, STATUS_NUMBER_BEFORE_DATE_RE, STATUS_NUMBER_PREFIX_RE, STATUS_STANDALONE_DAY_PREFIX_RE, STRUCTURAL_DIARY_PREFIXES, WHITESPACE_RE)
+from medical_word_format import ensure_docx_compatible
+
 
 def normalize_text(text: str) -> str:
     text = (text or "")
@@ -86,7 +88,8 @@ def looks_like_status(text: str) -> bool:
 
 
 def extract_statuses_from_docx(path: str | Path) -> list[str]:
-    doc = Document(str(path))
+    compatible_path = ensure_docx_compatible(path, label="тексты дневников")
+    doc = Document(str(compatible_path))
     statuses: list[str] = []
     seen_statuses: set[str] = set()
 
