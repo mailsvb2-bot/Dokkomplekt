@@ -83,7 +83,7 @@ def build_diary_wizard_review(app: object) -> DiaryWizardReview:
     if not admission:
         warnings.append("Не найдена дата госпитализации; дневники не знают, с какой даты начать.")
     if not discharge:
-        warnings.append("Не указана дата выписки; программа не знает, на какой дате закончить дневники.")
+        warnings.append("Не указана дата выписки; программа не знает, на какой строке закончить дневники.")
     if not templates and not text_output:
         warnings.append("Выберите папку/шаблон дат дневников через кнопку «Даты» или включите текстовый режим дневников.")
     if not texts:
