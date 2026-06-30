@@ -6,6 +6,7 @@ use serde::Serialize;
 struct HealthResponse {
     status: &'static str,
     service: &'static str,
+    environment: String,
     storage_mode: String,
     storage_backend: &'static str,
     database_configured: bool,
@@ -33,6 +34,7 @@ async fn health_response(state: &AppState) -> HealthResponse {
     HealthResponse {
         status: "ok",
         service: "dokkomplekt-license-server",
+        environment: state.config.environment.clone(),
         storage_mode: state.config.storage_mode.clone(),
         storage_backend: state.store.backend_name(),
         database_configured,
