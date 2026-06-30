@@ -19,7 +19,6 @@ from diagnosis_widget import DiagnosisWidgetMixin
 from ui_file_rows import UiFileRowsMixin
 from diary_template_discovery import DiaryTemplateDiscoveryMixin
 from diary_template_selection import DiaryTemplateSelectionMixin
-from legacy_word_file_mixin import LegacyWordFileMixin
 from product_access import ProductAccessMixin, ProductLicenseMixin
 from product_access_native import NativeProductAccessMixin
 
@@ -43,7 +42,6 @@ class CombinedMedicalDiaryApp(
     LayoutMixin,
     DialogsMixin,
     WidgetsMixin,
-    LegacyWordFileMixin,
     FilesMixin,
     DiaryTemplateMixin,
     DragDropMixin,
