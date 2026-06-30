@@ -33,14 +33,14 @@ async fn call(app: Router, method: Method, uri: String, body: Option<Value>) -> 
     (status, body)
 }
 
-async fn emulate(app: Router, storage_backend: &str, database_connected: bool) {
+async fn emulate(app: Router, storage_backend: &str, database_connected: bool, ready_status: StatusCode) {
     let (status, health) = call(app.clone(), Method::GET, "/healthz".to_string(), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(health["storage_backend"], storage_backend);
     assert_eq!(health["database_connected"], database_connected);
 
     let (status, ready) = call(app.clone(), Method::GET, "/readyz".to_string(), None).await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, ready_status);
     assert_eq!(ready["storage_backend"], storage_backend);
 
     let (status, order) = call(app.clone(), Method::POST, "/api/orders".to_string(), Some(json!({ "plan": "doctor_pro", "amount_rub": 3900, "machine_hash": "machine-a" }))).await;
@@ -86,7 +86,7 @@ async fn emulate(app: Router, storage_backend: &str, database_connected: bool) {
 
 #[tokio::test]
 async fn memory_flow() {
-    emulate(build_app(AppState::try_new(config(None)).unwrap()), "memory", false).await;
+    emulate(build_app(AppState::try_new(config(None)).unwrap()), "memory", false, StatusCode::SERVICE_UNAVAILABLE).await;
 }
 
 #[tokio::test]
@@ -95,6 +95,6 @@ async fn postgres_flow_when_database_url_is_present() {
     let app = tokio::task::spawn_blocking(move || build_app(AppState::try_new(config(Some(database_url))).unwrap()))
         .await
         .unwrap();
-    emulate(app.clone(), "postgres", true).await;
+    emulate(app.clone(), "postgres", true, StatusCode::OK).await;
     std::mem::forget(app);
 }
