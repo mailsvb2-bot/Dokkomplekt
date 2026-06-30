@@ -10,31 +10,33 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from docx import Document
-
 from diagnostic_logging import record_soft_exception
 from medical_formatting import redact_technical_text, technical_ref
 from medical_formatting import technical_report_path
+from medical_word_format import SUPPORTED_WORD_SUFFIXES, ensure_docx_compatible, existing_word_file
 
+from diary_calendar import default_observation_diary_dates
 from diary_dates import parse_admission_month_year, parse_full_date, parse_full_datetime, parse_optional_discharge_date
 from diary_gender import detect_gender_from_patient_name
 from diary_models import DiaryBatchResult
 from diary_paths import available_path, make_diary_output_name, safe_filename_part
-from diary_table import detect_first_month_year_from_docx
+from diary_text_output import (
+    DynamicEpicrisisInput,
+    build_dated_diary_entries,
+    build_dynamic_epicrisis_text,
+    create_text_diary_document,
+    dynamic_epicrisis_dates,
+)
 from diary_text_parser import extract_statuses_from_docx
 from diary_writer import fill_diary_file
+
 
 def _existing_docx_files(paths: Iterable[str | Path], label: str) -> list[Path]:
     result: list[Path] = []
     seen: set[Path] = set()
     for raw_path in paths:
-        if raw_path is None or str(raw_path).strip() == "":
-            raise ValueError(f"Пустой путь к файлу ({label}).")
-        path = Path(raw_path).expanduser()
-        if not path.exists() or not path.is_file():
-            raise FileNotFoundError(f"Не найден файл ({label}): {path}")
-        if path.suffix.lower() not in {".docx", ".docm"}:
-            raise ValueError(f"Неверный формат файла ({label}): {path.suffix or 'без расширения'}. Разрешено: .docx, .docm.")
+        source = existing_word_file(raw_path, label)
+        path = ensure_docx_compatible(source, label=label)
         key = path.resolve()
         if key in seen:
             continue
@@ -79,6 +81,82 @@ def open_folder(path: str | Path) -> bool:
         return False
 
 
+def _fill_text_diary_batch(
+    *,
+    statuses: Sequence[str],
+    result_dir: Path,
+    patient_name: str,
+    admission_value: str,
+    admission_date_value,
+    discharge_date_value,
+    gender_source_name: str,
+    repeat_statuses: bool,
+    patient_gender: str | None,
+    sick_leave_dynamic_epicrisis: bool,
+    treatment_correction: str,
+    birth_date: str,
+    complaints: str,
+    treatment: str,
+    profile_status: str,
+    sick_leave_from: str,
+    write_report: bool,
+) -> DiaryBatchResult:
+    if admission_date_value is None:
+        admission_date_value = parse_full_date(admission_value)
+    # If a discharge date exists, allow enough planned entries to reach it.  The
+    # calendar helper stops at discharge.  Without discharge, create at least as
+    # many entries as source statuses and never fewer than 10 planned rows.
+    if discharge_date_value is not None:
+        rough_limit = max(10, min(80, (discharge_date_value - admission_date_value).days + 10))
+    else:
+        rough_limit = max(10, len(statuses) or 10)
+    dates = default_observation_diary_dates(admission_date_value, limit=rough_limit, discharge_date=discharge_date_value)
+    entries = build_dated_diary_entries(statuses=statuses, dates=dates, patient_gender=patient_gender, repeat_statuses=repeat_statuses)
+    epicrisis_entries: list[tuple[object, str]] = []
+    if sick_leave_dynamic_epicrisis:
+        epi_input = DynamicEpicrisisInput(
+            patient_name=patient_name,
+            birth_date=birth_date,
+            sick_leave_from=sick_leave_from or admission_value,
+            complaints=complaints,
+            treatment=treatment,
+            profile_status=profile_status,
+            treatment_correction=treatment_correction,
+        )
+        for epi_date in dynamic_epicrisis_dates(admission_date_value, discharge_date=discharge_date_value, limit=12):
+            epicrisis_entries.append((epi_date, build_dynamic_epicrisis_text(epi_input)))
+    created = create_text_diary_document(
+        output_dir=result_dir,
+        patient_name=patient_name,
+        entries=entries,
+        epicrisis_entries=epicrisis_entries,
+    )
+    report_path: Path | None = None
+    if write_report:
+        lines = [
+            "ОТЧЁТ: текстовые дневники",
+            f"Дата запуска: {datetime.now():%d.%m.%Y %H:%M:%S}",
+            "Карточка пациента: обезличена",
+            "Технический идентификатор: " + technical_ref(patient_name, gender_source_name, admission_value),
+            f"Дневниковых дат: {len(dates)}",
+            f"Динамических эпикризов: {len(epicrisis_entries)}",
+        ]
+        report_path = technical_report_path(result_dir, "ОТЧЁТ_дневники.txt")
+        report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return DiaryBatchResult(
+        created_files=[created],
+        report_path=report_path,
+        processed_files=1,
+        filled_rows=len(entries),
+        detected_rows=len(entries),
+        month_cells_filled=0,
+        final_rows_filled=len(epicrisis_entries),
+        gender_replacements=0,
+        removed_holiday_rows=0,
+        removed_after_discharge_rows=0,
+    )
+
+
 def fill_diary_batch(
     *,
     status_files: Sequence[str | Path],
@@ -100,15 +178,23 @@ def fill_diary_batch(
     diary_hour_offsets: Sequence[int] = (),
     diary_frequency_mode: str = "daily",
     allow_empty_statuses: bool = False,
+    text_output: bool = False,
+    sick_leave_dynamic_epicrisis: bool = False,
+    treatment_correction: str = "",
+    birth_date: str = "",
+    complaints: str = "",
+    treatment: str = "",
+    profile_status: str = "",
+    sick_leave_from: str = "",
 ) -> DiaryBatchResult:
     """Implement the fill_diary_batch workflow with validation, UI state updates and diagnostics."""
-    if not diary_files:
+    if not diary_files and not text_output:
         raise ValueError("Сначала выберите файлы-таблицы дневников, которые нужно заполнить.")
-    diary_file_paths = _existing_docx_files(diary_files, "таблица дневников")
+    diary_file_paths = _existing_docx_files(diary_files, "таблица дневников") if diary_files else []
     status_file_paths = _existing_docx_files(status_files, "тексты дневников") if status_files else []
     if not status_files and not allow_empty_statuses:
         raise ValueError(
-            "Сначала выберите тексты дневников или положите DOCX с текстами рядом с первичным документом. "
+            "Сначала выберите тексты дневников или положите DOCX/DOC/DOCM с текстами рядом с первичным документом. "
             "Программа не будет создавать пустые дневники без текстов."
         )
     if not status_files and not fill_months and not force_final_diary:
@@ -134,8 +220,32 @@ def fill_diary_batch(
     if status_files and not statuses:
         raise ValueError("В выбранных файлах с текстами дневников не найдено подходящих текстов.")
 
-    first_dir = diary_file_paths[0].parent
+    first_dir = diary_file_paths[0].parent if diary_file_paths else Path.cwd()
     result_dir = _resolve_output_dir(output_dir, first_dir)
+
+    if text_output:
+        result = _fill_text_diary_batch(
+            statuses=statuses,
+            result_dir=result_dir,
+            patient_name=patient_name,
+            admission_value=admission_value,
+            admission_date_value=admission_date_value,
+            discharge_date_value=discharge_date_value,
+            gender_source_name=gender_name,
+            repeat_statuses=repeat_statuses,
+            patient_gender=patient_gender,
+            sick_leave_dynamic_epicrisis=sick_leave_dynamic_epicrisis,
+            treatment_correction=treatment_correction,
+            birth_date=birth_date,
+            complaints=complaints,
+            treatment=treatment,
+            profile_status=profile_status,
+            sick_leave_from=sick_leave_from,
+            write_report=write_report,
+        )
+        if open_result_folder:
+            open_folder(result_dir)
+        return result
 
     idx = 0
     created_files: list[Path] = []
