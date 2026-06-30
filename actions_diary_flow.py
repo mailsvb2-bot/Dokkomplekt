@@ -9,6 +9,14 @@ from medical_primary_document_state import selected_primary_document_path
 
 class ActionsDiaryFlowMixin:
     def _create_diaries_impl(self):
+        """Create the doctor-selected diary output for the current patient case.
+
+        The current production contract prefers text diaries over table-only
+        output: selected diary text files become dated paragraphs, while legacy
+        table settings stay available for compatibility inside ``fill_diary_batch``.
+        The UI path still reuses one patient source of truth for admission date,
+        gender adaptation and optional sick-leave dynamic epicrisis entries.
+        """
         primary_path = selected_primary_document_path(self)
         diary_admission_value = self._sync_admission_date_from_title(force=True)
         if primary_path is not None and not diary_admission_value:
