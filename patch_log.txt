@@ -1,0 +1,4 @@
+UPDATED: rust/crates/dokkomplekt-license-server/src/config.rs
+UPDATED: diary_text_selection.py
+UPDATED: files_mixin.py
+OK: patch applied

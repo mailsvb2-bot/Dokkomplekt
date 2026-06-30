@@ -11,7 +11,7 @@ def _is_docx_file(path: str | Path) -> bool:
         p = Path(path)
         if not p.is_file() or p.name.startswith("~$"):
             return False
-        if p.suffix.lower() in {".docx", ".docm"}:
+        if p.suffix.lower() in {".docx", ".docm", ".doc"}:
             return True
         if p.suffix:
             return False
@@ -202,7 +202,7 @@ def normalize_diary_diagnosis_name(value: str) -> str:
         p = Path(text)
         # Не считаем формальный диагноз вида "F70.0 ..." именем файла только
         # из-за точки в коде МКБ. Stem берём только для реальных DOCX/DOCM имён.
-        if p.suffix.lower() in {".docx", ".docm"}:
+        if p.suffix.lower() in {".docx", ".docm", ".doc"}:
             text = p.stem
     except Exception as exc:
         record_soft_exception("diary_text_selection:156", exc)

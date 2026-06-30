@@ -30,8 +30,12 @@ impl ServerConfig {
             &std::env::var("DOKKOMPLEKT_PAYMENT_PROVIDER").unwrap_or_else(|_| "manual".to_string()),
         )
         .unwrap_or_else(|| "manual".to_string());
+        let strict_runtime = strict_runtime_required();
+        if strict_runtime && payment_provider == "manual" {
+            anyhow::bail!("manual payment provider is not allowed for license server runtime");
+        }
         let database_url = std::env::var("DATABASE_URL").ok();
-        if database_url.as_ref().map(|value| value.trim()).filter(|value| !value.is_empty()).is_none() && postgres_required_for_runtime() {
+        if database_url.as_ref().map(|value| value.trim()).filter(|value| !value.is_empty()).is_none() && strict_runtime {
             anyhow::bail!("PostgreSQL connection is required for license server runtime");
         }
         let storage_mode = match database_url.as_ref().map(|value| value.trim()).filter(|value| !value.is_empty()) {
@@ -51,7 +55,7 @@ impl ServerConfig {
     }
 }
 
-fn postgres_required_for_runtime() -> bool {
+fn strict_runtime_required() -> bool {
     for name in ["DOKKOMPLEKT_LICENSE_ENV", "APP_ENV", "RUST_ENV", "ENV"] {
         let value = std::env::var(name).unwrap_or_default().trim().to_ascii_lowercase();
         if matches!(value.as_str(), "production" | "prod") {

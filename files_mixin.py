@@ -178,7 +178,7 @@ class FilesMixin:
             if path:
                 messagebox.showwarning(
                     "Нужен Word-документ",
-                    "В блок 01 нужно выбрать первичный документ Word в формате DOCX/DOCM.",
+                    "В блок 01 нужно выбрать первичный документ Word в формате DOC/DOCX/DOCM.",
                 )
             return
         path = sync_selected_primary_document_path(self, candidate)
@@ -246,7 +246,7 @@ class FilesMixin:
         path = filedialog.askopenfilename(
             title="Выберите первичный документ",
             initialdir=self._dialog_initial_dir(DIR_PRIMARY_DOCUMENTS),
-            filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("All files", "*.*")],
+            filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docx *.docm"), ("All files", "*.*")],
         )
         if not path:
             return
@@ -256,7 +256,7 @@ class FilesMixin:
         path = filedialog.askopenfilename(
             title="Выберите файл ЭПИ",
             initialdir=self._dialog_initial_dir(DIR_EPI),
-            filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("Text", "*.txt"), ("All files", "*.*")],
+            filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docx *.docm"), ("Text", "*.txt"), ("All files", "*.*")],
         )
         if path:
             self.epi_path_var.set(path)
@@ -394,9 +394,9 @@ class FilesMixin:
 
         if ask_folder:
             selected = filedialog.askopenfilename(
-                title="Выберите любой DOCX из папки с текстами дневников",
+                title="Выберите любой Word-файл из папки с текстами дневников",
                 initialdir=self._dialog_initial_dir(DIR_DIARY_TEXTS),
-                filetypes=[("Word DOCX", "*.docx *.docm"), ("All files", "*.*")],
+                filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docx *.docm"), ("All files", "*.*")],
             )
             if selected:
                 folder = Path(selected).parent
@@ -423,7 +423,7 @@ class FilesMixin:
         paths = filedialog.askopenfilenames(
             title="Выберите файл(ы) с текстами дневников",
             initialdir=self._dialog_initial_dir(DIR_DIARY_TEXTS),
-            filetypes=[("Word DOCX", "*.docx *.docm"), ("All files", "*.*")],
+            filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docx *.docm"), ("All files", "*.*")],
         )
         if not paths:
             return
@@ -535,7 +535,7 @@ class FilesMixin:
         selected = filedialog.askopenfilename(
             title="Выберите конкретный DOCX с датами дневников или отмените для выбора папки",
             initialdir=initial_dir,
-            filetypes=[("Word DOCX", "*.docx *.docm"), ("All files", "*.*")],
+            filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docx *.docm"), ("All files", "*.*")],
         )
         if selected:
             if self._set_manual_diary_template_file(selected) and not self.output_dir_var.get().strip():
