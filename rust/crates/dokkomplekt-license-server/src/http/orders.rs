@@ -26,16 +26,36 @@ pub fn router() -> Router<AppState> {
 }
 
 async fn create_order(State(state): State<AppState>, Json(request): Json<CreateOrderRequest>) -> Result<Json<CreateOrderResponse>, StatusCode> {
-    if request.plan.trim().is_empty() || request.amount_rub == 0 {
+    let plan = request.plan.trim();
+    if plan.is_empty() || request.amount_rub == 0 {
         return Err(StatusCode::BAD_REQUEST);
     }
+    if plan == "doctor_start" && request.amount_rub != 1490 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if plan == "doctor_pro" && request.amount_rub != 3900 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if plan == "department" && request.amount_rub != 14900 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if plan == "clinic" && request.amount_rub != 49000 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if plan == "enterprise" && request.amount_rub != 900000 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if !matches!(plan, "doctor_start" | "doctor_pro" | "department" | "clinic" | "enterprise") {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let machine_hash = request.machine_hash.as_deref().map(str::trim).filter(|value| !value.is_empty()).map(str::to_string).ok_or(StatusCode::BAD_REQUEST)?;
     let order_id = Uuid::new_v4();
     let record = OrderRecord {
         id: order_id,
-        plan: request.plan.trim().to_string(),
+        plan: plan.to_string(),
         amount_rub: request.amount_rub,
         status: OrderStatus::WaitingPayment,
-        machine_hash: request.machine_hash,
+        machine_hash: Some(machine_hash),
         created_at: OffsetDateTime::now_utc(),
     };
     state.store.create_order_async(record.clone()).await.map_err(store_error_status)?;
