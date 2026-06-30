@@ -1085,7 +1085,8 @@ def read_additional_info_file(path):
             try:
                 from medical_docx_xml_fragments import ensure_docx_compatible
                 word_path = ensure_docx_compatible(candidate)
-            except Exception:
+            except (ImportError, OSError, RuntimeError, ValueError) as exc:
+                record_soft_exception("dialog_fields_core.additional_info_doc_conversion", exc, detail=str(candidate))
                 word_path = candidate
         return extract_docx_text(word_path).strip()
     raise ValueError(f"Неверный формат файла дополнительной информации: {suffix or 'без расширения'}")
