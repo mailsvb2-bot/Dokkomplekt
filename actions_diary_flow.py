@@ -11,7 +11,7 @@ class ActionsDiaryFlowMixin:
     def _create_diaries_impl(self):
         # Для дневников дата поступления берётся строго из заголовка
         # первичного документа/направления. Это значение затем передаётся в
-        # старый fill_diary_batch как обычная строка даты; diary_filler.py не меняем.
+        # fill_diary_batch как обычная строка даты.
         """Implement the _create_diaries_impl workflow with validation, UI state updates and diagnostics."""
         primary_path = selected_primary_document_path(self)
         diary_admission_value = self._sync_admission_date_from_title(force=True)
@@ -22,24 +22,27 @@ class ActionsDiaryFlowMixin:
             )
         if not self.diary_files or getattr(self, "_diary_files_auto_selected", False):
             self._auto_select_numbered_diary_template(ask_folder=True)
-        if not self.diary_files:
-            raise ValueError("Выберите папку «шаблоны дневников» через кнопку «Даты» во втором блоке. Программа выберет нужный шаблон 01–31 по дате поступления.")
+        # Новый текстовый режим дневников не зависит от таблицы дат, но старый
+        # табличный режим остаётся совместимым: если шаблон выбран, он будет
+        # использоваться; если нет — создаётся один DOCX с датированными текстами.
+        text_output = True
         if not self.status_files:
             self._auto_select_diary_text_by_diagnosis(ask_folder=False)
         if not self.status_files:
             self.choose_status_files()
         if not self.status_files:
-            raise ValueError("Выберите файл(ы) с текстами дневников. Шаблон 01–31 — это только таблица; тексты берутся из отдельного файла с дневниками.")
+            raise ValueError("Выберите файл(ы) с текстами дневников. Тексты можно выбирать из DOCX/DOCM/DOC.")
         try:
             from diary_creation_wizard import confirm_diary_creation
             if not confirm_diary_creation(self):
-                raise ValueError("Создание дневников остановлено мастером дневников: проверьте дату госпитализации, шаблон дат и тексты дневников.")
+                raise ValueError("Создание дневников остановлено мастером дневников: проверьте дату госпитализации и тексты дневников.")
         except ValueError:
             raise
         except Exception as exc:
             record_soft_exception("actions_diary_flow.diary_wizard", exc)
         diary_patient_name = self.patient_name_var.get().strip()
         source_patient_fio = ""
+        parsed_for_name = None
         if primary_path is not None:
             try:
                 parsed_for_name = self._parse_primary_document(str(primary_path))
@@ -62,6 +65,8 @@ class ActionsDiaryFlowMixin:
         out_dir = str(self._result_output_dir())
         from diary_batch import fill_diary_batch
         diary_schedule = self._selected_profile_diary_schedule()
+        sick_leave_yes = self._normalize_yes_no(getattr(self, "expert_sick_leave_needed_var", None).get() if getattr(self, "expert_sick_leave_needed_var", None) else "") == "да"
+        treatment_correction = str(getattr(getattr(self, "diary_treatment_correction_var", None), "get", lambda: "")() or "").strip()
         result = fill_diary_batch(
             status_files=self.status_files,
             diary_files=self.diary_files,
@@ -83,6 +88,14 @@ class ActionsDiaryFlowMixin:
             diary_day_offsets=diary_schedule.day_offsets if diary_schedule else (),
             diary_hour_offsets=diary_schedule.hour_offsets if diary_schedule and getattr(self, "diary_frequency_mode_var", None) and self.diary_frequency_mode_var.get() == "hourly" else (),
             diary_frequency_mode=getattr(self, "diary_frequency_mode_var", None).get() if getattr(self, "diary_frequency_mode_var", None) else "daily",
+            text_output=text_output,
+            sick_leave_dynamic_epicrisis=sick_leave_yes,
+            treatment_correction=treatment_correction,
+            birth_date=str(getattr(parsed_for_name, "birth", "") or getattr(getattr(self, "data", None), "birth", "") or ""),
+            complaints=str(getattr(parsed_for_name, "complaints", "") or getattr(getattr(self, "data", None), "complaints", "") or ""),
+            treatment=str(getattr(parsed_for_name, "treatment_plan", "") or getattr(getattr(self, "data", None), "treatment_plan", "") or getattr(getattr(self, "assigned_treatment_var", None), "get", lambda: "")() or ""),
+            profile_status=str(getattr(parsed_for_name, "mental_status", "") or getattr(getattr(self, "data", None), "mental_status", "") or ""),
+            sick_leave_from=current_semantic_date(self, "expert_sick_leave_from"),
         )
         self._log("\n✅ Дневники заполнены:\n")
         for path in result.created_files:
@@ -93,7 +106,7 @@ class ActionsDiaryFlowMixin:
             self._log("Отчёт дневников не создавался: диагностические отчёты выключены.\n")
         self._log(
             f"Итого: файлов {result.processed_files}, дневников {result.filled_rows}, "
-            f"дат {result.month_cells_filled}, финальных записей {result.final_rows_filled}, "
+            f"дат {result.month_cells_filled}, финальных/динамических записей {result.final_rows_filled}, "
             f"удалено после выписки {result.removed_after_discharge_rows}.\n"
         )
         return result
