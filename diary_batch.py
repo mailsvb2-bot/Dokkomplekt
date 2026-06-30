@@ -1,34 +1,169 @@
-"""Разделённый слой заполнителя дневников.
-
-Файл создан при архитектурной нарезке бывшего diary_filler.py.
-"""
+"""Разделённый слой заполнителя дневников."""
 
 from __future__ import annotations
 
-import shutil
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from pathlib import Path
+import shutil
 from typing import Iterable, Sequence
 
-from diagnostic_logging import record_soft_exception
-from medical_formatting import redact_technical_text, technical_ref
-from medical_formatting import technical_report_path
-from medical_word_format import SUPPORTED_WORD_SUFFIXES, ensure_docx_compatible, existing_word_file
+from docx import Document
 
-from diary_calendar import default_observation_diary_dates
+from diagnostic_logging import record_soft_exception
+from medical_formatting import redact_technical_text, safe_filename, technical_ref, technical_report_path
+from medical_word_format import ensure_docx_compatible, existing_word_file
+
 from diary_dates import parse_admission_month_year, parse_full_date, parse_full_datetime, parse_optional_discharge_date
-from diary_gender import detect_gender_from_patient_name
+from diary_gender import adapt_text_to_patient_gender, detect_gender_from_patient_name
 from diary_models import DiaryBatchResult
 from diary_paths import available_path, make_diary_output_name, safe_filename_part
-from diary_text_output import (
-    DynamicEpicrisisInput,
-    build_dated_diary_entries,
-    build_dynamic_epicrisis_text,
-    create_text_diary_document,
-    dynamic_epicrisis_dates,
-)
-from diary_text_parser import extract_statuses_from_docx
+from diary_text_parser import clean_status_text, extract_statuses_from_docx
 from diary_writer import fill_diary_file
+
+_FIXED_HOLIDAY_RANGES: tuple[tuple[int, int, int], ...] = ((1, 1, 9), (5, 1, 9))
+DIARY_TEXT_OUTPUT_LOCK_VERSION = "v1.0"
+DIARY_TEXT_OUTPUT_USES_DATED_PARAGRAPHS = True
+DIARY_TEXT_OUTPUT_SUPPORTS_DYNAMIC_EPICRISIS = True
+
+
+@dataclass(frozen=True)
+class DynamicEpicrisisInput:
+    patient_name: str = ""
+    birth_date: str = ""
+    sick_leave_from: str = ""
+    complaints: str = ""
+    treatment: str = ""
+    profile_status: str = ""
+    treatment_correction: str = ""
+
+
+def is_fixed_holiday(day: date) -> bool:
+    return any(month == day.month and start <= day.day <= end for month, start, end in _FIXED_HOLIDAY_RANGES)
+
+
+def is_non_working_day(day: date) -> bool:
+    return day.weekday() >= 5 or is_fixed_holiday(day)
+
+
+def next_working_day(day: date, *, used: Iterable[date] = ()) -> date:
+    used_set = set(used)
+    current = day
+    for _ in range(370):
+        if not is_non_working_day(current) and current not in used_set:
+            return current
+        current += timedelta(days=1)
+    raise RuntimeError("Не удалось подобрать рабочую дату дневника в пределах года.")
+
+
+def default_observation_diary_dates(admission: date, *, limit: int = 20, discharge_date: date | None = None) -> tuple[date, ...]:
+    if limit <= 0:
+        return ()
+    offsets: list[int] = [0, 1, 2, 7]
+    next_offset = 10
+    step_toggle = 0
+    while len(offsets) < max(limit * 3, 12):
+        offsets.append(next_offset)
+        next_offset += 3 if step_toggle % 2 == 0 else 4
+        step_toggle += 1
+
+    result: list[date] = []
+    for offset in offsets:
+        planned = admission + timedelta(days=max(0, int(offset)))
+        if discharge_date is not None and planned > discharge_date:
+            break
+        adjusted = next_working_day(planned, used=result)
+        if discharge_date is not None and adjusted > discharge_date:
+            break
+        result.append(adjusted)
+        if len(result) >= limit:
+            break
+    return tuple(result)
+
+
+def diary_text_output_name(patient_name: str) -> str:
+    return safe_filename(make_diary_output_name(safe_filename_part(patient_name), file_index=1, total_files=1))
+
+
+def build_dated_diary_entries(
+    *,
+    statuses: Sequence[str],
+    dates: Sequence[date],
+    patient_gender: str | None = None,
+    repeat_statuses: bool = True,
+) -> tuple[str, ...]:
+    entries: list[str] = []
+    status_index = 0
+    for item_date in dates:
+        if not statuses:
+            text = ""
+        else:
+            if status_index >= len(statuses):
+                if repeat_statuses:
+                    status_index = 0
+                else:
+                    break
+            text = statuses[status_index]
+            status_index += 1
+        adapted, _changed = adapt_text_to_patient_gender(text, patient_gender)
+        cleaned = clean_status_text(adapted)
+        entries.append(f"{item_date:%d.%m.%y} {cleaned}".rstrip())
+    return tuple(entries)
+
+
+def dynamic_epicrisis_dates(admission: date, *, discharge_date: date | None = None, limit: int = 12) -> tuple[date, ...]:
+    result: list[date] = []
+    current = admission + timedelta(days=10)
+    while len(result) < limit:
+        if discharge_date is not None and current > discharge_date:
+            break
+        adjusted = next_working_day(current, used=result)
+        if discharge_date is not None and adjusted > discharge_date:
+            break
+        result.append(adjusted)
+        current += timedelta(days=10)
+    return tuple(result)
+
+
+def build_dynamic_epicrisis_text(data: DynamicEpicrisisInput) -> str:
+    correction = str(data.treatment_correction or "").strip() or "Лекарства принимает согласно назначениям."
+    lines = [
+        "Динамический эпикриз.",
+        f"ФИО: {data.patient_name or 'не указано'}.",
+        f"Дата рождения: {data.birth_date or 'не указана'}.",
+        f"Лечится с: {data.sick_leave_from or 'не указано'}.",
+        f"Жалобы: {data.complaints or 'без существенной динамики'}.",
+        f"Принимает: {data.treatment or 'согласно листу назначений'}.",
+        f"Профильный статус: {data.profile_status or 'без существенной динамики'}.",
+        correction,
+        "Продолжение лечения по листу нетрудоспособности.",
+        "Заведующий отделением ____________________",
+        "Лечащий врач ____________________",
+    ]
+    return "\n".join(lines)
+
+
+def create_text_diary_document(
+    *,
+    output_dir: str | Path,
+    patient_name: str,
+    entries: Sequence[str],
+    epicrisis_entries: Sequence[tuple[date, str]] = (),
+) -> Path:
+    result_dir = Path(output_dir).expanduser()
+    result_dir.mkdir(parents=True, exist_ok=True)
+    target = available_path(result_dir / diary_text_output_name(patient_name))
+    doc = Document()
+    for entry in entries:
+        doc.add_paragraph(str(entry or "").strip())
+    for item_date, text in epicrisis_entries:
+        if doc.paragraphs:
+            doc.add_paragraph("")
+        doc.add_paragraph(f"{item_date:%d.%m.%y} {text.splitlines()[0]}")
+        for line in text.splitlines()[1:]:
+            doc.add_paragraph(line)
+    doc.save(str(target))
+    return target
 
 
 def _existing_docx_files(paths: Iterable[str | Path], label: str) -> list[Path]:
@@ -103,16 +238,13 @@ def _fill_text_diary_batch(
 ) -> DiaryBatchResult:
     if admission_date_value is None:
         admission_date_value = parse_full_date(admission_value)
-    # If a discharge date exists, allow enough planned entries to reach it.  The
-    # calendar helper stops at discharge.  Without discharge, create at least as
-    # many entries as source statuses and never fewer than 10 planned rows.
     if discharge_date_value is not None:
         rough_limit = max(10, min(80, (discharge_date_value - admission_date_value).days + 10))
     else:
         rough_limit = max(10, len(statuses) or 10)
     dates = default_observation_diary_dates(admission_date_value, limit=rough_limit, discharge_date=discharge_date_value)
     entries = build_dated_diary_entries(statuses=statuses, dates=dates, patient_gender=patient_gender, repeat_statuses=repeat_statuses)
-    epicrisis_entries: list[tuple[object, str]] = []
+    epicrisis_entries: list[tuple[date, str]] = []
     if sick_leave_dynamic_epicrisis:
         epi_input = DynamicEpicrisisInput(
             patient_name=patient_name,
