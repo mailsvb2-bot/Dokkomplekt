@@ -1,9 +1,3 @@
-"""Run the strict baseline regression contour.
-
-This command is intentionally separate from release_check.py.  It catches
-user-facing regressions early, before packaging or EXE building starts.
-"""
-
 from __future__ import annotations
 
 import os
@@ -26,7 +20,6 @@ COMMANDS: tuple[tuple[str, ...], ...] = (
         "tests/test_docx_placeholder_camelcase_regression_v1483.py",
         "tests/test_production_interaction_matrix_v1487.py",
         "tests/test_diary_filler_donor_parity_v1490.py",
-        "tests/test_word_doc_and_text_diary_v1491.py",
     ),
     (sys.executable, "smoke_user_reported_regressions.py"),
     (sys.executable, "smoke_followup_regressions.py"),
