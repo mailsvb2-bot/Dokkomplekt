@@ -22,7 +22,6 @@ L_MUTED = "#667085"
 L_ACCENT = "#2f73e8"
 L_ACCENT_DARK = "#1f5fd0"
 L_SUCCESS = "#14804a"
-L_WARN = "#b7791f"
 
 
 class LayoutWizardSurfaceMixin:
@@ -108,7 +107,7 @@ class LayoutWizardSurfaceMixin:
         upload = tk.Frame(card, bg=L_PANEL)
         upload.grid(row=2, column=0, sticky="ew")
         upload.grid_columnconfigure(0, weight=1)
-        self._source_drop_row(upload, 0)
+        self._rw_upload_zone(upload, 0)
         type_row = tk.Frame(card, bg=L_PANEL)
         type_row.grid(row=3, column=0, sticky="ew", pady=(self._px(8, 4), 0))
         type_row.grid_columnconfigure(1, weight=1)
@@ -116,6 +115,25 @@ class LayoutWizardSurfaceMixin:
         tk.Label(type_row, textvariable=self.primary_document_type_display_var, bg=L_SOFT, fg=L_TEXT, highlightbackground=L_LINE, highlightthickness=1, font=self._font(10), padx=12, pady=7, anchor="w").grid(row=0, column=1, sticky="ew")
         self._rw_small_button(type_row, "Изменить", self._toggle_primary_document_type).grid(row=0, column=2, sticky="e", padx=(10, 0))
         self._rw_primary_button(card, "Выбрать файл", self.choose_navigation).grid(row=2, column=1, sticky="e", padx=(self._px(16, 8), 0))
+
+    def _rw_upload_zone(self, parent: tk.Frame, row: int) -> None:
+        drop = tk.Frame(parent, bg=L_SOFT, highlightbackground=L_LINE, highlightthickness=1, cursor="hand2", height=self._px(94, 70))
+        drop.grid(row=row, column=0, sticky="ew")
+        drop.grid_propagate(False)
+        drop.grid_columnconfigure(0, weight=1)
+        title = tk.Label(drop, text="Перетащите сюда первичный документ", bg=L_SOFT, fg=L_TEXT, font=self._font(12, "bold"), anchor="center")
+        title.grid(row=0, column=0, sticky="ew", pady=(self._px(16, 8), 0))
+        hint = tk.Label(drop, text="PDF пока не обрабатываем здесь: нужен DOCX/DOCM", bg=L_SOFT, fg=L_MUTED, font=self._font(9), anchor="center")
+        hint.grid(row=1, column=0, sticky="ew", pady=(self._px(4, 2), 0))
+        self.primary_drop_hint_label = hint
+        self.primary_selected_status_var = tk.StringVar(value=" ")
+        status = tk.Label(drop, textvariable=self.primary_selected_status_var, bg=L_SOFT, fg=L_SUCCESS, font=self._font(9, "bold"), anchor="center", wraplength=self._px(650, 460))
+        status.grid(row=2, column=0, sticky="ew", pady=(self._px(4, 2), 0))
+        for widget in (drop, title, hint, status):
+            widget.bind("<Button-1>", lambda _event: self.choose_navigation())
+        self.drop_zone = drop
+        self.primary_selected_status_label = status
+        self._drop_widgets = [drop, title, hint, status]
 
     def _rw_data_card(self, parent: tk.Frame, *, row: int, column: int) -> None:
         card = self._rw_card(parent)
@@ -125,14 +143,7 @@ class LayoutWizardSurfaceMixin:
         fields = tk.Frame(card, bg=L_PANEL)
         fields.grid(row=1, column=0, sticky="ew", pady=(self._px(8, 4), 0))
         fields.grid_columnconfigure(1, weight=1)
-        rows = (
-            ("ФИО / файл", self.patient_name_var),
-            ("История болезни", self.case_number_var),
-            ("Поступление", self.admission_date_var),
-            ("Выписка", self.discharge_date_var),
-            ("Диагноз", self.diagnosis_var),
-            ("Больничный", self.expert_sick_leave_display_var),
-        )
+        rows = (("ФИО / файл", self.patient_name_var), ("История болезни", self.case_number_var), ("Поступление", self.admission_date_var), ("Выписка", self.discharge_date_var), ("Диагноз", self.diagnosis_var), ("Больничный", self.expert_sick_leave_display_var))
         for i, (label, var) in enumerate(rows):
             tk.Label(fields, text=label, bg=L_PANEL, fg=L_MUTED, font=self._font(9), anchor="w").grid(row=i, column=0, sticky="w", pady=3, padx=(0, 8))
             tk.Label(fields, textvariable=var, bg=L_SOFT, fg=L_TEXT, highlightbackground=L_LINE, highlightthickness=1, font=self._font(9), padx=9, pady=5, anchor="w").grid(row=i, column=1, sticky="ew", pady=3)
@@ -203,8 +214,7 @@ class LayoutWizardSurfaceMixin:
             row = tk.Frame(container, bg=L_SOFT, highlightbackground=L_LINE, highlightthickness=1, padx=9, pady=6)
             row.grid(row=i, column=0, sticky="ew", pady=(0, 6))
             row.grid_columnconfigure(1, weight=1)
-            cb = tk.Checkbutton(row, variable=var, bg=L_SOFT, activebackground=L_SOFT, selectcolor="#ffffff", command=self._rw_update_selected_count)
-            cb.grid(row=0, column=0, sticky="w")
+            tk.Checkbutton(row, variable=var, bg=L_SOFT, activebackground=L_SOFT, selectcolor="#ffffff", command=self._rw_update_selected_count).grid(row=0, column=0, sticky="w")
             tk.Label(row, text=doc.label, bg=L_SOFT, fg=L_TEXT, font=self._font(10, "bold"), anchor="w").grid(row=0, column=1, sticky="ew")
         self._refresh_diary_frequency_controls()
         self._rw_update_selected_count()
