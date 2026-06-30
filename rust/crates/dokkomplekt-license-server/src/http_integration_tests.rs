@@ -14,6 +14,9 @@ fn base_config(database_url: Option<String>) -> ServerConfig {
         payment_provider: "manual".to_string(),
         storage_mode: if database_url.is_some() { "postgres" } else { "memory" }.to_string(),
         database_url,
+        environment: "test".to_string(),
+        provider_callback_secret: None,
+        license_issue_secret: None,
     }
 }
 
@@ -43,6 +46,7 @@ async fn assert_order_payment_activation_flow(app: Router, expected_backend: &st
     assert_eq!(status, StatusCode::OK);
     let order_id = order["order_id"].as_str().unwrap().to_string();
     assert_eq!(order["status"], "waiting_payment");
+    assert_eq!(order["amount_rub"], 3900);
 
     let event_id = format!("evt-{order_id}");
     let callback = json!({ "order_id": order_id, "provider_event_id": event_id, "provider_payment_id": "pay-1", "provider": "manual", "status": "succeeded", "amount_rub": 3900 });
@@ -78,6 +82,29 @@ async fn postgres_http_order_payment_activation_flow_when_database_url_is_presen
         .unwrap();
     assert_order_payment_activation_flow(app.clone(), "postgres", true).await;
     std::mem::forget(app);
+}
+
+#[tokio::test]
+async fn wrong_client_price_is_rejected_before_order_creation() {
+    let app = build_app(AppState::try_new(base_config(None)).unwrap());
+    let (status, _) = call(app, Method::POST, "/api/orders".to_string(), Some(json!({ "plan": "doctor_pro", "amount_rub": 1, "machine_hash": "machine-a" }))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn configured_callback_secret_is_required() {
+    let mut config = base_config(None);
+    config.provider_callback_secret = Some("secret".to_string());
+    let app = build_app(AppState::try_new(config).unwrap());
+    let (status, order) = call(app.clone(), Method::POST, "/api/orders".to_string(), Some(json!({ "plan": "doctor_pro", "amount_rub": 3900, "machine_hash": "machine-a" }))).await;
+    assert_eq!(status, StatusCode::OK);
+    let order_id = order["order_id"].as_str().unwrap().to_string();
+    let callback = json!({ "order_id": order_id, "provider_event_id": "evt-secret", "provider": "manual", "status": "succeeded", "amount_rub": 3900 });
+    let (status, _) = call(app.clone(), Method::POST, "/api/provider/callback".to_string(), Some(callback)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let callback = json!({ "order_id": order_id, "provider_event_id": "evt-secret", "provider": "manual", "status": "succeeded", "amount_rub": 3900, "callback_secret": "secret" });
+    let (status, _) = call(app, Method::POST, "/api/provider/callback".to_string(), Some(callback)).await;
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[test]
