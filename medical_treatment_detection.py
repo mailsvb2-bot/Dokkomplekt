@@ -8,7 +8,7 @@ from medical_text_utils import normalize_match, normalize_text
 # Treat only explicit section labels as evidence that the primary document has
 # its own treatment field. Ordinary phrases like "за время лечения" or
 # "находится на лечении" must not suppress the doctor popup.
-_TREATMENT_LABEL = r"(?:назначенное\s+лечение|план\s+лечения|лечение)"
+_TREATMENT_LABEL = r"(?:назначенное\s+лечение|план\s+лечения|лечение|zalecone\s+leczenie|zastosowane\s+leczenie|plan\s+leczenia|leczenie|terapia)"
 _TREATMENT_MARKER_WITH_SEPARATOR_RE = re.compile(
     # Strict section labels: "Лечение:", "Назначенное лечение - ...",
     # "План лечения".  This is the safest signal that the primary document
@@ -39,6 +39,14 @@ _PROSE_AFTER_TREATMENT_LABEL_PREFIXES = (
     "осуществлялось",
     "не проводилось",
     "ранее",
+    "było",
+    "bylo",
+    "prowadzono",
+    "otrzymywał",
+    "otrzymywal",
+    "otrzymywała",
+    "otrzymywala",
+    "w trakcie",
 )
 
 
@@ -49,7 +57,7 @@ def line_has_treatment_marker(line: str) -> bool:
         return False
     normalized = normalize_match(cleaned)
     # Guard against prose sentences that only contain the word treatment.
-    if normalized.startswith(("за время лечения", "находится на лечении", "получал лечение", "получает лечение")):
+    if normalized.startswith(("за время лечения", "находится на лечении", "получал лечение", "получает лечение", "w trakcie leczenia", "przebieg leczenia")):
         return False
     if _TREATMENT_MARKER_WITH_SEPARATOR_RE.match(cleaned):
         return True
