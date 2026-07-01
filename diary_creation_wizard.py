@@ -6,7 +6,7 @@ import os
 
 from diagnostic_logging import record_soft_exception
 
-DIARY_CREATION_WIZARD_LOCK_VERSION = "v1.1"
+DIARY_CREATION_WIZARD_LOCK_VERSION = "v1.2"
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,9 @@ class DiaryWizardReview:
     text_files: tuple[str, ...]
     text_output: bool = False
     sick_leave_dynamic_epicrisis: bool = False
+    frequency_mode: str = "daily"
+    day_offsets: tuple[int, ...] = ()
+    hour_offsets: tuple[int, ...] = ()
     warnings: tuple[str, ...] = ()
 
     @property
@@ -32,19 +35,24 @@ class DiaryWizardReview:
             f"Дата госпитализации: {self.admission_date or 'не найдена'}",
             f"Дата выписки: {self.discharge_date or 'не указана'}",
             f"Режим: {'текстовый DOCX' if self.text_output else 'таблица дневников'}",
+            f"Частота: {'по часам' if self.frequency_mode == 'hourly' else 'ежедневно'}",
             f"Динамический эпикриз по больничному: {'да' if self.sick_leave_dynamic_epicrisis else 'нет'}",
             "Шаблоны дат:",
         ]
-        lines.extend([f"  • {name}" for name in self.template_files] or ["  • не требуются для текстового режима" if self.text_output else "  ⚠ не выбраны"])
+        lines.extend([f"  - {name}" for name in self.template_files] or ["  - не требуются для текстового режима" if self.text_output else "  - не выбраны"])
         lines.append("Тексты дневников:")
-        lines.extend([f"  • {name}" for name in self.text_files] or ["  ⚠ не выбраны"])
+        lines.extend([f"  - {name}" for name in self.text_files] or ["  - не выбраны"])
+        if self.day_offsets:
+            lines.append("Дни дневников: " + ", ".join(str(item) for item in self.day_offsets))
+        if self.frequency_mode == "hourly" and self.hour_offsets:
+            lines.append("Часы дневников: " + ", ".join(str(item) for item in self.hour_offsets))
         if self.warnings:
             lines.append("")
             lines.append("Что надо исправить:")
-            lines.extend([f"  ⚠ {item}" for item in self.warnings])
+            lines.extend([f"  - {item}" for item in self.warnings])
         else:
             lines.append("")
-            lines.append("✅ Дневники готовы к созданию.")
+            lines.append("Дневники готовы к созданию.")
         return "\n".join(lines)
 
 
@@ -73,6 +81,20 @@ def build_diary_wizard_review(app: object) -> DiaryWizardReview:
     texts = tuple(Path(item).name for item in getattr(app, "status_files", []) or [])
     text_output = bool(getattr(app, "_diary_text_output_enabled", False))
     sick_leave_dynamic_epicrisis = _normalize_yes_no(_get_var("expert_sick_leave_needed_var")) == "да"
+    frequency_mode = _get_var("diary_frequency_mode_var") or "daily"
+    if frequency_mode not in {"daily", "hourly"}:
+        frequency_mode = "daily"
+    day_offsets: tuple[int, ...] = ()
+    hour_offsets: tuple[int, ...] = ()
+    try:
+        getter = getattr(app, "_selected_profile_diary_schedule", None)
+        schedule = getter() if callable(getter) else None
+        if schedule is not None:
+            day_offsets = tuple(int(item) for item in getattr(schedule, "day_offsets", ()) or ())
+            if frequency_mode == "hourly":
+                hour_offsets = tuple(int(item) for item in getattr(schedule, "hour_offsets", ()) or ())
+    except Exception as exc:
+        record_soft_exception("diary_creation_wizard.schedule", exc)
     if not templates and getattr(app, "diary_template_dir", ""):
         templates = (f"папка: {Path(str(getattr(app, 'diary_template_dir'))).name}",)
     if not texts and getattr(app, "diary_texts_dir", ""):
@@ -85,10 +107,12 @@ def build_diary_wizard_review(app: object) -> DiaryWizardReview:
     if not discharge:
         warnings.append("Не указана дата выписки; программа не знает, на какой строке закончить дневники.")
     if not templates and not text_output:
-        warnings.append("Выберите папку/шаблон дат дневников через кнопку «Даты» или включите текстовый режим дневников.")
+        warnings.append("Выберите папку/шаблон дат дневников через кнопку Даты или включите текстовый режим дневников.")
     if not texts:
-        warnings.append("Выберите тексты дневников через кнопку «Тексты» или настройте автоподбор по диагнозу.")
-    return DiaryWizardReview(patient, admission, discharge, templates, texts, text_output, sick_leave_dynamic_epicrisis, tuple(warnings))
+        warnings.append("Выберите тексты дневников через кнопку Тексты или настройте автоподбор по диагнозу.")
+    if frequency_mode == "hourly" and not hour_offsets:
+        warnings.append("Для режима по часам в профиле дневников нет часового расписания.")
+    return DiaryWizardReview(patient, admission, discharge, templates, texts, text_output, sick_leave_dynamic_epicrisis, frequency_mode, day_offsets, hour_offsets, tuple(warnings))
 
 
 def confirm_diary_creation(app: object) -> bool:
@@ -112,9 +136,10 @@ def confirm_diary_creation(app: object) -> bool:
 
 
 def assert_diary_creation_wizard_lock() -> None:
-    if DIARY_CREATION_WIZARD_LOCK_VERSION != "v1.1":
+    if DIARY_CREATION_WIZARD_LOCK_VERSION != "v1.2":
         raise AssertionError("Diary creation wizard lock changed unexpectedly")
     empty = type("Empty", (), {})()
     review = build_diary_wizard_review(empty)
-    if review.ok or "МАСТЕР ДНЕВНИКОВ" not in review.as_text():
-        raise AssertionError("Diary wizard must block incomplete diary state")
+    text = review.as_text()
+    if review.ok or "МАСТЕР ДНЕВНИКОВ" not in text or "Частота:" not in text:
+        raise AssertionError("Diary wizard must block incomplete diary state and show frequency")
