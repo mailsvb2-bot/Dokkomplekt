@@ -202,10 +202,6 @@ class AppInitializationMixin:
         self.vk_protocol_date_var = tk.StringVar()
         self.vk_mse_work_org_var = tk.StringVar()
         self.vk_mse_position_var = tk.StringVar()
-        # Explicit combined value for custom/profile placeholders like
-        # {{vk_mse.work_position}}.  Older fixed flows still use the split org /
-        # position variables, but custom doctor templates may ask for one field.
-        self.vk_mse_work_position_var = tk.StringVar()
         self.sick_leave_vk_date_var = tk.StringVar()
         self.sick_leave_vk_protocol_number_var = tk.StringVar()
         self.sick_leave_vk_protocol_date_var = tk.StringVar()
@@ -461,3 +457,17 @@ class AppInitializationMixin:
                 self.printer_var.set(saved)
         except Exception as exc:
             record_soft_exception("app_initialization.bootstrap_printer_field", exc)
+
+    def _bootstrap_ui(self) -> None:
+        self._apply_custom_window_chrome()
+        self._install_text_shortcuts()
+        self._install_global_hotkeys()
+        self._build_ui()
+        # Drag-and-drop включается только через безопасный TkDND-путь.
+        # Нативная подмена Windows WndProc была рискованной: на некоторых ПК
+        # приложение могло не стартовать или закрываться сразу после запуска.
+        self.root.after(150, self._install_file_drop_support)
+        self._check_templates()
+        self._set_status("Готов к работе")
+        self._bootstrap_printer_field_without_shell_scan()
+        self.root.after(700, self._bootstrap_desktop_intake_watcher)
