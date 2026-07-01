@@ -129,17 +129,30 @@ class DiaryTemplateSelectionMixin:
         if not title_date:
             return ""
         current = current_semantic_date(self, "admission_date")
-        # Автоматически исправляем пустое поле и автозаполненное поле. Ручной
-        # ввод врача сохраняем, кроме force-вызова перед созданием дневников.
-        if force or not current or not self._manual_admission_date:
+        # Ручной/doctor-confirmed ввод всегда финальный. Даже force-вызовы из
+        # создания дневников, desktop-intake или смены первичного документа не
+        # должны перетирать дату, которую врач уже подтвердил в popup/UI. После
+        # выбора нового первичного документа runtime state сбрасывается отдельно,
+        # поэтому здесь можно безопасно сохранять ручной приоритет.
+        if current and bool(getattr(self, "_manual_admission_date", False)):
+            return title_date
+        if force or not current:
             self._set_ui_var(self.admission_date_var, title_date)
         return title_date
 
     def _admission_datetime_for_diary_template(self) -> datetime | None:
-        # Для автоподбора шаблона дневников дата должна идти из самого
-        # первичного документа/направления, а не из случайно заполненного UI-поля.
-        # Это защищает от ситуации, когда в UI попала дата рождения пациента.
-        title_date = self._sync_admission_date_from_title(force=True)
+        # Для автоподбора шаблона дневников ручной doctor-confirmed ввод имеет
+        # приоритет: если врач исправил дату госпитализации, шаблон 01–31 должен
+        # выбираться по исправленной дате, а не по устаревшей дате заголовка.
+        if bool(getattr(self, "_manual_admission_date", False)):
+            manual_value = current_semantic_date(self, "admission_date")
+            parsed_manual = parse_date(manual_value)
+            if parsed_manual:
+                return parsed_manual
+        # Если ручной даты нет, сначала берём дату из самого первичного
+        # документа/направления. Это защищает от ситуации, когда в UI случайно
+        # попала дата рождения пациента.
+        title_date = self._sync_admission_date_from_title(force=False)
         parsed_from_doc = parse_date(title_date)
         if parsed_from_doc:
             return parsed_from_doc
