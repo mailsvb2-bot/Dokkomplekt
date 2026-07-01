@@ -76,6 +76,8 @@ class PatientData:
     vk_protocol_date: str = ""
     vk_mse_work_org: str = ""
     vk_mse_position: str = ""
+    # Combined value for custom/profile placeholders such as vk_mse.work_position.
+    vk_mse_work_position: str = ""
     sick_leave_vk_date: str = ""
     sick_leave_vk_protocol_number: str = ""
     sick_leave_vk_protocol_date: str = ""
@@ -245,7 +247,6 @@ def _diagnosis_status(value: str, is_manual: bool, *, required: bool = False, re
     return _STATUS_MANUAL if is_manual else _STATUS_OK
 
 
-
 _ICD10_ANY_CODE_RE = re.compile(r"(?<![A-Za-zА-Яа-я0-9])[A-ZА-ЯЁІЇЈ]\s*\d{2}(?:[.,]\s*[0-9A-ZА-ЯЁІЇЈ]+)?", re.IGNORECASE)
 
 
@@ -404,4 +405,3 @@ def expected_medical_filenames(review: PatientCaseReview, selected_medical: Sequ
         if suffix:
             names.append(f"{stem} {suffix}.docx")
     return tuple(names)
-

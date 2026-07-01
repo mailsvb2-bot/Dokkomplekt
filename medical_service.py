@@ -37,6 +37,19 @@ def _normalize_yes_no_text(value: str) -> str:
     return ""
 
 
+def _not_working_value(value: str) -> bool:
+    normalized = " ".join(str(value or "").strip().lower().replace("ё", "е").split())
+    return normalized in {
+        "",
+        "нет",
+        "не работает",
+        "безработный",
+        "безработная",
+        "неработающий",
+        "неработающая",
+    }
+
+
 def _ensure_word_compatible_for_service(path: Path) -> Path:
     if path.suffix.lower() != ".doc":
         return path
@@ -48,7 +61,8 @@ def _ensure_word_compatible_for_service(path: Path) -> Path:
 
 
 def legacy_fixed_template_backend_enabled() -> bool:
-    return os.environ.get("DOKKOMPLEKT_DISABLE_LEGACY_FIXED_TEMPLATES", "").strip().lower() not in {"1", "true", "yes", "да"}
+    """Legacy fixed templates are opt-in only in the doctor-owned product model."""
+    return os.environ.get("DOKKOMPLEKT_ENABLE_LEGACY_FIXED_TEMPLATES", "").strip().lower() in {"1", "true", "yes", "да"}
 
 
 class MedicalDocumentService:
@@ -275,6 +289,12 @@ class MedicalDocumentService:
             self._ensure_date_not_before_admission(data.admission_date, data.vk_protocol_date, "Дата протокола ВК на МСЭ")
             data.vk_mse_work_org = (data.vk_mse_work_org or data.work_org or "не работает").strip()
             data.vk_mse_position = (data.vk_mse_position or data.position).strip()
+            combined = str(getattr(data, "vk_mse_work_position", "") or "").strip()
+            if not _not_working_value(data.vk_mse_work_org) and not (data.vk_mse_position or combined):
+                data.vk_mse_position = self._require_text(data.vk_mse_position, "должность для ВК на МСЭ")
+            data.vk_mse_work_position = combined or ", ".join(
+                part for part in [data.vk_mse_work_org, data.vk_mse_position] if part
+            )
 
         if "sick_leave_vk" in selected_set:
             data.sick_leave_vk_date = self._normalize_required_date(data.sick_leave_vk_date, "Дата ВК больничного")
@@ -334,7 +354,6 @@ class MedicalDocumentService:
         selected = self._normalize_selected_docs(selected_docs)
         primary_path = self._existing_file(navigation_path, "первичный документ", allowed_suffixes=_PRIMARY_SUFFIXES)
         primary_path = _ensure_word_compatible_for_service(primary_path)
-        primary_path = _ensure_word_compatible_for_service(primary_path)
         normalized_discharge_date = self._normalize_discharge_date(discharge_date)
 
         data = copy.deepcopy(override_data) if override_data is not None else self.parse_primary_document(primary_path)
@@ -350,7 +369,7 @@ class MedicalDocumentService:
         output_path_root = self._resolve_output_dir(output_dir, primary_path.parent)
 
         if not legacy_fixed_template_backend_enabled():
-            raise RuntimeError("Старый fixed-template backend отключён. Используйте doctor-owned шаблоны/профиль документов.")
+            raise RuntimeError("Старый fixed-template backend отключён по умолчанию. Используйте doctor-owned шаблоны/профиль документов или включите DOKKOMPLEKT_ENABLE_LEGACY_FIXED_TEMPLATES=1 только для совместимости.")
         template_paths = {kind: bundled_template_path(kind) for kind in selected}
         missing = [path for path in template_paths.values() if not path.exists()]
         if missing:
@@ -587,4 +606,3 @@ def _safe_docx_probe_text(path: Path) -> str:
     except Exception as exc:
         record_soft_exception("medical_service.safe_docx_probe", exc, detail=str(path))
         return ""
-
