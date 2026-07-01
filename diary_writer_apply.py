@@ -5,12 +5,17 @@ from typing import Sequence
 
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-from diary_constants import FINAL_DIARY_TEXT
 from diary_dates import format_month_year
 from diary_gender import adapt_text_to_patient_gender
 from diary_table import fill_diary_text_cell, fill_text_cell, remove_row
 from diary_text_parser import clean_status_text, remove_examinee_words
 from diary_writer_entries import DatedEntry, DiaryEntry
+
+NEUTRAL_FINAL_DIARY_TEXT = (
+    "Состояние улучшилось. Жалоб активно не предъявляет. Отрицательной динамики не отмечается. "
+    "Общее самочувствие стабильное, режим соблюдает, назначения выполняет. "
+    "На текущую дату оформлена выписка из стационара. Даны рекомендации"
+)
 
 
 def apply_diary_entries(
@@ -79,7 +84,7 @@ def apply_diary_entries(
             stats["month_cells_filled"] += 1
 
         if is_final_diary_row:
-            adapted_final_text, changed = adapt_text_to_patient_gender(FINAL_DIARY_TEXT, patient_gender)
+            adapted_final_text, changed = adapt_text_to_patient_gender(NEUTRAL_FINAL_DIARY_TEXT, patient_gender)
             adapted_final_text = remove_examinee_words(adapted_final_text)
             stats["gender_replacements"] += changed
             fill_diary_text_cell(row.cells[diary_col], adapted_final_text, keep_signature=keep_signature)
