@@ -5,8 +5,9 @@ from pathlib import Path
 import os
 
 from diagnostic_logging import record_soft_exception
+from medical_date_state import current_semantic_date
 
-DIARY_CREATION_WIZARD_LOCK_VERSION = "v1.2"
+DIARY_CREATION_WIZARD_LOCK_VERSION = "v1.3"
 
 
 @dataclass(frozen=True)
@@ -75,8 +76,8 @@ def build_diary_wizard_review(app: object) -> DiaryWizardReview:
             return ""
 
     patient = _get_var("patient_name_var")
-    admission = _get_var("admission_date_var")
-    discharge = _get_var("discharge_date_var")
+    admission = current_semantic_date(app, "admission_date") or _get_var("admission_date_var")
+    discharge = current_semantic_date(app, "discharge_date") or _get_var("discharge_date_var")
     templates = tuple(Path(item).name for item in getattr(app, "diary_files", []) or [])
     texts = tuple(Path(item).name for item in getattr(app, "status_files", []) or [])
     text_output = bool(getattr(app, "_diary_text_output_enabled", False))
@@ -136,7 +137,7 @@ def confirm_diary_creation(app: object) -> bool:
 
 
 def assert_diary_creation_wizard_lock() -> None:
-    if DIARY_CREATION_WIZARD_LOCK_VERSION != "v1.2":
+    if DIARY_CREATION_WIZARD_LOCK_VERSION != "v1.3":
         raise AssertionError("Diary creation wizard lock changed unexpectedly")
     empty = type("Empty", (), {})()
     review = build_diary_wizard_review(empty)
