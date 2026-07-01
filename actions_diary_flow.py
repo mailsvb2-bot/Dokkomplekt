@@ -17,9 +17,8 @@ class ActionsDiaryFlowMixin:
         kept only as a fallback when no date/table template is available.
         """
         primary_path = selected_primary_document_path(self)
-        diary_admission_value = self._sync_admission_date_from_title(force=True)
-        if primary_path is not None and not diary_admission_value:
-            raise ValueError("Не удалось найти дату поступления в первичном документе.")
+        title_admission_value = self._sync_admission_date_from_title(force=False)
+        diary_admission_value = current_semantic_date(self, "admission_date") or title_admission_value
         if not self.status_files:
             self._auto_select_diary_text_by_diagnosis(ask_folder=False)
         if not self.status_files:
@@ -56,7 +55,7 @@ class ActionsDiaryFlowMixin:
         if not diary_admission_value:
             diary_admission_value = current_semantic_date(self, "admission_date")
         if not diary_admission_value:
-            raise ValueError("Не удалось найти дату поступления в первичном документе.")
+            raise ValueError("Не удалось найти дату поступления в первичном документе или popup/UI.")
 
         from diary_batch import fill_diary_batch
         diary_schedule = self._selected_profile_diary_schedule()
