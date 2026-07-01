@@ -34,6 +34,17 @@ def _not_working_value(value: str) -> bool:
 class RegressionStateOverlayMixin:
     """Protect doctor-confirmed values without increasing root module count."""
 
+    def _vk_mse_work_position_value(self) -> str:
+        if hasattr(self, "vk_mse_work_position_var"):
+            return self.vk_mse_work_position_var.get().strip()
+        return str(getattr(self, "_vk_mse_work_position_value_cache", "") or "").strip()
+
+    def _set_vk_mse_work_position_value(self, value: str) -> None:
+        value = str(value or "").strip()
+        if hasattr(self, "vk_mse_work_position_var"):
+            self.vk_mse_work_position_var.set(value)
+        self._vk_mse_work_position_value_cache = value
+
     def _clear_required_review_value(self, key: str) -> None:
         if key == "admission_date":
             try:
@@ -50,8 +61,7 @@ class RegressionStateOverlayMixin:
                 record_soft_exception("regression_state_overlay.clear_admission_date", exc)
         if key == "vk_mse_work_position":
             try:
-                if hasattr(self, "vk_mse_work_position_var"):
-                    self.vk_mse_work_position_var.set("")
+                self._set_vk_mse_work_position_value("")
                 data = getattr(self, "data", None)
                 if data is not None:
                     setattr(data, "vk_mse_work_position", "")
@@ -88,8 +98,7 @@ class RegressionStateOverlayMixin:
                 self._clear_required_review_value(key)
                 return
             try:
-                if hasattr(self, "vk_mse_work_position_var"):
-                    self.vk_mse_work_position_var.set(value)
+                self._set_vk_mse_work_position_value(value)
                 data = getattr(self, "data", None)
                 if data is not None:
                     setattr(data, "vk_mse_work_position", value)
@@ -101,8 +110,7 @@ class RegressionStateOverlayMixin:
     def _reset_primary_document_runtime_state(self) -> None:
         result = super()._reset_primary_document_runtime_state()  # type: ignore[misc]
         try:
-            if hasattr(self, "vk_mse_work_position_var"):
-                self.vk_mse_work_position_var.set("")
+            self._set_vk_mse_work_position_value("")
         except Exception as exc:
             record_soft_exception("regression_state_overlay.reset_vk_mse_work_position", exc)
         return result
@@ -112,7 +120,7 @@ class RegressionStateOverlayMixin:
         try:
             work_org = self.vk_mse_work_org_var.get().strip()
             position = self.vk_mse_position_var.get().strip()
-            combined = self.vk_mse_work_position_var.get().strip() if hasattr(self, "vk_mse_work_position_var") else ""
+            combined = self._vk_mse_work_position_value()
             if not all([*dates, self.vk_protocol_number_var.get().strip(), work_org]):
                 return False
             if not _not_working_value(work_org) and not (position or combined):
@@ -125,9 +133,7 @@ class RegressionStateOverlayMixin:
     def _confirmed_universal_overlay_values(self) -> dict[str, str]:
         values: dict[str, str] = dict(super()._confirmed_universal_overlay_values())  # type: ignore[misc]
         try:
-            combined = ""
-            if hasattr(self, "vk_mse_work_position_var"):
-                combined = self.vk_mse_work_position_var.get().strip()
+            combined = self._vk_mse_work_position_value()
             if not combined:
                 work = values.get("vk_mse.work", "").strip()
                 position = values.get("vk_mse.position", "").strip()
@@ -143,7 +149,7 @@ class RegressionStateOverlayMixin:
         try:
             pack = self._load_or_create_universal_pack()
             selected = {str(item).strip() for item in selected_custom_ids if str(item).strip()}
-            for document in tuple(getattr(pack, "documents", ()) or ()): 
+            for document in tuple(getattr(pack, "documents", ()) or ()):
                 if selected and getattr(document, "id", "") not in selected:
                     continue
                 required = " ".join(str(item or "") for item in tuple(getattr(document, "required_fields", ()) or ()))
