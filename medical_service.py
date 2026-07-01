@@ -193,6 +193,7 @@ class MedicalDocumentService:
         return ""
 
     def _validate_and_normalize_selected_data(self, data: PatientData, selected: Sequence[str]) -> None:
+        """Validate selected patient data before service rendering."""
         selected_set = set(selected)
         data.fio = self._require_core_text(data.fio, "Ф.И.О.")
         self._require_core_text(data.admission_date, "дата госпитализации")
