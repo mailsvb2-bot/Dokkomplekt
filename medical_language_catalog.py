@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 LANGUAGE_CATALOG_LOCK_VERSION = "v1.0"
-SUPPORTED_LANGUAGE_IDS = ("auto", "ru", "uk", "be", "kk", "uz", "az", "hy", "ka", "tg", "tk", "en")
+SUPPORTED_LANGUAGE_IDS = ("auto", "ru", "uk", "be", "kk", "uz", "az", "hy", "ka", "tg", "tk", "pl", "en")
 
 
 @dataclass(frozen=True)
@@ -37,6 +37,7 @@ _LANGUAGE_PROFILES: dict[str, LanguageProfile] = {
     "ka": LanguageProfile("ka", "ქართული", "Грузинский", "georgian"),
     "tg": LanguageProfile("tg", "Тоҷикӣ", "Таджикский", "cyrillic"),
     "tk": LanguageProfile("tk", "Türkmençe", "Туркменский", "latin"),
+    "pl": LanguageProfile("pl", "Polski", "Польский", "latin"),
     "en": LanguageProfile("en", "English", "Английский", "latin"),
 }
 
@@ -55,6 +56,7 @@ def normalize_language_id(value: str | None, *, default: str = "auto") -> str:
         "geo": "ka", "kat": "ka", "ka-ge": "ka",
         "taj": "tg", "tg-tj": "tg",
         "turkmen": "tk", "tk-tm": "tk",
+        "pol": "pl", "polish": "pl", "polski": "pl", "pl-pl": "pl",
         "eng": "en", "en-us": "en", "en-gb": "en",
     }
     text = aliases.get(text, text.split("-", 1)[0])
@@ -79,6 +81,6 @@ def language_id_from_choice(choice: str) -> str:
 def assert_language_catalog_lock() -> None:
     if LANGUAGE_CATALOG_LOCK_VERSION != "v1.0":
         raise AssertionError("Language catalog lock changed unexpectedly")
-    for required in ("ru", "uk", "be", "kk", "uz", "az", "hy", "ka", "tg", "tk", "en"):
+    for required in ("ru", "uk", "be", "kk", "uz", "az", "hy", "ka", "tg", "tk", "pl", "en"):
         if required not in _LANGUAGE_PROFILES:
             raise AssertionError(f"Missing supported medical language: {required}")
