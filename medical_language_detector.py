@@ -20,7 +20,7 @@ LANGUAGE_DETECTION_LOCK_VERSION = "v1.0"
 _ARMENIAN_RE = re.compile(r"[\u0531-\u058F]")
 _GEORGIAN_RE = re.compile(r"[\u10A0-\u10FF]")
 _CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
-_LATIN_RE = re.compile(r"[A-Za-zƏəĞğİıÖöŞşÜüÇçʻʼ’]")
+_LATIN_RE = re.compile(r"[A-Za-zĄąĆćĘęŁłŃńÓóŚśŹźŻżƏəĞğİıÖöŞşÜüÇçʻʼ’]")
 
 _MARKERS: dict[str, tuple[str, ...]] = {
     "ru": ("история болезни", "медицинская карта", "жалобы", "анамнез", "диагноз", "лечение", "рекомендации"),
@@ -33,6 +33,11 @@ _MARKERS: dict[str, tuple[str, ...]] = {
     "az": ("xəstəlik tarixi", "tibbi kart", "şikayət", "diaqnoz", "müalicə", "tövsiy"),
     "uz": ("tibbiy karta", "kasallik tarixi", "shikoyat", "tashxis", "davolash"),
     "tk": ("lukmançylyk kart", "kesel taryhy", "arz", "diagnoz", "bejergi"),
+    "pl": (
+        "historia choroby", "karta informacyjna", "karta leczenia", "pacjent",
+        "rozpoznanie", "leczenie", "zalecenia", "data przyjęcia", "data przyjecia",
+        "data wypisu", "dziennik obserwacji", "badanie", "skierowanie"
+    ),
     "en": ("medical record", "case history", "complaints", "diagnosis", "treatment", "recommendations"),
 }
 
@@ -133,6 +138,7 @@ def assert_language_detection_lock() -> None:
         ("Հիվանդության պատմություն. Ախտորոշում", "hy"),
         ("სამედიცინო ბარათი. დიაგნოზი", "ka"),
         ("Xəstəlik tarixi. Diaqnoz və müalicə", "az"),
+        ("Historia choroby. Rozpoznanie i leczenie", "pl"),
         # Russian text with Latin placeholders must stay Russian, not English.
         ("Протокол операции {{patient.fio}} {{procedure.name}}", "ru"),
     )

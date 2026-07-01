@@ -90,6 +90,17 @@ RUSSIAN_VOWELS = "аеёиоуыэюя"
 
 GENDER_WORD_PAIRS: tuple[tuple[str, str], ...] = (
     # Person / patient nouns and pronouns.
+    ("pacjent", "pacjentka"),
+    ("pacjenta", "pacjentki"),
+    ("chory", "chora"),
+    ("przyjęty", "przyjęta"),
+    ("przyjety", "przyjeta"),
+    ("wypisany", "wypisana"),
+    ("hospitalizowany", "hospitalizowana"),
+    ("leczony", "leczona"),
+    ("badany", "badana"),
+    ("zgłaszał", "zgłaszała"),
+    ("zglaszal", "zglaszala"),
     ("пациент", "пациентка"),
     ("пациента", "пациентки"),
     ("больной", "больная"),

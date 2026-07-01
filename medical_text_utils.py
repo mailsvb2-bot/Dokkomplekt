@@ -97,6 +97,12 @@ def clean_value(text: str) -> str:
 
 
 def looks_like_label(value: str) -> bool:
+    """Return True for standalone field captions, including Polish aliases.
+
+    This guard prevents parser/scanner values from swallowing the next caption
+    in doctor-owned DOCX/DOCM templates while staying country-neutral: labels are
+    used only as stop markers and never as embedded document content.
+    """
     value = normalize_match(value)
     if not value:
         return False
@@ -129,6 +135,26 @@ def looks_like_label(value: str) -> bool:
         "эпидемиологический",
         "врач",
         "зав",
+        "data urodzenia",
+        "nr historii choroby",
+        "numer historii choroby",
+        "data przyjęcia",
+        "data przyjecia",
+        "data wypisu",
+        "skargi",
+        "dolegliwości",
+        "dolegliwosci",
+        "wywiad",
+        "stan psychiczny",
+        "stan somatyczny",
+        "stan przedmiotowy",
+        "rozpoznanie",
+        "diagnoza",
+        "leczenie",
+        "plan leczenia",
+        "zalecenia",
+        "lekarz",
+        "ordynator",
     ]
     return any(value.startswith(k) for k in known)
 
@@ -144,6 +170,14 @@ DIAGNOSIS_STOP_MARKERS: Sequence[str] = (
     "ЭЭГ", "ЭПИ", "За время лечения", "Рекомендовано", "Экспертный анамнез",
     "Врач психиатр", "Врач-психиатр", "Лечащий врач", "Зав. отделением", "Зав.отделением",
     "Зав. отд.", "Зав отд", "Зам глав врача", "Зам. гл. врача",
+    "Data przyjęcia", "Data przyjecia", "Data hospitalizacji", "Data wypisu",
+    "Historia choroby", "Nr historii choroby", "Numer historii choroby", "Pacjent", "Pacjentka",
+    "Imię i nazwisko", "Imie i nazwisko", "Data urodzenia", "PESEL",
+    "Skargi", "Dolegliwości", "Dolegliwosci", "Wywiad chorobowy", "Wywiad życiowy", "Wywiad zyciowy",
+    "Stan psychiczny", "Stan somatyczny", "Stan przedmiotowy", "Plan leczenia", "Zalecone leczenie",
+    "Zastosowane leczenie", "Leczenie", "Rozpoznanie kliniczne", "Rozpoznanie", "Diagnoza",
+    "Wyniki badań", "Wyniki badan", "Zalecenia", "Lekarz", "Lekarz prowadzący", "Lekarz prowadzacy",
+    "Ordynator", "Kierownik oddziału", "Kierownik oddzialu",
 )
 
 

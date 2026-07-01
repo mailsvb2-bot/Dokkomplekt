@@ -19,7 +19,7 @@ from typing import Iterable, Mapping
 from medical_language_catalog import normalize_language_id
 from regulatory_document_roles import DocumentRole, default_document_role_registry
 
-PERSONAL_DOCUMENT_BUTTON_LOCK_VERSION = "v1.4"
+PERSONAL_DOCUMENT_BUTTON_LOCK_VERSION = "v1.5-pl"
 BUTTON_LABEL_IS_PROFILE_DATA = True
 BUTTONS_DO_NOT_REQUIRE_HARDCODED_UI_TRANSLATION = True
 BUTTON_ROLE_CONFIDENCE_THRESHOLD = 0.25
@@ -30,7 +30,10 @@ PROFILE_BUTTONS_ARE_NOT_PSYCHIATRY_BOUND = True
 
 
 def safe_profile_filename(label: str) -> str:
-    text = re.sub(r"[^0-9A-Za-zА-Яа-яЁё._-]+", "_", str(label or "doctor_profile")).strip("._-")
+    # Unicode-safe: Polish/Caucasus/doctor-owned profile names must not collapse
+    # to a generic ASCII-only filename.  The stable pack id below still carries
+    # a hash, so the filename can preserve the doctor's visible language.
+    text = re.sub(r"[^\w._-]+", "_", str(label or "doctor_profile"), flags=re.UNICODE).strip("._-")
     return (text or "doctor_profile")[:80] + ".medpack.json"
 
 
@@ -73,6 +76,7 @@ def unique_button_label(label: str, existing_labels: set[str]) -> str:
 LOCALIZED_ROLE_LABELS: dict[str, dict[str, str]] = {
     "hospitalization_referral": {
         "ru": "Направление на госпитализацию",
+        "pl": "Skierowanie do hospitalizacji",
         "uk": "Направлення на госпіталізацію",
         "be": "Накіраванне на шпіталізацыю",
         "kk": "Стационарға жатқызуға жолдама",
@@ -86,6 +90,7 @@ LOCALIZED_ROLE_LABELS: dict[str, dict[str, str]] = {
     },
     "admission_doctor_exam": {
         "ru": "Осмотр врача приёмного покоя",
+        "pl": "Badanie lekarza izby przyjęć",
         "uk": "Огляд лікаря приймального відділення",
         "be": "Агляд лекара прыёмнага аддзялення",
         "kk": "Қабылдау бөлімінің дәрігерлік қарауы",
@@ -99,6 +104,7 @@ LOCALIZED_ROLE_LABELS: dict[str, dict[str, str]] = {
     },
     "primary_exam": {
         "ru": "Первичный осмотр",
+        "pl": "Badanie wstępne",
         "uk": "Первинний огляд",
         "be": "Першасны агляд",
         "kk": "Алғашқы қарау",
@@ -112,6 +118,7 @@ LOCALIZED_ROLE_LABELS: dict[str, dict[str, str]] = {
     },
     "inpatient_record": {
         "ru": "История болезни",
+        "pl": "Historia choroby",
         "uk": "Історія хвороби",
         "be": "Гісторыя хваробы",
         "kk": "Ауру тарихы",
@@ -125,6 +132,7 @@ LOCALIZED_ROLE_LABELS: dict[str, dict[str, str]] = {
     },
     "daily_diary": {
         "ru": "Дневник наблюдения",
+        "pl": "Dziennik obserwacji",
         "uk": "Щоденник спостереження",
         "be": "Дзённік назірання",
         "kk": "Бақылау күнделігі",
@@ -138,6 +146,7 @@ LOCALIZED_ROLE_LABELS: dict[str, dict[str, str]] = {
     },
     "discharge_epicrisis": {
         "ru": "Выписной эпикриз",
+        "pl": "Karta informacyjna leczenia szpitalnego",
         "uk": "Виписний епікриз",
         "be": "Выпісны эпікрыз",
         "kk": "Шығару эпикризі",
@@ -151,6 +160,7 @@ LOCALIZED_ROLE_LABELS: dict[str, dict[str, str]] = {
     },
     "transfer_epicrisis": {
         "ru": "Переводной эпикриз",
+        "pl": "Epikryza przeniesieniowa",
         "uk": "Перевідний епікриз",
         "be": "Пераводны эпікрыз",
         "kk": "Ауыстыру эпикризі",
@@ -164,6 +174,7 @@ LOCALIZED_ROLE_LABELS: dict[str, dict[str, str]] = {
     },
     "specialist_consultation": {
         "ru": "Консультационное заключение",
+        "pl": "Konsultacja specjalistyczna",
         "uk": "Консультаційний висновок",
         "be": "Кансультацыйнае заключэнне",
         "kk": "Консультациялық қорытынды",
@@ -177,6 +188,7 @@ LOCALIZED_ROLE_LABELS: dict[str, dict[str, str]] = {
     },
     "operation_protocol": {
         "ru": "Протокол операции",
+        "pl": "Protokół operacji",
         "uk": "Протокол операції",
         "be": "Пратакол аперацыі",
         "kk": "Операция хаттамасы",
@@ -190,6 +202,7 @@ LOCALIZED_ROLE_LABELS: dict[str, dict[str, str]] = {
     },
     "anesthesia_preop": {
         "ru": "Осмотр анестезиолога",
+        "pl": "Badanie anestezjologiczne",
         "uk": "Огляд анестезіолога",
         "be": "Агляд анестэзіёлага",
         "kk": "Анестезиолог қарауы",
@@ -203,6 +216,7 @@ LOCALIZED_ROLE_LABELS: dict[str, dict[str, str]] = {
     },
     "informed_consent": {
         "ru": "Информированное согласие",
+        "pl": "Świadoma zgoda",
         "uk": "Інформована згода",
         "be": "Інфармаваная згода",
         "kk": "Ақпараттандырылған келісім",
@@ -216,6 +230,7 @@ LOCALIZED_ROLE_LABELS: dict[str, dict[str, str]] = {
     },
     "medical_commission": {
         "ru": "Врачебная комиссия",
+        "pl": "Komisja lekarska",
         "uk": "Лікарська комісія",
         "be": "Урачэбная камісія",
         "kk": "Дәрігерлік комиссия",
@@ -229,6 +244,7 @@ LOCALIZED_ROLE_LABELS: dict[str, dict[str, str]] = {
     },
     "mse_referral": {
         "ru": "Направление на МСЭ",
+        "pl": "Skierowanie na orzeczenie",
         "uk": "Направлення на МСЕК",
         "be": "Накіраванне на МСЭ",
         "kk": "МӘС-ке жолдама",
@@ -242,22 +258,27 @@ LOCALIZED_ROLE_LABELS: dict[str, dict[str, str]] = {
     },
     "joint_medical_exam": {
         "ru": "Совместный осмотр",
+        "pl": "Badanie wspólne",
         "en": "Joint medical examination",
     },
     "vk_mse": {
         "ru": "ВК на МСЭ",
+        "pl": "Komisja lekarska do orzeczenia",
         "en": "Medical commission for disability assessment",
     },
     "sick_leave_vk": {
         "ru": "ВК больничный",
+        "pl": "Komisja ds. zwolnienia lekarskiego",
         "en": "Sick-leave commission",
     },
     "military_commissariat_act": {
         "ru": "Акт для РВК",
+        "pl": "Akt dla komisji wojskowej",
         "en": "Military commissariat medical act",
     },
     "lab_results": {
         "ru": "Лабораторные результаты",
+        "pl": "Wyniki badań laboratoryjnych",
         "uk": "Лабораторні результати",
         "be": "Лабараторныя вынікі",
         "kk": "Зертханалық нәтижелер",
@@ -271,6 +292,7 @@ LOCALIZED_ROLE_LABELS: dict[str, dict[str, str]] = {
     },
     "instrumental_study": {
         "ru": "Инструментальное исследование",
+        "pl": "Badanie instrumentalne",
         "uk": "Інструментальне дослідження",
         "be": "Інструментальнае даследаванне",
         "kk": "Аспаптық зерттеу",
@@ -372,17 +394,17 @@ def neutralize_weak_role_for_generic_profile(
     title = str(top_title or "").strip().lower().replace("ё", "е")
     if specialty not in {"", "generic", "custom", "any"} or not top_title:
         return role
-    if any(word in title for word in ("дневник", "наблюдени")):
+    if any(word in title for word in ("дневник", "наблюдени", "dziennik", "obserwac")):
         return "daily_diary"
-    if "перевод" in title and "эпикриз" in title:
+    if ("перевод" in title and "эпикриз" in title) or ("przeniesieniow" in title and ("epikryz" in title or "epicris" in title)):
         return "transfer_epicrisis"
-    if any(word in title for word in ("выпис", "эпикриз")):
+    if any(word in title for word in ("выпис", "эпикриз", "wypis", "epikryz", "karta informacyjna")):
         return "discharge_epicrisis"
-    if "операц" in title and any(word in title for word in ("протокол", "ход", "операц")):
+    if ("операц" in title and any(word in title for word in ("протокол", "ход", "операц"))) or any(word in title for word in ("protokol operacji", "protokół operacji", "operac", "zabieg")):
         return "operation_protocol"
-    if "анестезиолог" in title:
+    if any(word in title for word in ("анестезиолог", "anestezjolog", "znieczulen")):
         return "anesthesia_preop"
-    if "соглас" in title:
+    if any(word in title for word in ("соглас", "zgod")):
         return "informed_consent"
     if "рвк" in title or "военком" in title or "военный комиссариат" in title:
         return "military_commissariat_act"
@@ -392,8 +414,12 @@ def neutralize_weak_role_for_generic_profile(
         return "vk_mse"
     if "совместный осмотр" in title or "комиссионный осмотр" in title:
         return "joint_medical_exam"
-    if any(word in title for word in ("консультац", "консультатив", "заключение специалист")):
+    if any(word in title for word in ("консультац", "консультатив", "заключение специалист", "konsultac", "opinia specjalist", "zalecenia specjalist")):
         return "specialist_consultation"
+    if any(word in title for word in ("laborator", "wyniki badań", "wyniki badan", "morfologia")):
+        return "lab_results"
+    if any(word in title for word in ("badanie wstępne", "badanie wstepne", "przyjęciu", "przyjeciu")):
+        return "primary_exam"
     if confidence < 0.45:
         return "unknown"
     return role
@@ -471,6 +497,10 @@ _DOCUMENT_TITLE_KEYWORDS = (
     "исследован", "обследован", "описание", "консилиум", "освидетельств", "направление", "согласие", "рекомендац",
     "рвк", "вк", "мсэ", "комисси", "operation", "protocol", "discharge", "summary", "consultation", "examination", "exam",
     "certificate", "report", "referral", "consent", "procedure", "surgery",
+    "badanie", "wstępne", "wstepne", "przyjęciu", "przyjeciu", "izba przyjęć", "izba przyjec",
+    "protokół", "protokol", "operacj", "zabieg", "procedur", "epikryz", "wypis", "karta informacyjna",
+    "konsultac", "opinia", "zaświadczenie", "zaswiadczenie", "skierowanie", "zgoda", "dziennik",
+    "obserwac", "historia choroby", "karta leczenia", "komisj", "orzeczenie", "wyniki badań", "wyniki badan", "laborator",
 )
 
 _DOCUMENT_TITLE_STOPWORDS = (
@@ -479,6 +509,9 @@ _DOCUMENT_TITLE_STOPWORDS = (
     "утверждаю", "главный врач", "заведующий", "м.п.", "печать", "форма", "код формы",
     "ф.и.о", "фио", "пациент", "дата рождения", "история болезни", "палата", "пол", "возраст",
     "дата поступления", "дата выписки", "лечащий врач", "подпись", "страница",
+    "ministerstwo", "szpital", "klinika", "oddział", "oddzial", "adres", "telefon", "email", "e-mail",
+    "pacjent", "pacjentka", "data urodzenia", "nr historii", "numer historii", "data przyjęcia", "data przyjecia",
+    "data wypisu", "lekarz", "podpis", "pieczęć", "pieczec", "formularz", "strona", "pesel",
 )
 
 
@@ -596,7 +629,7 @@ def _split_title_candidates(text: str) -> tuple[str, ...]:
 
 def _normalize_detected_document_title(value: str) -> str:
     text = normalize_button_label(value)
-    text = re.sub(r"^(?:документ|форма|приложение)\s*(?:№|n|no)?\s*[0-9A-Za-zА-Яа-я._/-]*\s*[:.\-–—]+\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^(?:документ|форма|приложение|dokument|formularz|załącznik|zalacznik)\s*(?:№|n|no|nr)?\s*[0-9A-Za-zА-Яа-яŁłŃńÓóŚśŹźŻż._/-]*\s*[:.\-–—]+\s*", "", text, flags=re.IGNORECASE)
     text = normalize_button_label(text.strip("«»\"'()[]{}"))
     if len(text) < 3 or len(text) > 90:
         return ""
@@ -613,7 +646,7 @@ def _normalize_detected_document_title(value: str) -> str:
         return ""
     if sum(ch.isdigit() for ch in text) > max(2, len(text) // 5):
         return ""
-    if not re.search(r"[A-Za-zА-Яа-яЁёІіЇїЄєӘәҒғҚқҢңӨөҰұҮүҺһЎўІі]", text):
+    if not re.search(r"[A-Za-zА-Яа-яЁёІіЇїЄєӘәҒғҚқҢңӨөҰұҮүҺһЎўІіĄąĆćĘęŁłŃńÓóŚśŹźŻż]", text):
         return ""
     # Specialty-neutral constructor rule: a doctor's own button name is taken
     # from the visible upper title of the DOCX.  Do not require a narrow specialty or
@@ -662,7 +695,9 @@ def _looks_like_vague_option_not_title(lower_text: str) -> bool:
         return True
     if re.fullmatch(r"повторн\w*\s*[,/;]\s*первичн\w*", lower):
         return True
-    if lower in {"первичный", "повторный", "плановый", "экстренный", "амбулаторный", "стационарный"}:
+    if re.fullmatch(r"pierwszorazow\w*\s*[,/;]\s*kontroln\w*", lower) or re.fullmatch(r"kontroln\w*\s*[,/;]\s*pierwszorazow\w*", lower):
+        return True
+    if lower in {"первичный", "повторный", "плановый", "экстренный", "амбулаторный", "стационарный", "pierwszorazowy", "kontrolny", "pilny", "planowy", "ambulatoryjny", "stacjonarny"}:
         return True
     return False
 
@@ -674,7 +709,14 @@ def _looks_like_field_label_not_document_title(lower_text: str) -> bool:
         return True
     if re.match(r"^история\s+болезни\s*(?:№|номер|n|no|:|[-–—]|\d)", lower):
         return True
+    if re.match(r"^historia\s+choroby\s*(?:nr|n|no|:|[-–—]|\d)", lower):
+        return True
     field_prefixes = (
+        "data przyjęcia", "data przyjecia", "data wypisu", "data urodzenia", "pesel",
+        "nr historii choroby", "numer historii choroby", "nr dokumentacji", "numer dokumentacji",
+        "pacjent", "pacjentka", "imię i nazwisko", "imie i nazwisko",
+        "rozpoznanie", "diagnoza", "leczenie", "plan leczenia", "zalecenia", "skargi", "dolegliwości", "dolegliwosci",
+        "wywiad", "stan psychiczny", "stan przedmiotowy", "wyniki badań", "wyniki badan", "lekarz", "ordynator", "podpis",
         "дата поступления", "дата выписки", "дата перевода", "диагноз",
         "диагноз при поступлении", "диагноз при выписке", "лечение",
         "назначенное лечение", "проведенное лечение", "жалобы", "анамнез",
@@ -706,8 +748,12 @@ def _looks_like_service_header_line(lower_text: str) -> bool:
         return False
     if not has_title_keyword:
         return True
-    strong_header_markers = ("министерство", "департамент", "комитет", "больница", "клиника", "адрес", "телефон", "инн", "огрн", "окпо")
-    return any(marker in lower for marker in strong_header_markers)
+    strong_header_markers = ("министерство", "департамент", "комитет", "больница", "клиника", "адрес", "телефон", "инн", "огрн", "окпо", "ministerstwo", "klinika", "oddział", "oddzial", "adres", "telefon", "regon", "nip")
+    if any(marker in lower for marker in strong_header_markers):
+        return True
+    # Do not reject real Polish titles like "Karta informacyjna leczenia szpitalnego":
+    # "szpitalnego" is an adjective inside the document title, not a hospital letterhead.
+    return bool(re.search(r"\bszpital\b", lower))
 
 
 def _document_title_score(title: str, block_index: int) -> float:
@@ -722,7 +768,7 @@ def _document_title_score(title: str, block_index: int) -> float:
         score += 12.0
     if title[:1].isupper() or title.isupper():
         score += 4.0
-    if lower.startswith(("первичный", "повторный", "выписной", "переводной", "протокол", "осмотр", "акт", "справка", "заключение", "направление", "лист")):
+    if lower.startswith(("первичный", "повторный", "выписной", "переводной", "протокол", "осмотр", "акт", "справка", "заключение", "направление", "лист", "karta", "historia", "badanie", "protokół", "protokol", "skierowanie", "zaświadczenie", "zaswiadczenie", "dziennik", "epikryza", "konsultacja")):
         score += 16.0
     if any(keyword in lower for keyword in _DOCUMENT_TITLE_KEYWORDS):
         score += 10.0
@@ -779,7 +825,7 @@ def _template_title(path: Path) -> str:
 
 
 def _looks_like_only_placeholders(text: str) -> bool:
-    return not re.search(r"[A-Za-zА-Яа-яЁёІіЇїЄєӘәҒғҚқҢңӨөҰұҮүҺһЎўІіԱ-ֆა-ჰ]", text or "")
+    return not re.search(r"[A-Za-zА-Яа-яЁёІіЇїЄєӘәҒғҚқҢңӨөҰұҮүҺһЎўІіԱ-ֆა-ჰĄąĆćĘęŁłŃńÓóŚśŹźŻż]", text or "")
 
 
 def _safe_id(value: str) -> str:
@@ -795,7 +841,7 @@ def _safe_id(value: str) -> str:
 
 
 def assert_personal_document_button_lock() -> None:
-    if PERSONAL_DOCUMENT_BUTTON_LOCK_VERSION != "v1.4":
+    if PERSONAL_DOCUMENT_BUTTON_LOCK_VERSION != "v1.5-pl":
         raise AssertionError("Personal document button lock changed unexpectedly")
     if not BUTTON_LABEL_IS_PROFILE_DATA:
         raise AssertionError("Dynamic document button labels must remain profile-owned data")
@@ -827,10 +873,16 @@ def assert_personal_document_button_lock() -> None:
             raise AssertionError(f"Early-production role title was not preserved: {legacy_title}")
     for role_id in ("operation_protocol", "discharge_epicrisis", "primary_exam", "informed_consent"):
         labels = LOCALIZED_ROLE_LABELS.get(role_id, {})
-        for lang in ("ru", "uk", "az", "hy", "ka", "en"):
+        for lang in ("ru", "uk", "az", "hy", "ka", "pl", "en"):
             if not labels.get(lang):
                 raise AssertionError(f"Missing localized button label for {role_id}/{lang}")
     for role_id in ("joint_medical_exam", "vk_mse", "sick_leave_vk", "military_commissariat_act"):
         if not LOCALIZED_ROLE_LABELS.get(role_id, {}).get("ru"):
             raise AssertionError(f"Missing legacy-compatible role label for {role_id}/ru")
+        if not LOCALIZED_ROLE_LABELS.get(role_id, {}).get("pl"):
+            raise AssertionError(f"Missing Polish-compatible role label for {role_id}/pl")
+    if safe_profile_filename("Chirurgia Łódź") != "Chirurgia_Łódź.medpack.json":
+        raise AssertionError("Polish profile filename must preserve visible Unicode letters")
+    if _normalize_detected_document_title("Karta informacyjna leczenia szpitalnego") != "Karta informacyjna leczenia szpitalnego":
+        raise AssertionError("Polish discharge card title must be preserved")
 

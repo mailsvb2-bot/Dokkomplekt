@@ -17,9 +17,10 @@ from docx import Document
 from universal_fields import FieldRegistry, PatientCase, default_field_registry, normalize_field_id
 from universal_profiles import ExtractionRule
 from medical_language_detector import detect_text_language
+from medical_formatting import parse_date
 
 _DATE_RE = re.compile(r"(?<!\d)([0-3]?\d[.\-/][01]?\d[.\-/](?:19|20)?\d{2}|[0-3]?\d[01]\d(?:19|20)?\d{2})(?!\d)")
-_CASE_RE = re.compile(r"(?i)(?:история\s+болезни|иб)\s*(?:№|n|no|номер)?\s*[:\-–—]?\s*([A-Za-zА-Яа-я0-9/\\\-]+)")
+_CASE_RE = re.compile(r"(?i)(?:история\s+болезни|иб|nr\s+historii\s+choroby|numer\s+historii\s+choroby|historia\s+choroby\s*(?:nr|n|no)?|nr\s+dokumentacji|numer\s+dokumentacji|nr\s+karty)\s*(?:№|n|no|nr|numer|номер)?\s*[:\-–—]?\s*([A-Za-zА-Яа-яŁłŃńÓóŚśŹźŻż0-9/\\\-]+)\b")
 _SNILS_RE = re.compile(r"(?<!\d)(\d{3}[- ]?\d{3}[- ]?\d{3}[- ]?\d{2})(?!\d)")
 _PASSPORT_RE = re.compile(r"(?i)(?:паспорт[^0-9]{0,24})?(\d{2}\s?\d{2}\s?\d{6})")
 _ICD10_RE = re.compile(r"(?i)\b([A-ZА-Я]\s?\d{2}(?:\.\d+)?)\b")
@@ -48,6 +49,12 @@ _BLOCK_GUARD_WORDS = (
     "Анамнез жизни", "Анамнез заболевания", "Психический статус", "Соматический статус",
     "Объективный статус", "Диагноз", "Лечение", "План лечения", "Назначенное лечение",
     "Рекомендовано", "Рекомендации", "Врач", "Зав. отделением", "Начмед",
+    "Pacjent", "Pacjentka", "Imię i nazwisko", "Imie i nazwisko", "Nazwisko i imię", "Nazwisko i imie",
+    "Data urodzenia", "PESEL", "Nr historii choroby", "Numer historii choroby", "Historia choroby",
+    "Data przyjęcia", "Data przyjecia", "Data hospitalizacji", "Data wypisu",
+    "Rozpoznanie", "Diagnoza", "Leczenie", "Plan leczenia", "Zalecone leczenie", "Zastosowane leczenie",
+    "Skargi", "Dolegliwości", "Dolegliwosci", "Wywiad", "Stan psychiczny", "Stan przedmiotowy",
+    "Wyniki badań", "Wyniki badan", "Zalecenia", "Lekarz", "Ordynator", "Podpis",
 )
 
 
@@ -329,10 +336,10 @@ def _scan_known_regexes(blocks: Sequence[DocumentBlock], registry: FieldRegistry
             definition = registry.require("patient.passport")
             result.append(FieldMatch(definition.id, definition.label, passport.group(1).strip(), 0.78, "regex_passport", block.index, passport.start(1), passport.end(1), block.path_hint))
         icd = _ICD10_RE.search(block.text)
-        if icd and any(word in block.text.lower() for word in ("диагноз", "мкб", "f")):
+        if icd and any(word in block.text.lower() for word in ("диагноз", "мкб", "icd", "mkb", "rozpoznanie", "diagnoza", "kod rozpoznania", "f")):
             definition = registry.require("diagnosis.icd10")
             result.append(FieldMatch(definition.id, definition.label, _normalize_icd10_code(icd.group(1)), 0.84, "regex_icd10", block.index, icd.start(1), icd.end(1), block.path_hint))
-        if any(word.lower() in block.text.lower() for word in ("первичный осмотр", "направление на госпитализацию", "выписной эпикриз")):
+        if any(word.lower() in block.text.lower() for word in ("первичный осмотр", "направление на госпитализацию", "выписной эпикриз", "badanie wstępne", "badanie wstepne", "skierowanie do szpitala", "skierowanie na hospitalizację", "skierowanie na hospitalizacje", "karta informacyjna", "epikryza", "historia choroby")):
             definition = registry.require("document.title")
             title = _trim_value(block.text)
             result.append(FieldMatch(definition.id, definition.label, title, 0.7, "title_phrase", block.index, 0, len(block.text), block.path_hint))
@@ -440,6 +447,9 @@ def _value_after_label(text: str, label: str) -> tuple[str, int, int] | None:
 
 
 def _first_date(text: str) -> str:
+    parsed_textual = parse_date(text)
+    if parsed_textual:
+        return parsed_textual.strftime("%d.%m.%Y")
     match = _DATE_RE.search(text)
     if not match:
         return ""

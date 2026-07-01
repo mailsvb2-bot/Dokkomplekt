@@ -21,7 +21,7 @@ from medical_docx_title_context import _date_match_has_birth_context
 from medical_docx_title_finder import extract_admission_date_from_title_docx
 from medical_text_utils import normalize_match, normalize_text
 
-ADMISSION_RESOLVER_LOCK_VERSION = "v1.3"
+ADMISSION_RESOLVER_LOCK_VERSION = "v1.4"
 ADMISSION_RESOLVER_REJECTS_BIRTH_CONTEXT = True
 ADMISSION_RESOLVER_USES_EXPLICIT_ADMISSION_MARKERS = True
 ADMISSION_RESOLVER_EXPLICIT_MARKERS_OVERRIDE_BIRTHY_TITLE = True
@@ -43,6 +43,19 @@ _ADMISSION_MARKERS = (
     "направление на госпитализацию",
     "в отделение поступ",
     "в 3 отделение кдп поступ",
+    "data przyjęcia",
+    "data przyjecia",
+    "data hospitalizacji",
+    "przyjęty",
+    "przyjety",
+    "przyjęta",
+    "przyjeta",
+    "przyjęcie",
+    "przyjecie",
+    "hospitalizacja od",
+    "skierowanie na hospitalizację",
+    "skierowanie na hospitalizacje",
+    "skierowanie do szpitala",
 )
 _BIRTH_MARKERS = (
     "дата рождения",
@@ -51,6 +64,11 @@ _BIRTH_MARKERS = (
     "возраст",
     "родился",
     "родилась",
+    "data urodzenia",
+    "urodzony",
+    "urodzona",
+    "pesel",
+    "wiek",
 )
 
 
@@ -214,7 +232,7 @@ def _nearest_marker_distance(text: str, pos: int, markers: tuple[str, ...]) -> i
     return min(distances) if distances else None
 
 def assert_admission_resolver_lock() -> None:
-    if ADMISSION_RESOLVER_LOCK_VERSION != "v1.3":
+    if ADMISSION_RESOLVER_LOCK_VERSION != "v1.4":
         raise AssertionError("Admission resolver lock changed unexpectedly")
     if not ADMISSION_RESOLVER_REJECTS_BIRTH_CONTEXT:
         raise AssertionError("Admission resolver must reject birth-date contexts")
@@ -224,6 +242,8 @@ def assert_admission_resolver_lock() -> None:
         raise AssertionError("Admission resolver must prefer explicit admission markers over birth-like title-neighbour dates")
     if not ADMISSION_RESOLVER_COMPARES_MARKER_DISTANCE_WITH_ORIGINAL_POSITIONS:
         raise AssertionError("Admission resolver must compare birth/admission marker distance using stable positions")
+    if extract_admission_date_from_primary_text("Data urodzenia\n04.01.2000\nData przyjęcia\n23.06.2026") != "23.06.2026":
+        raise AssertionError("Polish admission resolver must not prefer birth date over admission date")
     if extract_admission_date_from_primary_text("Дата рождения\n04.01.2000\nДата поступления\n23.06.2026") != "23.06.2026":
         raise AssertionError("Admission resolver must not prefer birth date over adjacent admission date")
     if extract_admission_date_from_primary_text("10.06.2026 Первичный осмотр\nГод рождения: 1980\nВ 3 отделение КДП поступает добровольно") == "01.09.1980":

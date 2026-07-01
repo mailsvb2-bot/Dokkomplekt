@@ -123,18 +123,18 @@ def all_diagnosis_display_values(*, language_id: str | None = "ru") -> list[str]
 
 
 # --- Safe ICD-10 normalization for parsed diagnoses ---
-ICD10_NORMALIZATION_LOCK_VERSION = "v1.4.42-p1"
+ICD10_NORMALIZATION_LOCK_VERSION = "v1.4.43-pl"
 
 
 _SYNONYM_CODE_ALIASES: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("артериальная гипертензия", "гипертоническая болезнь", "гипертония"), "I10"),
-    (("сахарный диабет 2", "сахарный диабет второго", "диабет 2 типа", "диабет ii типа"), "E11"),
-    (("сахарный диабет 1", "сахарный диабет первого", "диабет 1 типа", "диабет i типа"), "E10"),
-    (("острый аппендицит", "аппендицит"), "K35"),
-    (("пневмония", "внебольничная пневмония"), "J18"),
-    (("инфаркт миокарда", "острый инфаркт"), "I21"),
-    (("инсульт", "ишемический инсульт", "инфаркт мозга"), "I63"),
-    (("перелом предплечья", "перелом лучевой кости", "перелом локтевой кости"), "S52"),
+    (("артериальная гипертензия", "гипертоническая болезнь", "гипертония", "nadciśnienie tętnicze", "nadcisnienie tetnicze", "nadciśnienie", "nadcisnienie"), "I10"),
+    (("сахарный диабет 2", "сахарный диабет второго", "диабет 2 типа", "диабет ii типа", "cukrzyca typu 2", "cukrzyca 2 typu"), "E11"),
+    (("сахарный диабет 1", "сахарный диабет первого", "диабет 1 типа", "диабет i типа", "cukrzyca typu 1", "cukrzyca 1 typu"), "E10"),
+    (("острый аппендицит", "аппендицит", "ostre zapalenie wyrostka", "zapalenie wyrostka", "wyrostka robaczkowego"), "K35"),
+    (("пневмония", "внебольничная пневмония", "zapalenie płuc", "zapalenie pluc", "pozaszpitalne zapalenie płuc", "pozaszpitalne zapalenie pluc"), "J18"),
+    (("инфаркт миокарда", "острый инфаркт", "zawał mięśnia sercowego", "zawal miesnia sercowego", "ostry zawał", "ostry zawal"), "I21"),
+    (("инсульт", "ишемический инсульт", "инфаркт мозга", "udar", "udar niedokrwienny", "zawał mózgu", "zawal mozgu"), "I63"),
+    (("перелом предплечья", "перелом лучевой кости", "перелом локтевой кости", "złamanie przedramienia", "zlamanie przedramienia", "złamanie kości promieniowej", "zlamanie kosci promieniowej"), "S52"),
 )
 
 
@@ -158,13 +158,18 @@ def _strip_existing_code(value: str, code: str) -> str:
     # Strip both official Latin codes and accidental Cyrillic-keyboard variants
     # from the beginning of the diagnosis string.
     direct = re.compile(rf"^\s*{re.escape(code)}\s*[—\-:.,;]*\s*", re.IGNORECASE)
-    stripped = direct.sub("", value or "").strip()
-    if stripped != (value or "").strip():
+    original = (value or "").strip()
+    stripped = direct.sub("", original).strip()
+    if stripped != original:
         return stripped
+    bounded = re.compile(rf"(?<![A-ZА-ЯЁІЇЈ0-9]){re.escape(code)}(?![A-ZА-ЯЁІЇЈ0-9])", re.IGNORECASE)
+    stripped_anywhere = re.sub(r"\s+", " ", bounded.sub(" ", original)).strip(" —-:.,;")
+    if stripped_anywhere != original:
+        return stripped_anywhere.strip()
     return re.sub(
         r"^\s*[A-ZА-ЯЁІЇЈ][0-9]{2}(?:[.,][0-9A-ZА-ЯЁІЇЈ]+)?\s*[—\-:.,;]*\s*",
         "",
-        value or "",
+        original,
         flags=re.IGNORECASE,
     ).strip()
 
@@ -275,7 +280,7 @@ def normalize_required_diagnosis_with_icd10(value: str, *, language_id: str | No
     return normalized if diagnosis_has_icd10_code(normalized) else ""
 
 def assert_icd10_diagnosis_normalizer_lock() -> None:
-    if ICD10_NORMALIZATION_LOCK_VERSION != "v1.4.42-p1":
+    if ICD10_NORMALIZATION_LOCK_VERSION != "v1.4.43-pl":
         raise AssertionError("ICD-10 diagnosis normalization lock changed")
     checks = (
         (normalize_diagnosis_with_icd10("Острый аппендицит").startswith("K35"), "appendicitis must map to K35"),
@@ -286,6 +291,9 @@ def assert_icd10_diagnosis_normalizer_lock() -> None:
         (normalize_diagnosis_with_icd10("какая-то техническая инструкция") == "какая-то техническая инструкция", "unknown free text must not be invented"),
         (normalize_required_diagnosis_with_icd10("какая-то техническая инструкция") == "", "required popup diagnosis must reject unresolved free text"),
         (normalize_required_diagnosis_with_icd10("Острый аппендицит").startswith("K35"), "required popup diagnosis must accept safe text-to-code matches"),
+        (normalize_diagnosis_with_icd10("Ostre zapalenie wyrostka robaczkowego", language_id="pl").startswith("K35"), "Polish appendicitis must map to K35"),
+        (normalize_diagnosis_with_icd10("Ostre zapalenie wyrostka robaczkowego K35.8", language_id="pl") == "K35.8 Ostre zapalenie wyrostka robaczkowego", "Trailing Polish ICD code must not duplicate"),
+        (normalize_required_diagnosis_with_icd10("Nadciśnienie tętnicze", language_id="pl").startswith("I10"), "Polish hypertension must map to I10 in popup validation"),
     )
     for ok, message in checks:
         if not ok:

@@ -95,11 +95,19 @@ def _score_role(role: DocumentRole, text: str, found_sections: set[str], overlay
         score += 1.5
         markers.append(f"профиль: {overlay.label}")
     # Strong phrase pairs reduce false positives for common words like "врач".
-    if role.id == "discharge_epicrisis" and _has_all(haystack, ["дата поступления", "дата выписки"]):
+    if role.id == "discharge_epicrisis" and (
+        _has_all(haystack, ["дата поступления", "дата выписки"])
+        or _has_all(haystack, ["data przyjęcia", "data wypisu"])
+        or _has_all(haystack, ["data przyjecia", "data wypisu"])
+    ):
         score += 2.0
-    if role.id == "operation_protocol" and _has_any(haystack, ["ход операции", "оперативное вмешательство", "протокол операции"]):
+    if role.id == "operation_protocol" and _has_any(haystack, ["ход операции", "оперативное вмешательство", "протокол операции", "protokół operacji", "protokol operacji", "opis operacji", "przebieg operacji", "zabieg"]):
         score += 2.0
-    if role.id == "primary_exam" and _has_all(haystack, ["жалобы", "анамнез", "диагноз"]):
+    if role.id == "primary_exam" and (
+        _has_all(haystack, ["жалобы", "анамнез", "диагноз"])
+        or _has_all(haystack, ["dolegliwości", "wywiad", "rozpoznanie"])
+        or _has_all(haystack, ["dolegliwosci", "wywiad", "rozpoznanie"])
+    ):
         score += 1.5
     return score, list(dict.fromkeys(markers))
 

@@ -40,32 +40,37 @@ DIAGNOSIS_FIELD_HINTS = {
     "main.diagnosis",
     "clinical.diagnosis",
 }
-DIAGNOSIS_TEXT_HINTS = ("diagnos", "диагноз", "мкб", "mkb", "icd", "icd-10")
+DIAGNOSIS_TEXT_HINTS = ("diagnos", "rozpoznanie", "diagnoza", "диагноз", "мкб", "mkb", "icd", "icd-10")
 CASE_TEXT_HINTS = (
     "case.number", "case_number", "case.no", "case.num", "history.number", "history_number",
     "medical.record", "medical_record", "medical.card", "record.number", "record_no", "ib.number",
     "номер истории", "история болезни", "№ истории", "истории №", "иб №", "иб n",
     "номер карты", "медицинская карта",
+    "nr historii choroby", "numer historii choroby", "historia choroby", "nr dokumentacji", "numer dokumentacji",
 )
 ADMISSION_TEXT_HINTS = (
     "admission.date", "admission_date", "admission.dt", "date.of.admission", "date_admission",
     "hospitalization.date", "hospitalization_date", "hospital.admission", "admitted.at", "admitted_at",
     "дата поступ", "дата госпитал", "госпитализац", "поступил", "поступила", "принят", "принята",
+    "data przyjęcia", "data przyjecia", "data hospitalizacji", "przyjęty", "przyjety", "przyjęta", "przyjeta",
 )
 DISCHARGE_TEXT_HINTS = (
     "discharge.date", "discharge_date", "discharge.dt", "date.of.discharge", "date_discharge",
     "hospital.discharge", "discharged.at", "discharged_at",
     "дата выписк", "выписан", "выписана", "выписывается",
+    "data wypisu", "data wypisania", "wypisany", "wypisana", "wypisano",
 )
 TREATMENT_TEXT_HINTS = (
     "treatment.plan", "treatment_plan", "assigned_treatment", "assigned.treatment",
     "prescribed_treatment", "therapy.plan", "therapy_plan",
     "лечение", "назначенное лечение", "план лечения", "терапия", "назначения",
+    "leczenie", "plan leczenia", "zalecone leczenie", "zastosowane leczenie", "terapia",
 )
 LABS_TEXT_HINTS = (
     "labs.results", "lab.results", "lab_results", "analysis.results", "analysis_results",
     "analyses.results", "laboratory.results", "instrumental.results",
     "анализ", "лаборатор", "обследован", "исследован", "оак", "оам", "бак",
+    "badania", "laborator", "wyniki badań", "wyniki badan", "morfologia", "obrazowe",
 )
 
 LEGACY_STORE_KEYS = {
@@ -209,7 +214,7 @@ def _is_discharge_date_field(field: Any) -> bool:
     return (
         normalized in {"discharge.date", "discharge.date.actual"}
         or any(hint in signature for hint in DISCHARGE_TEXT_HINTS)
-        or (("date" in normalized or "дата" in signature) and ("discharge" in normalized or "выписк" in signature))
+        or (("date" in normalized or "дата" in signature or "data" in signature) and ("discharge" in normalized or "выписк" in signature or "wypis" in signature))
     )
 
 
@@ -219,7 +224,7 @@ def _is_admission_date_field(field: Any) -> bool:
     return (
         normalized in {"admission.date", "hospitalization.date"}
         or any(hint in signature for hint in ADMISSION_TEXT_HINTS)
-        or (("date" in normalized or "дата" in signature) and ("admission" in normalized or "hospitalization" in normalized or "поступ" in signature or "госпитал" in signature))
+        or (("date" in normalized or "дата" in signature or "data" in signature) and ("admission" in normalized or "hospitalization" in normalized or "поступ" in signature or "госпитал" in signature or "przyj" in signature or "hospitaliz" in signature))
     )
 
 

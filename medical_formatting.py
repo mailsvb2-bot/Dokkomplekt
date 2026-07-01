@@ -242,11 +242,42 @@ def _parse_compact_date_digits(digits: str) -> Optional[datetime]:
             return parsed
     return None
 
+_PL_MONTHS = {
+    "stycznia": 1, "styczen": 1, "styczeń": 1,
+    "lutego": 2, "luty": 2,
+    "marca": 3, "marzec": 3,
+    "kwietnia": 4, "kwiecien": 4, "kwiecień": 4,
+    "maja": 5, "maj": 5,
+    "czerwca": 6, "czerwiec": 6,
+    "lipca": 7, "lipiec": 7,
+    "sierpnia": 8, "sierpien": 8, "sierpień": 8,
+    "wrzesnia": 9, "września": 9, "wrzesien": 9, "wrzesień": 9,
+    "pazdziernika": 10, "października": 10, "pazdziernik": 10, "październik": 10,
+    "listopada": 11, "listopad": 11,
+    "grudnia": 12, "grudzien": 12, "grudzień": 12,
+}
+
+
+def _parse_polish_textual_date(value: str) -> Optional[datetime]:
+    match = re.fullmatch(r"(\d{1,2})\s+([A-Za-zĄąĆćĘęŁłŃńÓóŚśŹźŻż]+)\s+(\d{2}|\d{4})", value.strip(), flags=re.IGNORECASE)
+    if not match:
+        return None
+    month_key = match.group(2).lower()
+    month_key = month_key.replace("ą", "a").replace("ć", "c").replace("ę", "e").replace("ł", "l").replace("ń", "n").replace("ó", "o").replace("ś", "s").replace("ź", "z").replace("ż", "z")
+    month = _PL_MONTHS.get(match.group(2).lower()) or _PL_MONTHS.get(month_key)
+    if not month:
+        return None
+    return _candidate_date(int(match.group(3)), month, int(match.group(1)))
+
 def parse_date(value: str) -> Optional[datetime]:
     value = normalize_text(value)
     value = re.sub(r"\s*(?:г\.?|год)\s*$", "", value, flags=re.IGNORECASE).strip()
     if not value:
         return None
+
+    textual = _parse_polish_textual_date(value)
+    if textual:
+        return textual
 
     match = re.fullmatch(r"(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{2}|\d{4})", value)
     if match:

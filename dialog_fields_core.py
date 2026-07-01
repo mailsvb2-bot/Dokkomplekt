@@ -96,7 +96,9 @@ def prompt_fields_dialog(
     entries: list[tk.Entry] = []
     entry_vars: list[tk.StringVar] = []
     entry_auto_values: list[str] = []
-    diagnosis_popup = DialogDiagnosisPopup(win, self.root, language_id=(self.ui_language_var.get() if hasattr(self, "ui_language_var") else "ru"))
+    diagnosis_popup = DialogDiagnosisPopup(
+        win, self.root, language_id=str(getattr(self, "_diagnosis_language", lambda: self.ui_language_var.get() if hasattr(self, "ui_language_var") else "ru")())
+    )
 
     body, footer, _wheel = _build_scrollable_prompt_body(win, title)
 
@@ -134,7 +136,8 @@ def prompt_fields_dialog(
         value = (value or "").strip()
         if not value:
             return None, f"Заполните поле: {label}"
-        if "дата" in label_l:
+        is_date_label = any(marker in label_l for marker in ("дата", "data", "urodzenia", "przyjęcia", "przyjecia", "wypisu", "hospitalizacji"))
+        if is_date_label:
             parsed = parse_date(value)
             if not parsed:
                 return None, f"Проверьте формат даты: {label}"
@@ -146,14 +149,23 @@ def prompt_fields_dialog(
                 except Exception as exc:
                     record_soft_exception("dialog_fields_core.date_episode_validation", exc, detail=f"{label}: {value}")
             return normalized_date, ""
-        if "диагноз" in label_l:
+        is_diagnosis_label = any(marker in label_l for marker in ("диагноз", "мкб", "icd", "mkb", "rozpoznanie", "diagnoza", "kod rozpoznania"))
+        if is_diagnosis_label:
             sanitized = sanitize_diagnosis(value)
             compact = re.sub(r"\s+", "", sanitized.replace(",", "."))
             if re.fullmatch(r"\d{1,4}(?:\.\d+)?", compact):
                 return None, "Укажите диагноз текстом или полный шифр МКБ-10 с буквой класса, например K35 или I10."
             normalized = normalize_required_diagnosis_with_icd10(sanitized, language_id=getattr(self, "_diagnosis_language", lambda: "ru")())
             return (normalized or None), "" if normalized else "Выберите диагноз из МКБ-10 или укажите шифр с буквой класса, например K35 или I10."
-        if "номер истории" in label_l or "истори" in label_l and "болез" in label_l:
+        is_case_number_label = (
+            "номер истории" in label_l
+            or ("истори" in label_l and "болез" in label_l)
+            or ("histori" in label_l and "chorob" in label_l)
+            or "nr dokumentacji" in label_l
+            or "numer dokumentacji" in label_l
+            or "nr karty" in label_l
+        )
+        if is_case_number_label:
             patient_name = ""
             try:
                 if hasattr(self, "_patient_name_for_case_number_guard"):

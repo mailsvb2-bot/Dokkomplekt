@@ -33,7 +33,11 @@ class DialogDiagnosisPopup:
 
     @staticmethod
     def is_diagnosis_label(label: str) -> bool:
-        return "диагноз" in (label or "").strip().lower()
+        text = (label or "").strip().lower().replace("ё", "е")
+        return any(marker in text for marker in (
+            "диагноз", "мкб", "icd", "mkb",
+            "rozpoznanie", "diagnoza", "kod rozpoznania", "kod icd",
+        ))
 
     def attach(self, entry: tk.Entry, var: tk.StringVar) -> None:
         self.entry = entry
