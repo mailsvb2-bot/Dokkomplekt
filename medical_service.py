@@ -338,7 +338,7 @@ class MedicalDocumentService:
         return {kind: bundled_template_path(kind) for kind in DOCUMENT_ORDER}
 
     def missing_templates(self) -> List[Path]:
-        return [path for path in self.available_templates().values() if path.exists()]
+        return [path for path in self.available_templates().values() if not path.exists()]
 
     def create_documents(
         self,
