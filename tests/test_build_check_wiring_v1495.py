@@ -33,8 +33,5 @@ def test_build_checks_are_wired_into_ci_and_release_gate():
     ):
         assert snippet in release
 
-    for snippet in (
-        "test_user_reported_regressions_v1492.py",
-        "test_regression_state_overlay_v1491.py",
-    ):
-        assert snippet in runner
+    assert "test_regression_state_overlay_v1491.py" in runner
+    assert "smoke_user_reported" in runner
