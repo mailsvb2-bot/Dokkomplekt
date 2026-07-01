@@ -21,6 +21,7 @@ from diary_template_discovery import DiaryTemplateDiscoveryMixin
 from diary_template_selection import DiaryTemplateSelectionMixin
 from product_access import ProductAccessMixin, ProductLicenseMixin
 from product_access_native import NativeProductAccessMixin
+from regression_state_overlay_mixin import RegressionStateOverlayMixin
 
 
 class WidgetsMixin(UiCardsMixin, UiIconsMixin, UiButtonsMixin, UiFieldsMixin, DiagnosisWidgetMixin, UiFileRowsMixin):
@@ -32,6 +33,7 @@ class DiaryTemplateMixin(DiaryTemplateDiscoveryMixin, DiaryTemplateSelectionMixi
 
 
 class CombinedMedicalDiaryApp(
+    RegressionStateOverlayMixin,
     NativeProductAccessMixin,
     ProductAccessMixin,
     ProductLicenseMixin,
