@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -40,9 +41,9 @@ def test_desktop_intake_top_level_docx_is_launch_intent(tmp_path, monkeypatch):
 
     primary = tmp_path / "primary.docx"
     primary.write_bytes(b"fake-docx-for-monkeypatched-reader")
-    old = time.time() - 10
-    primary.touch()
-    monkeypatch.setattr(time, "time", lambda: old + 10)
+    stable_time = time.time() - 10
+    os.utime(primary, (stable_time, stable_time))
+    monkeypatch.setattr(time, "time", lambda: stable_time + 10)
     monkeypatch.setattr(desktop_intake, "_read_intake_docx_text", lambda path, context: "Первичный осмотр ФИО: Иванов Иван История болезни № 123 Диагноз: J20")
 
     candidates = desktop_intake.scan_primary_candidates(tmp_path, set())
