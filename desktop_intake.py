@@ -48,6 +48,8 @@ DESKTOP_INTAKE_IGNORES_HIDDEN_DOT_FILES = True
 DESKTOP_INTAKE_COPY_FALLBACK_TRIES_TO_UNLINK_SOURCE = True
 DESKTOP_INTAKE_RELAXED_PRIMARY_THRESHOLD_FOR_DOCTOR_FOLDER = True
 DESKTOP_INTAKE_TOP_LEVEL_DOCX_DROP_STARTS_APP = True
+DESKTOP_INTAKE_REJECTS_UNREADABLE_DOCX_FALLBACKS = True
+
 _ALLOWED_PRIMARY_SUFFIXES = {".docx", ".docm"}
 _PRIMARY_MARKERS = (
     "первичный осмотр",
@@ -73,14 +75,14 @@ _EXCLUDED_DOCUMENT_MARKERS = (
 )
 
 
-def primary_document_score(text: str) -> int:
-    """Score whether DOCX text is a primary intake source.
+@dataclass(frozen=True)
+class DesktopCandidate:
+    path: Path
+    signature: tuple[int, int]
 
-    A single generic word like «госпитализация» is not enough: it appears in
-    discharge summaries, consents and operation documents too.  The watcher is
-    intentionally conservative and requires either a strong primary title or a
-    combination of patient/admission/diagnosis markers.
-    """
+
+def primary_document_score(text: str) -> int:
+    """Score whether DOCX text is a primary intake source."""
 
     low = (text or "").lower().replace("ё", "е")
     if not low.strip():
@@ -97,10 +99,18 @@ def primary_document_score(text: str) -> int:
         "осмотр врача приёмного покоя",
         "направление на госпитализацию",
     )
-    score += 6 * sum(1 for marker in strong_markers if marker in low)
     identity_markers = ("ф.и.о", "фио", "фамилия имя отчество", "пациент", "больной", "больная", "история болезни", "номер истории")
-    admission_markers = ("дата поступления", "дата госпитализации", "поступил", "поступила", "поступает", "госпитализирован", "госпитализирована")
+    admission_markers = (
+        "дата поступления",
+        "дата госпитализации",
+        "поступил",
+        "поступила",
+        "поступает",
+        "госпитализирован",
+        "госпитализирована",
+    )
     clinical_markers = ("диагноз", "жалобы", "анамнез", "объективный статус", "соматический статус", "план лечения")
+    score += 6 * sum(1 for marker in strong_markers if marker in low)
     score += 2 * sum(1 for marker in identity_markers if marker in low)
     score += 3 * sum(1 for marker in admission_markers if marker in low)
     score += 1 * sum(1 for marker in clinical_markers if marker in low)
@@ -109,19 +119,8 @@ def primary_document_score(text: str) -> int:
     return max(0, score - negative)
 
 
-@dataclass(frozen=True)
-class DesktopCandidate:
-    path: Path
-    signature: tuple[int, int]
-
-
 def _desktop_from_windows_registry() -> Path | None:
-    """Read the authoritative Windows Desktop location when available.
-
-    OneDrive redirection is stored by Explorer in ``User Shell Folders``.
-    Environment-variable heuristics are useful as a fallback, but the registry
-    value is the closest stdlib-only source of truth for a real Windows user.
-    """
+    """Read the authoritative Windows Desktop location when available."""
 
     if os.name != "nt":
         return None
@@ -138,18 +137,11 @@ def _desktop_from_windows_registry() -> Path | None:
             return candidate
     except Exception as exc:
         record_soft_exception("desktop_intake.windows_desktop_registry", exc)
-        return None
     return None
 
 
 def desktop_path() -> Path:
-    """Return the user's real Desktop folder as safely as possible.
-
-    On Windows the Desktop is often redirected to OneDrive.  The strongest
-    signal is Explorer's registry setting; if it is unavailable, OneDrive
-    Desktop candidates are preferred before ``USERPROFILE/Desktop`` so a stale
-    local Desktop folder does not steal the first-launch intake prompt.
-    """
+    """Return the user's real Desktop folder as safely as possible."""
 
     registry_desktop = _desktop_from_windows_registry()
     if registry_desktop is not None:
@@ -168,7 +160,6 @@ def desktop_path() -> Path:
             return
         candidates.extend((base / "Desktop", base / "Рабочий стол"))
 
-    # Prefer redirected/cloud desktops before the ordinary user profile.
     for key in ("OneDriveCommercial", "OneDriveConsumer", "OneDrive", "USERPROFILE"):
         add_base(os.environ.get(key))
     candidates.extend((home / "Desktop", home / "Рабочий стол"))
@@ -193,14 +184,7 @@ def default_intake_folder() -> Path:
 
 
 def prompt_intake_folder(saved_folder: str | Path | None = None) -> Path:
-    """Return the folder path that the setup dialog should offer.
-
-    Saved settings can come from an older broken build where the prompt was not
-    reliably shown.  For a new prompt we must not blindly reuse a stale path:
-    the question says «на рабочем столе», so missing/invalid saved paths are
-    re-resolved against the current real Desktop/OneDrive Desktop.  An existing
-    previously created intake folder is still reused to avoid duplicates.
-    """
+    """Return the folder path that the setup dialog should offer."""
 
     if saved_folder:
         try:
@@ -213,12 +197,7 @@ def prompt_intake_folder(saved_folder: str | Path | None = None) -> Path:
 
 
 def _existing_intake_folder_on_desktop() -> Path | None:
-    """Return an existing intake folder regardless of case/old spelling.
-
-    Earlier versions created ``выписанные пациенты`` in lowercase.  On Windows
-    that is the same folder for most users, but on case-sensitive filesystems and
-    in tests we must not silently create a duplicate capitalized folder.
-    """
+    """Return an existing intake folder regardless of case/old spelling."""
 
     root = desktop_path()
     target = DESKTOP_INTAKE_FOLDER_NAME.casefold()
@@ -228,9 +207,7 @@ def _existing_intake_folder_on_desktop() -> Path | None:
                 return child
     except Exception as exc:
         record_soft_exception("desktop_intake.existing_intake_folder_on_desktop", exc, detail=str(root))
-        return None
     return None
-
 
 
 def _is_ignored_candidate_name(path: str | Path) -> bool:
@@ -244,12 +221,7 @@ def _is_supported_intake_document_name(path: str | Path) -> bool:
 
 
 def _setting_bool(value: object) -> bool:
-    """Normalize legacy JSON booleans stored as strings.
-
-    Older/manual settings may contain values like ``"false"`` or ``"нет"``.
-    Python's ``bool("false")`` is True, which could accidentally enable the
-    desktop watcher and suppress the first-launch prompt.
-    """
+    """Normalize legacy JSON booleans stored as strings."""
 
     if isinstance(value, bool):
         return value
@@ -265,16 +237,14 @@ def _setting_bool(value: object) -> bool:
 
 
 def is_desktop_intake_folder_path(path: str | Path) -> bool:
-    """Return True only for the canonical watched folder name.
+    """Return True only for the canonical watched folder name."""
 
-    The startup watcher must never silently scan an arbitrary saved directory
-    such as the whole Desktop after a corrupted/legacy settings file.
-    """
     try:
         return Path(path).expanduser().name.casefold() == DESKTOP_INTAKE_FOLDER_NAME.casefold()
     except Exception as exc:
         record_soft_exception("desktop_intake.folder_path_check", exc, detail=str(path))
         return False
+
 
 def normalize_intake_settings(raw: Mapping[str, object] | None) -> dict:
     data = dict(raw or {}) if isinstance(raw, Mapping) else {}
@@ -297,20 +267,7 @@ def normalize_intake_settings(raw: Mapping[str, object] | None) -> dict:
 
 
 def should_prompt_intake_setup(settings: Mapping[str, object] | None) -> bool:
-    """Whether startup must ask about the intake folder.
-
-    This prompt is a user-visible startup contract, not a cosmetic preference.
-    Old builds could leave ``prompt_version=v2`` in settings without reliably
-    showing the question to the doctor.  Therefore the current v3 prompt is
-    deliberately considered a new mandatory setup checkpoint.
-
-    Rules:
-    * clean profile => ask;
-    * old/no prompt version => ask;
-    * v2 or any non-current prompt version => ask;
-    * enabled=True but folder is missing => ask instead of silently recreating;
-    * current explicit No => do not ask again until the next prompt version.
-    """
+    """Whether startup must ask about the intake folder."""
 
     normalized = normalize_intake_settings(settings)
     folder = Path(str(normalized["folder"])).expanduser()
@@ -347,6 +304,7 @@ def safe_patient_subfolder(folder: str | Path, primary_path: str | Path, folder_
     if folder_name is None:
         try:
             from desktop_patient_folder import build_patient_folder_info
+
             folder_name = build_patient_folder_info(primary_path).folder_name
         except Exception as exc:
             record_soft_exception("desktop_intake.patient_folder_info", exc, detail=str(primary_path))
@@ -355,16 +313,24 @@ def safe_patient_subfolder(folder: str | Path, primary_path: str | Path, folder_
     return _available_dir(Path(folder).expanduser() / name)
 
 
+def _read_intake_docx_text(path: Path, *, context: str) -> str | None:
+    """Return DOCX text, or None for unreadable/corrupt renamed Word files."""
+
+    try:
+        return extract_docx_text(path)[:12000]
+    except Exception as exc:
+        record_soft_exception(context, exc, detail=str(path))
+        return None
+
+
 def scan_primary_candidates(folder: str | Path, seen_signatures: set[str]) -> tuple[DesktopCandidate, ...]:
     """Return top-level intake candidates with primary-source priority.
 
-    Dedicated folder semantics are intentionally two-stage:
-    * any stable top-level DOCX/DOCM is a launch intent when the file is not
-      clearly a generated/discharge document;
-    * when a clearly primary source is present, it wins. If that primary source
-      is already marked as seen, neighbouring generated documents must not
-      become a new launch candidate.
+    A stable top-level DOCX/DOCM inside the dedicated folder is a launch intent,
+    but it still must be a readable Word file. Corrupt/renamed bytes, hidden dot
+    files and Word lock files must not launch the UI.
     """
+
     root = Path(folder).expanduser()
     if not root.exists() or not root.is_dir():
         return ()
@@ -385,11 +351,9 @@ def scan_primary_candidates(folder: str | Path, seen_signatures: set[str]) -> tu
         if time.time() - stat.st_mtime < 1.2:
             continue
 
-        try:
-            doc_text = extract_docx_text(path)[:12000]
-        except Exception as exc:
-            record_soft_exception("desktop_intake.scan_primary_candidate_score", exc, detail=str(path))
-            doc_text = ""
+        doc_text = _read_intake_docx_text(path, context="desktop_intake.scan_primary_candidate_score")
+        if doc_text is None:
+            continue
         score = primary_document_score(doc_text)
         is_clear_primary = score >= 5
         if is_clear_primary:
@@ -417,37 +381,21 @@ def scan_primary_candidates(folder: str | Path, seen_signatures: set[str]) -> tu
 
 
 def is_likely_primary_document(path: str | Path) -> bool:
-    """Return True only for intake source documents, not generated templates.
-
-    This classifier is intentionally kept for diagnostics and manual role checks.
-    It is no longer a hard launch gate for the dedicated intake folder: the
-    watched folder itself is the doctor's explicit signal to start the workflow.
-    """
+    """Return True only for intake source documents, not generated templates."""
 
     candidate = Path(path).expanduser()
     if _is_ignored_candidate_name(candidate):
         return False
     if candidate.suffix.lower() not in _ALLOWED_PRIMARY_SUFFIXES or not candidate.exists():
         return False
-    try:
-        text = extract_docx_text(candidate)[:12000]
-    except Exception as exc:
-        record_soft_exception("desktop_intake.likely_primary_extract", exc, detail=str(candidate))
+    text = _read_intake_docx_text(candidate, context="desktop_intake.likely_primary_extract")
+    if text is None:
         return False
-    # The watched folder is a deliberate doctor action: a DOCX dropped into
-    # «Выписанные пациенты» should not be ignored merely because the hospital
-    # template lacks a literal title «Первичный осмотр».  Negative document
-    # markers are still subtracted by primary_document_score().
     return primary_document_score(text) >= 5
 
 
 def prepare_patient_work_folder(folder: str | Path, primary_path: str | Path, folder_name: str | None = None) -> tuple[Path, Path]:
-    """Create a patient subfolder and move the dropped primary document into it.
-
-    Moving the source DOCX out of the watched top-level folder prevents the same
-    file from re-triggering on the next application start.  If moving across
-    filesystems fails, copy+unlink is attempted by shutil.move.
-    """
+    """Create a patient subfolder and move the dropped primary document into it."""
 
     source = Path(primary_path).expanduser()
     if not source.exists() or not source.is_file():
@@ -458,19 +406,12 @@ def prepare_patient_work_folder(folder: str | Path, primary_path: str | Path, fo
     try:
         moved = Path(shutil.move(str(source), str(target)))
     except Exception as move_exc:
-        # If Explorer/Word temporarily locks the source, still copy the primary
-        # into the patient folder and use that copy as the active source.  If the
-        # copy also fails, stop loudly: otherwise the UI would promise a patient
-        # folder while generation still depends on the top-level intake folder.
         try:
             shutil.copy2(str(source), str(target))
             moved = target
             try:
                 source.unlink()
             except Exception as unlink_exc:
-                # A locked Word/Explorer file may survive copy fallback. Generation
-                # still uses the patient-folder copy, but diagnostics must show why
-                # the top-level duplicate could not be removed.
                 record_soft_exception("desktop_intake.copy_fallback_unlink_source", unlink_exc, detail=str(source))
         except Exception as copy_exc:
             with suppress(Exception):
@@ -503,7 +444,8 @@ def mark_seen(seen_signatures: set[str], candidate: DesktopCandidate) -> None:
 
 
 def assert_desktop_intake_lock() -> None:
-    """Implement the assert_desktop_intake_lock workflow with validation, UI state updates and diagnostics."""
+    """Lock the desktop-intake production behavior."""
+
     if DESKTOP_INTAKE_LOCK_VERSION != "v1.12":
         raise AssertionError("Desktop intake lock changed unexpectedly")
     if DESKTOP_INTAKE_REQUIRES_RUNNING_APP:
@@ -554,6 +496,8 @@ def assert_desktop_intake_lock() -> None:
         raise AssertionError("Desktop intake must ignore hidden dot files")
     if not DESKTOP_INTAKE_COPY_FALLBACK_TRIES_TO_UNLINK_SOURCE:
         raise AssertionError("Desktop intake copy fallback must try to remove the top-level source")
+    if not DESKTOP_INTAKE_REJECTS_UNREADABLE_DOCX_FALLBACKS:
+        raise AssertionError("Desktop intake must not launch on unreadable/corrupt DOCX files")
     if not _is_ignored_candidate_name(Path(".hidden.docx")) or not _is_ignored_candidate_name(Path("~$temp.docx")):
         raise AssertionError("Desktop intake ignored-file predicate is broken")
     if not _is_supported_intake_document_name(Path("Первичный осмотр.docx")):
