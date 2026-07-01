@@ -175,6 +175,7 @@ class _DesktopPollHarness(SettingsMixin, DesktopIntakeMixin):
     def _open_desktop_intake_popup(self, primary_path: str | Path) -> bool:
         self.opened_paths.append(Path(primary_path))
         self._desktop_intake_last_popup_opened = True
+        self._desktop_intake_popup_outcome = "ignored"
         return False
 
 

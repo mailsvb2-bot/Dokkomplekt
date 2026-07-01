@@ -208,9 +208,7 @@ class DesktopIntakeMixin:
                     # "setup_needed" is deliberately not terminal: if the doctor
                     # must first create block-03 buttons, the same primary DOCX
                     # should be offered again after setup, not silently disappear.
-                    terminal_close = outcome in {"processed", "ignored"} or (
-                        outcome in {"", "opened"} and bool(getattr(self, "_desktop_intake_last_popup_opened", False))
-                    )
+                    terminal_close = outcome in {"processed", "ignored"}
                     if processed or terminal_close:
                         mark_seen(self._desktop_intake_seen_signatures, candidate)
                         self._persist_desktop_intake_settings()

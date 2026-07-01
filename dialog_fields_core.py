@@ -1064,11 +1064,15 @@ def ensure_additional_info_state(app):
 
 def _read_text_file_for_additional_info(path):
     raw = Path(path).read_bytes()
+    last_decode_error = None
     for enc in ("utf-8-sig", "utf-8", "cp1251"):
         try:
             return raw.decode(enc).strip()
-        except UnicodeDecodeError:
-            pass
+        except UnicodeDecodeError as exc:
+            last_decode_error = exc
+            continue
+    if last_decode_error is not None:
+        record_soft_exception("dialog_fields_core.additional_info_text_decode", last_decode_error, detail=str(path))
     return raw.decode("utf-8", errors="replace").strip()
 
 def read_additional_info_file(path):

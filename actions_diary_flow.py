@@ -26,10 +26,7 @@ class ActionsDiaryFlowMixin:
             self.choose_status_files()
         if not self.status_files:
             raise ValueError("Выберите файл(ы) с текстами дневников. Тексты можно выбирать из DOCX/DOCM/DOC.")
-        template_selected = self._auto_select_numbered_diary_template(ask_folder=False)
-        if not template_selected and getattr(self, "_diary_files_auto_selected", False):
-            self.diary_files = []
-            self._diary_files_auto_selected = False
+        self._auto_select_numbered_diary_template(ask_folder=False)
         text_output = not bool(getattr(self, "diary_files", None))
         self._diary_text_output_enabled = bool(text_output)
         try:
