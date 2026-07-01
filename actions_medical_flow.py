@@ -25,6 +25,16 @@ def _not_working_value(value: str) -> bool:
     return normalized in {"", "нет", "не работает", "безработный", "безработная", "неработающий", "неработающая"}
 
 
+def _combined_vk_mse_work_position(app, work_org: str, position: str) -> str:
+    if hasattr(app, "_vk_mse_work_position_value"):
+        value = app._vk_mse_work_position_value()
+    elif hasattr(app, "vk_mse_work_position_var"):
+        value = app.vk_mse_work_position_var.get().strip()
+    else:
+        value = str(getattr(app, "_vk_mse_work_position_value_cache", "") or "").strip()
+    return value or ", ".join(part for part in [work_org, position] if part)
+
+
 class ActionsMedicalFlowMixin:
     def _confirmed_admission_date_override(self) -> str:
         """Return a doctor-confirmed admission date that may outrank rescanning."""
@@ -168,9 +178,7 @@ class ActionsMedicalFlowMixin:
         data.vk_protocol_date = _semantic_date("vk_protocol_date")
         data.vk_mse_work_org = self.vk_mse_work_org_var.get().strip() or shared_org
         data.vk_mse_position = self.vk_mse_position_var.get().strip() or shared_position
-        data.vk_mse_work_position = self.vk_mse_work_position_var.get().strip() or ", ".join(
-            part for part in [data.vk_mse_work_org, data.vk_mse_position] if part
-        )
+        data.vk_mse_work_position = _combined_vk_mse_work_position(self, data.vk_mse_work_org, data.vk_mse_position)
         data.sick_leave_vk_date = _semantic_date("sick_leave_vk_date")
         data.sick_leave_vk_protocol_number = self.sick_leave_vk_protocol_number_var.get().strip()
         data.sick_leave_vk_protocol_date = _semantic_date("sick_leave_vk_protocol_date")
