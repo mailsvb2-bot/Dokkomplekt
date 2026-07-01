@@ -27,14 +27,7 @@ def _not_working_value(value: str) -> bool:
 
 class ActionsMedicalFlowMixin:
     def _confirmed_admission_date_override(self) -> str:
-        """Return a doctor-confirmed admission date that may outrank rescanning.
-
-        The primary DOCX is reparsed during generation.  Without this guard, a
-        value corrected in a popup/preflight editor can be overwritten by the
-        scanner just before rendering.  Only explicitly stored semantic state or
-        a manually edited UI field wins here; automatic UI values still defer to
-        the safer document resolver below.
-        """
+        """Return a doctor-confirmed admission date that may outrank rescanning."""
         try:
             state = getattr(self, "_semantic_date_state", {})
             if isinstance(state, dict):
@@ -45,7 +38,7 @@ class ActionsMedicalFlowMixin:
             record_soft_exception("actions_medical_flow.confirmed_admission_state", exc)
         try:
             if bool(getattr(self, "_manual_admission_date", False)):
-                value = normalize_date_value(self.admission_date_var.get().strip())
+                value = normalize_date_value(current_semantic_date(self, "admission_date"))
                 if value:
                     return value
         except Exception as exc:
@@ -58,8 +51,6 @@ class ActionsMedicalFlowMixin:
         selected_source_type = self.primary_document_type_var.get()
         if selected_source_type == "hospitalization_referral":
             data.input_document_kind = "направление на госпитализацию"
-            # Для направления лечение вводится вручную через UI, потому что
-            # в самом направлении блока «План лечения» может не быть.
             if self.assigned_treatment_var.get().strip():
                 data.treatment_plan = self.assigned_treatment_var.get().strip()
         elif selected_source_type == "primary_exam":
@@ -77,15 +68,7 @@ class ActionsMedicalFlowMixin:
         manual_patient_name = self.patient_name_var.get().strip()
         if not data.fio and manual_patient_name:
             data.fio = manual_patient_name
-        # UI-ФИО используется для имени создаваемых файлов; если исходник вообще
-        # не содержит ФИО, doctor-approved значение закрывает и обязательное поле.
         data.output_fio = manual_patient_name or data.fio
-        # Дата поступления для медицинских документов должна идти через тот же
-        # безопасный resolver, что и дневники/desktop-intake.  Старый title-only
-        # extractor мог принять дату рождения из верхней демографической таблицы
-        # за дату госпитализации.  Но значение, уже исправленное врачом в
-        # popup/preflight/UI, имеет абсолютный приоритет и не должно перетираться
-        # повторным rescanning прямо перед рендером.
         confirmed_admission = self._confirmed_admission_date_override()
         if confirmed_admission:
             data.admission_date = confirmed_admission
@@ -134,9 +117,6 @@ class ActionsMedicalFlowMixin:
             data.additional_info_text = ""
             data.additional_info_source = ""
 
-        # Универсальные анализы: врач может явно выбрать «без анализов»,
-        # ввести текст, загрузить отдельный файл или выделить блок мышкой.
-        # Эти данные имеют приоритет над старым fallback-автозаполнением.
         try:
             from medical_renderer_labs import labs_block_from_values
 
@@ -160,8 +140,6 @@ class ActionsMedicalFlowMixin:
             data.labs_date_policy = "preserve_found_dates"
             data.labs_without = False
 
-        # Экспертный анамнез строго из UI/popup. Если врач заполнил эти поля,
-        # они имеют приоритет над распознанными из первичного документа строками.
         shared_org, shared_position = self._shared_work_defaults()
         data.expert_work_status = self._normalize_yes_no(self.expert_work_status_var.get())
         data.expert_work_org = self.expert_work_org_var.get().strip() or shared_org
