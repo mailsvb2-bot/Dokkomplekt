@@ -1,1 +1,14 @@
-PLACEHOLDER
+# Retired placeholder; kept inert to avoid running any workflow.
+name: Retired Polish scenario dispatcher
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "retired"
