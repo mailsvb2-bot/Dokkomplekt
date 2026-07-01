@@ -8,14 +8,16 @@ unknown doctor wording.  This is a product safety lock, not a limitation.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import re
 
 from medical_language_catalog import normalize_language_id
 from medical_language_detector import detect_text_language
 from medical_orthography_rules import PHRASE_CORRECTIONS
 
-ORTHOGRAPHY_MEDICAL_SAFE_LOCK_VERSION = "v1.0"
+ORTHOGRAPHY_MEDICAL_SAFE_LOCK_VERSION = "v1.1"
 ORTHOGRAPHY_IS_CONSERVATIVE = True
+ORTHOGRAPHY_CORRECTION_CACHE_ENABLED = True
 
 _PROTECTED_RE = re.compile(
     r"(\{\{[^{}]+\}\}|\b[A-ZА-Я]\s?\d{2}(?:\.\d+)?\b|\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b|\b\d{2,}[-/\\]\d+\b|\b[А-ЯA-Z]{2,}\b)"
@@ -40,7 +42,11 @@ class OrthographyResult:
 
 
 def correct_medical_text(text: str, *, language_id: str = "auto", enabled: bool = True) -> OrthographyResult:
-    original = str(text or "")
+    return _correct_medical_text_cached(str(text or ""), str(language_id or "auto"), bool(enabled))
+
+
+@lru_cache(maxsize=8192)
+def _correct_medical_text_cached(original: str, language_id: str, enabled: bool) -> OrthographyResult:
     if not enabled or not original:
         return OrthographyResult(original, original, normalize_language_id(language_id), False, ())
     lang = normalize_language_id(language_id)
@@ -57,13 +63,18 @@ def correct_medical_text(text: str, *, language_id: str = "auto", enabled: bool 
     applied: list[str] = []
     working = _normalize_typography(working)
     for wrong, right in PHRASE_CORRECTIONS.get(lang, {}).items():
-        pattern = re.compile(rf"(?iu)(?<![\w]){re.escape(wrong)}(?![\w])")
+        pattern = _phrase_pattern(lang, wrong)
         if pattern.search(working):
             working = pattern.sub(_case_preserving_replacement(right), working)
             applied.append(f"{lang}:{wrong}->{right}")
     for index, value in enumerate(protected):
         working = working.replace(f"\uFFF0{index}\uFFF1", value)
     return OrthographyResult(original, working, lang, working != original, tuple(applied))
+
+
+@lru_cache(maxsize=4096)
+def _phrase_pattern(_lang: str, wrong: str) -> re.Pattern[str]:
+    return re.compile(rf"(?iu)(?<![\w]){re.escape(wrong)}(?![\w])")
 
 
 def correct_case_values(values: dict[str, str], *, language_id: str = "auto", enabled: bool = True) -> dict[str, str]:
@@ -107,11 +118,15 @@ def _is_safe_to_correct_field(field_id: str) -> bool:
 
 
 def assert_orthography_medical_safe_lock() -> None:
-    if ORTHOGRAPHY_MEDICAL_SAFE_LOCK_VERSION != "v1.0" or not ORTHOGRAPHY_IS_CONSERVATIVE:
+    if ORTHOGRAPHY_MEDICAL_SAFE_LOCK_VERSION != "v1.1" or not ORTHOGRAPHY_IS_CONSERVATIVE:
         raise AssertionError("Orthography medical-safe lock changed")
+    if not ORTHOGRAPHY_CORRECTION_CACHE_ENABLED:
+        raise AssertionError("Orthography correction cache must stay enabled for batch rendering")
     text = "Диагноз: K35.8. Рекоммендации: наблюдение 10.06.2026 {{patient.fio}}"
     corrected = correct_medical_text(text, language_id="ru").corrected
     if "K35.8" not in corrected or "10.06.2026" not in corrected or "{{patient.fio}}" not in corrected:
         raise AssertionError("Orthography changed protected medical tokens")
     if "Рекомендации" not in corrected:
         raise AssertionError("Orthography did not apply conservative correction")
+    if correct_medical_text(text, language_id="ru").corrected != corrected:
+        raise AssertionError("Orthography cache changed correction result")
