@@ -33,16 +33,7 @@ from medical_text_utils import (
 class MedicalParserCoreMixin:
     @staticmethod
     def _detect_document_kind(text: str) -> str:
-        """Определить тип входного первичного документа для статуса/диагностики.
-
-        Это не влияет на схему данных: и направление, и первичный осмотр
-        разбираются в один PatientData и затем используются всеми выбранными
-        документами.
-        """
         low = normalize_match(text)
-        # Сначала направление: в реальных файлах оно может содержать слова
-        # «первичный осмотр» как часть текста/шапки, но popup нужен именно для
-        # направления на госпитализацию.
         if (
             "направление на госпитализацию" in low
             or "госпитализируется по направлению" in low
@@ -56,10 +47,6 @@ class MedicalParserCoreMixin:
     def parse_docx(self, path: str | Path) -> PatientData:
         text = extract_docx_text(path)
         data = self.parse_text(text)
-        # Дата поступления в DOCX имеет один источник истины: заголовок
-        # документа / имя файла рядом с названием. Если структурный DOCX-поиск
-        # нашёл дату рядом с заголовком, он имеет приоритет. Если нет, сохраняем
-        # строгий text-fallback из parse_text вместо обнуления уже найденной даты.
         admission_date = extract_admission_date_from_primary_docx(path)
         if admission_date:
             data.admission_date = admission_date
@@ -67,21 +54,35 @@ class MedicalParserCoreMixin:
         sanitize_patient_data_forbidden_phrases(data)
         return data
 
-    def parse_text(self, text: str) -> PatientData:
-        """Implement the parse_text workflow with validation, UI state updates and diagnostics."""
+    def _split_solid_primary_text(self, text: str) -> str:
         text = normalize_text(text)
+        if not text:
+            return ""
+        non_empty_lines = [line for line in text.splitlines() if line.strip()]
+        if len(non_empty_lines) > 2:
+            return text
+        aliases: list[str] = []
+        for values in tuple(self.FIELD_ALIASES.values()) + tuple(self.BLOCK_ALIASES.values()):
+            aliases.extend(str(item) for item in values if str(item).strip())
+        aliases.extend(str(item) for item in self.SECTION_MARKERS if str(item).strip())
+        aliases = sorted(set(aliases), key=len, reverse=True)
+        repaired = " " + text.strip()
+        for alias in aliases:
+            alias_pattern = re.escape(alias).replace(r"\ ", r"\s+").replace("ё", "[её]").replace("Ё", "[ЕЁ]")
+            pattern = rf"(?<![\nА-Яа-яA-Za-z0-9])({alias_pattern})(?![А-Яа-яA-Za-z0-9])\s*(?=[:№N#.-]|\s)"
+            repaired = re.sub(pattern, r"\n\1", repaired, flags=re.IGNORECASE)
+        repaired = re.sub(r"\n{2,}", "\n", repaired).strip()
+        return normalize_text(repaired)
+
+    def parse_text(self, text: str) -> PatientData:
+        text = self._split_solid_primary_text(text)
         data = PatientData()
         data.input_document_kind = self._detect_document_kind(text)
-        # Full-document scan: if the primary DOCX has no explicit treatment
-        # row, the UI must ask the doctor for «Лечение» when any medical
-        # document is selected in block 03.
         data.has_treatment_section = has_treatment_section_marker(text)
 
         for field_name, aliases in self.FIELD_ALIASES.items():
             value = self._extract_inline(text, aliases, field_name=field_name)
             if value:
-                # "Проживает - в семье" в анамнезе жизни не является адресом регистрации.
-                # Адрес берём только из явных адресных строк или компактной строки пациента.
                 if field_name == "registered" and not self._looks_like_address_tail(value):
                     continue
                 if field_name == "case_number":
@@ -96,36 +97,16 @@ class MedicalParserCoreMixin:
                 setattr(data, field_name, value)
 
         data.admission_date = extract_admission_date_from_primary_text(text) or self._extract_admission_date(text)
-
-        # Поддержка компактных первичных документов: ФИО, возраст и адрес
-        # могут быть написаны в одну строку, а не в отдельный столбец.
         self._repair_compact_demographics(data, text)
-
-        # Работа и должность должны подтягиваться из первичного документа в
-        # popup-окна как два отдельных значения. Поддерживаем как отдельные
-        # поля «Работает в организации» / «Должность», так и одну фразу
-        # «Работает в ..., в должности ...».
         self._repair_work_details(data, text)
-
-        # После восстановления ФИО повторно чистим номер истории болезни уже с
-        # контекстом пациента.  Первичный проход идёт по FIELD_ALIASES и видит
-        # ``case_number`` раньше ``fio``; без второго прохода строка вида
-        # «История болезни № Иванов Иван Иванович 123» могла попасть в popup
-        # целиком или быть отброшена вместе с настоящим номером.
         if data.case_number:
             data.case_number = sanitize_case_number_candidate(data.case_number, patient_name=data.fio)
-
-        # Анамнез жизни может быть не только таблицей/столбцом с явной меткой
-        # «Анамнез жизни», но и свободным абзацем: "наследственность - ...
-        # Родился... Беременность и роды...". Берём исходные слова и стиль
-        # из первичного документа, не пересобирая текст искусственно.
         self._repair_life_anamnesis_from_free_style(data, text)
 
         if not data.diagnosis:
             diagnosis = self._extract_after_phrase(text, r"был\s+выставлен\s+диагноз\s*[:.]?")
             if diagnosis:
                 data.diagnosis = diagnosis
-
         if data.diagnosis:
             data.diagnosis = normalize_diagnosis_with_icd10(data.diagnosis)
 
@@ -137,25 +118,18 @@ class MedicalParserCoreMixin:
             data.diagnosis = normalize_diagnosis_with_icd10(data.diagnosis)
         if data.fio:
             data.fio = self._sanitize_fio_value(data.fio)
-
-        # Универсальный режим не имеет зашитого города, врача, заведующего или
-        # профильного эпиданамнеза. Если шаблон требует эти значения, они
-        # должны прийти из исходного документа, профиля врача или popup-а.
         sanitize_patient_data_forbidden_phrases(data)
-
         self._refresh_warnings(data)
-
         return data
 
     @staticmethod
     def _sanitize_fio_value(value: str) -> str:
-        """Reject accidental non-name fragments captured as patient FIO."""
         cleaned = clean_value(value)
         if not cleaned:
             return ""
         low = cleaned.lower()
         forbidden = (
-            "лечение", "диагноз", "документ", "шаблон", "кнопк", "попап",
+            "лечение", "диагноз", "документ", "шаблон", "кнопк",
             "история болезни", "дата", "осмотр", "жалобы", "анамнез",
             "комиссия", "мсэ", "рвк", "эпикриз", "подпись",
         )
@@ -166,7 +140,6 @@ class MedicalParserCoreMixin:
         words = re.findall(r"[А-ЯЁA-Z][а-яёa-z]+|[А-ЯЁA-Z]\.", cleaned)
         if len(words) >= 2:
             return cleaned
-        # Also support all-caps table values like "ИВАНОВ ИВАН ИВАНОВИЧ".
         plain_words = re.findall(r"[А-ЯЁA-Z]{2,}", cleaned)
         if len(plain_words) >= 2:
             return cleaned
@@ -174,12 +147,6 @@ class MedicalParserCoreMixin:
 
     @staticmethod
     def _refresh_warnings(data: PatientData) -> None:
-        """Rebuild parser warnings after late repairs/overrides.
-
-        parse_docx can fill admission_date after parse_text has already run.
-        Recomputing warnings prevents stale "missing admission date" messages in
-        the UI preview and strict-mode diagnostics.
-        """
         data.warnings.clear()
         for field_name in data.missing_critical_fields():
             data.warnings.append(f"Не найдено критическое поле: {field_name}")
