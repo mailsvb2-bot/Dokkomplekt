@@ -32,8 +32,6 @@ def _not_working_value(value: str) -> bool:
 
 
 class RegressionStateOverlayMixin:
-    """Protect doctor-confirmed values without increasing root module count."""
-
     def _vk_mse_work_position_value(self) -> str:
         if hasattr(self, "vk_mse_work_position_var"):
             return self.vk_mse_work_position_var.get().strip()
@@ -165,11 +163,11 @@ class RegressionStateOverlayMixin:
 
 
 class WidgetsMixin(UiCardsMixin, UiIconsMixin, UiButtonsMixin, UiFieldsMixin, DiagnosisWidgetMixin, UiFileRowsMixin):
-    """Aggregates focused widget helper mixins without an extra shim module."""
+    pass
 
 
 class DiaryTemplateMixin(DiaryTemplateDiscoveryMixin, DiaryTemplateSelectionMixin):
-    """Aggregates diary-template discovery/selection without an extra shim module."""
+    pass
 
 
 class CombinedMedicalDiaryApp(
@@ -191,3 +189,4 @@ class CombinedMedicalDiaryApp(
 ):
     def __init__(self, root: tk.Tk):
         self._initialize_app(root)
+        self.show_product_license_dialog
