@@ -535,7 +535,7 @@ class FilesMixin:
         selected = filedialog.askopenfilename(
             title="Выберите конкретный DOCX с датами дневников или отмените для выбора папки",
             initialdir=initial_dir,
-            filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docx *.docm"), ("All files", "*.*")],
+            filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("All files", "*.*")],
         )
         if selected:
             if self._set_manual_diary_template_file(selected) and not self.output_dir_var.get().strip():

@@ -274,6 +274,23 @@ def _watched_folder() -> Path | None:
     return None
 
 
+def _settings_seen_signatures() -> set[str]:
+    """Return GUI-persisted seen signatures from the shared settings file.
+
+    The GUI and the background agent write different state files.  When the GUI
+    has already accepted, ignored or moved a primary DOCX, the agent must trust
+    the GUI settings instead of relaunching the same top-level file after its
+    pending retry window expires.  Only 64-char hashes are returned; patient
+    filenames never leave the intake folder.
+    """
+    settings = _load_json(_settings_path())
+    intake_raw = settings.get("desktop_intake") if isinstance(settings, dict) else None
+    if not isinstance(intake_raw, dict):
+        return set()
+    normalized = normalize_intake_settings(intake_raw)
+    return {str(item).lower() for item in normalized.get("seen_signatures", ())}
+
+
 
 
 def _windows_hidden_startupinfo():
@@ -553,6 +570,10 @@ def _resolve_pending_state(state: dict, seen: set[str], folder: Path | None = No
         return {}, False
     launched_at = _safe_float(pending.get("launched_at", 0.0), 0.0)
     signature = str(pending.get("signature", ""))
+    if signature in _settings_seen_signatures():
+        seen.add(signature)
+        _write_log(f"pending launch confirmed by GUI settings: {_safe_signature_ref(signature)}")
+        return {}, True
     if folder is None:
         if _legacy_pending_path_confirmed_removed(state):
             seen.add(signature)

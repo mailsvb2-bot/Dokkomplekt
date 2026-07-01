@@ -193,8 +193,22 @@ class DiaryTemplateSelectionMixin:
         """
         if self.diary_files and not getattr(self, "_diary_files_auto_selected", False):
             return True
+
+        stale_auto_selection = bool(self.diary_files and getattr(self, "_diary_files_auto_selected", False))
+
+        def clear_stale_auto_selection() -> None:
+            if not stale_auto_selection:
+                return
+            self.diary_files = []
+            self._diary_files_auto_selected = False
+            try:
+                self._update_diary_template_label(success=False)
+            except Exception as exc:
+                record_soft_exception("diary_template_selection.clear_stale_auto_template", exc)
+
         admission_dt = self._admission_datetime_for_diary_template()
         if not admission_dt:
+            clear_stale_auto_selection()
             return False
 
         day_candidates = self._diary_template_day_candidates(admission_dt)
@@ -217,6 +231,8 @@ class DiaryTemplateSelectionMixin:
                 f"по {reason} {template_date.strftime(DATE_FMT)}.\n"
             )
             return True
+
+        clear_stale_auto_selection()
 
         if ask_folder:
             selected_file = filedialog.askopenfilename(
