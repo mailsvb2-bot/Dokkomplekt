@@ -189,4 +189,9 @@ class CombinedMedicalDiaryApp(
 ):
     def __init__(self, root: tk.Tk):
         self._initialize_app(root)
-        self.show_product_license_dialog
+        try:
+            self._product_license_button = tk.Label(root, text="License", cursor="hand2")
+            self._product_license_button.bind("<Button-1>", lambda _event: self.show_product_license_dialog())
+            self._product_license_button.place(relx=1.0, rely=1.0, x=-14, y=-14, anchor="se")
+        except Exception as exc:
+            record_soft_exception("app.license_button", exc)
