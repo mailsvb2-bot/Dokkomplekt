@@ -329,6 +329,20 @@ def should_prompt_intake_setup(settings: Mapping[str, object] | None) -> bool:
     return False
 
 
+def _available_dir(path: str | Path) -> Path:
+    candidate = Path(path).expanduser()
+    if not candidate.exists():
+        return candidate
+    parent = candidate.parent
+    stem = candidate.name.rstrip(" .") or "Patient"
+    index = 2
+    while True:
+        next_candidate = parent / f"{stem} ({index})"
+        if not next_candidate.exists():
+            return next_candidate
+        index += 1
+
+
 def safe_patient_subfolder(folder: str | Path, primary_path: str | Path, folder_name: str | None = None) -> Path:
     if folder_name is None:
         try:
@@ -342,10 +356,23 @@ def safe_patient_subfolder(folder: str | Path, primary_path: str | Path, folder_
 
 
 def scan_primary_candidates(folder: str | Path, seen_signatures: set[str]) -> tuple[DesktopCandidate, ...]:
+    """Return top-level intake candidates with primary-source priority.
+
+    Dedicated folder semantics are intentionally two-stage:
+    * any stable top-level DOCX/DOCM is a launch intent when the file is not
+      clearly a generated/discharge document;
+    * when a clearly primary source is present, it wins. If that primary source
+      is already marked as seen, neighbouring generated documents must not
+      become a new launch candidate.
+    """
     root = Path(folder).expanduser()
     if not root.exists() or not root.is_dir():
         return ()
-    result: list[DesktopCandidate] = []
+
+    fallback_candidates: list[DesktopCandidate] = []
+    primary_candidates: list[tuple[int, DesktopCandidate]] = []
+    clear_primary_present = False
+
     for path in sorted(root.iterdir(), key=lambda item: item.name.lower()):
         if not path.is_file() or not _is_supported_intake_document_name(path):
             continue
@@ -355,19 +382,38 @@ def scan_primary_candidates(folder: str | Path, seen_signatures: set[str]) -> tu
             continue
         if stat.st_size <= 0:
             continue
-        # Wait until file copy is likely complete before touching the file.
-        # A doctor putting DOCX/DOCM into the dedicated «Выписанные пациенты»
-        # folder is already an explicit launch intent.  Do not require the
-        # background agent to parse hospital-specific wording before starting the
-        # GUI: that made real первичные документы invisible when templates used
-        # uncommon titles or sparse text.
         if time.time() - stat.st_mtime < 1.2:
             continue
+
+        try:
+            doc_text = extract_docx_text(path)[:12000]
+        except Exception as exc:
+            record_soft_exception("desktop_intake.scan_primary_candidate_score", exc, detail=str(path))
+            doc_text = ""
+        score = primary_document_score(doc_text)
+        is_clear_primary = score >= 5
+        if is_clear_primary:
+            clear_primary_present = True
+
         key = signature_key(path, stat.st_mtime_ns, stat.st_size)
         if key in seen_signatures:
             continue
-        result.append(DesktopCandidate(path, (stat.st_mtime_ns, stat.st_size)))
-    return tuple(result)
+
+        candidate = DesktopCandidate(path, (stat.st_mtime_ns, stat.st_size))
+        if is_clear_primary:
+            primary_candidates.append((score, candidate))
+            continue
+
+        low_text = doc_text.lower().replace("ё", "е")
+        if any(marker in low_text for marker in _EXCLUDED_DOCUMENT_MARKERS):
+            continue
+        fallback_candidates.append(candidate)
+
+    if clear_primary_present:
+        ordered = sorted(primary_candidates, key=lambda item: (-item[0], item[1].path.name.lower()))
+        return tuple(candidate for _score, candidate in ordered)
+
+    return tuple(fallback_candidates)
 
 
 def is_likely_primary_document(path: str | Path) -> bool:
