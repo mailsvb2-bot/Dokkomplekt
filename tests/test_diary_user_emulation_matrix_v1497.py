@@ -36,7 +36,7 @@ def test_diary_user_emulation_matrix_covers_fifty_plus_runtime_contracts():
     check(expand_day_offsets((0, 1, 2, 7), 7) == (0, 1, 2, 7, 12, 17, 22), "day schedule 1")
     check(expand_day_offsets((1, 2, 5), 6) == (1, 2, 5, 8, 11, 14), "day schedule 2")
     check(expand_day_offsets((0,), 5) == (0, 1, 2, 3, 4), "day schedule 3")
-    check(expand_day_offsets((), 4) == (), "empty day schedule")
+    check(expand_day_offsets((), 4) == (1, 2, 3, 4), "default day schedule")
     check(expand_hour_intervals((2,), 4) == (2, 4, 6, 8), "hour schedule 1")
     check(expand_hour_intervals((1, 3), 5) == (1, 4, 5, 8, 9), "hour schedule 2")
     check(expand_hour_intervals((4,), 3) == (4, 8, 12), "hour schedule 3")
