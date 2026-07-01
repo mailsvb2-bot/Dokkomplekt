@@ -11,7 +11,7 @@ from medical_parser_sanitize import sanitize_diagnosis
 from icd10_f_search import normalize_diagnosis_with_icd10
 from diagnostic_logging import record_soft_exception
 from medical_primary_document_state import selected_primary_document_path
-from medical_date_state import current_semantic_date
+from medical_date_state import current_semantic_date, normalize_date_value
 
 
 def _format_preview_lazy(data) -> str:
@@ -20,7 +20,38 @@ def _format_preview_lazy(data) -> str:
 from medical_models import PatientData
 
 
+def _not_working_value(value: str) -> bool:
+    normalized = " ".join(str(value or "").strip().lower().replace("ё", "е").split())
+    return normalized in {"", "нет", "не работает", "безработный", "безработная", "неработающий", "неработающая"}
+
+
 class ActionsMedicalFlowMixin:
+    def _confirmed_admission_date_override(self) -> str:
+        """Return a doctor-confirmed admission date that may outrank rescanning.
+
+        The primary DOCX is reparsed during generation.  Without this guard, a
+        value corrected in a popup/preflight editor can be overwritten by the
+        scanner just before rendering.  Only explicitly stored semantic state or
+        a manually edited UI field wins here; automatic UI values still defer to
+        the safer document resolver below.
+        """
+        try:
+            state = getattr(self, "_semantic_date_state", {})
+            if isinstance(state, dict):
+                stored = normalize_date_value(state.get("admission_date", ""))
+                if stored:
+                    return stored
+        except Exception as exc:
+            record_soft_exception("actions_medical_flow.confirmed_admission_state", exc)
+        try:
+            if bool(getattr(self, "_manual_admission_date", False)):
+                value = normalize_date_value(self.admission_date_var.get().strip())
+                if value:
+                    return value
+        except Exception as exc:
+            record_soft_exception("actions_medical_flow.confirmed_admission_ui", exc)
+        return ""
+
     def _medical_override_data(self, navigation: str) -> PatientData:
         """Implement the _medical_override_data workflow with validation, UI state updates and diagnostics."""
         data = self._parse_primary_document(navigation)
@@ -52,16 +83,21 @@ class ActionsMedicalFlowMixin:
         # Дата поступления для медицинских документов должна идти через тот же
         # безопасный resolver, что и дневники/desktop-intake.  Старый title-only
         # extractor мог принять дату рождения из верхней демографической таблицы
-        # за дату госпитализации, поэтому он больше не является источником
-        # истины для создания документов.
-        from medical_admission_resolver import extract_admission_date_from_primary_docx
-        safe_admission_date = extract_admission_date_from_primary_docx(navigation)
-        if safe_admission_date:
-            data.admission_date = safe_admission_date
+        # за дату госпитализации.  Но значение, уже исправленное врачом в
+        # popup/preflight/UI, имеет абсолютный приоритет и не должно перетираться
+        # повторным rescanning прямо перед рендером.
+        confirmed_admission = self._confirmed_admission_date_override()
+        if confirmed_admission:
+            data.admission_date = confirmed_admission
         else:
-            value = current_semantic_date(self, "admission_date")
-            if value:
-                data.admission_date = value
+            from medical_admission_resolver import extract_admission_date_from_primary_docx
+            safe_admission_date = extract_admission_date_from_primary_docx(navigation)
+            if safe_admission_date:
+                data.admission_date = safe_admission_date
+            else:
+                value = current_semantic_date(self, "admission_date")
+                if value:
+                    data.admission_date = value
         def _semantic_date(key: str) -> str:
             return current_semantic_date(self, key)
 
@@ -154,6 +190,9 @@ class ActionsMedicalFlowMixin:
         data.vk_protocol_date = _semantic_date("vk_protocol_date")
         data.vk_mse_work_org = self.vk_mse_work_org_var.get().strip() or shared_org
         data.vk_mse_position = self.vk_mse_position_var.get().strip() or shared_position
+        data.vk_mse_work_position = self.vk_mse_work_position_var.get().strip() or ", ".join(
+            part for part in [data.vk_mse_work_org, data.vk_mse_position] if part
+        )
         data.sick_leave_vk_date = _semantic_date("sick_leave_vk_date")
         data.sick_leave_vk_protocol_number = self.sick_leave_vk_protocol_number_var.get().strip()
         data.sick_leave_vk_protocol_date = _semantic_date("sick_leave_vk_protocol_date")
@@ -187,6 +226,8 @@ class ActionsMedicalFlowMixin:
                 self._set_ui_var(self.discharge_date_var, discharge)
         out_dir = str(self._result_output_dir())
         data = self._medical_override_data(navigation)
+        if "vk_mse" in selected_docs and not _not_working_value(data.vk_mse_work_org) and not (data.vk_mse_position or data.vk_mse_work_position):
+            raise ValueError("Для ВК на МСЭ укажите должность или общее поле места работы/должности.")
         missing = data.missing_critical_fields()
         allow_missing_required = bool(getattr(self, "_allow_missing_required_creation", False))
         if missing and not allow_missing_required:
