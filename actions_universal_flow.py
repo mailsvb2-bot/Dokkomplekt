@@ -150,6 +150,27 @@ class ActionsUniversalFlowMixin:
         add("sick_leave_vk.work_position", var_text("sick_leave_vk_work_position_var"))
         return values
 
+    def _custom_requirement_flags(self, selected_custom_ids: List[str]) -> dict[str, bool]:
+        """Infer preflight/popup requirements for selected doctor-owned buttons.
+
+        This method is intentionally in the base universal flow, not only in the
+        UI overlay, so block-03 custom buttons keep working if mixin order changes
+        or a future refactor removes an overlay-specific super target.
+        """
+        from universal_main_documents import custom_requirement_flags_for_documents, empty_custom_requirement_flags
+
+        try:
+            current_pack = self._load_or_create_universal_pack()
+            selected = {str(item).strip() for item in selected_custom_ids or [] if str(item).strip()}
+            documents = [document for document in tuple(getattr(current_pack, "documents", ()) or ()) if not selected or getattr(document, "id", "") in selected]
+            if not documents:
+                return empty_custom_requirement_flags()
+            return custom_requirement_flags_for_documents(tuple(documents))
+        except Exception as exc:
+            from diagnostic_logging import record_soft_exception
+            record_soft_exception("actions_universal_flow.custom_requirement_flags", exc)
+            return empty_custom_requirement_flags()
+
     def _missing_custom_completion_inputs(self, current_pack, case, selected_custom_ids: List[str]):
         missing: list[str] = []
         selected = {str(item).strip() for item in selected_custom_ids if str(item).strip()}
