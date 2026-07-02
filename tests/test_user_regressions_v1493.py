@@ -91,6 +91,38 @@ def test_discharge_custom_template_receives_primary_case_fields(tmp_path: Path) 
     assert "режим, терапия" in text
 
 
+def test_custom_requirement_flags_do_not_depend_on_overlay_super_method() -> None:
+    from actions_universal_flow import ActionsUniversalFlowMixin
+    from universal_profiles import DocumentPack, DocumentTemplateSpec
+
+    class Harness(ActionsUniversalFlowMixin):
+        def __init__(self) -> None:
+            self.pack = DocumentPack(
+                pack_id="doctor.custom.requirements",
+                name="Профиль врача",
+                documents=(
+                    DocumentTemplateSpec(
+                        id="doctor_discharge",
+                        button_label="Мой документ врача",
+                        template="templates/discharge.docx",
+                        required_fields=("case.number", "diagnosis.main", "treatment.plan", "discharge.date"),
+                        role_id="dischargeEpicrisis",
+                    ),
+                ),
+            )
+
+        def _load_or_create_universal_pack(self):
+            return self.pack
+
+    flags = Harness()._custom_requirement_flags(["doctor_discharge"])
+
+    assert flags["requires_case_number"]
+    assert flags["requires_diagnosis"]
+    assert flags["requires_treatment"]
+    assert flags["requires_discharge_date"]
+    assert flags["discharge"]
+
+
 def test_desktop_intake_top_level_docx_is_launch_intent(tmp_path, monkeypatch):
     import desktop_intake
 
