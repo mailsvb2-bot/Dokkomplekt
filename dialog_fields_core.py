@@ -121,7 +121,7 @@ def prompt_fields_dialog(
     error_label.grid(row=0, column=0, sticky="w", pady=(0, 4))
     buttons = _build_buttons_frame(footer, 1)
 
-    def validate_and_normalize(label: str, value: str) -> tuple[str | None, str]:
+    def _validate_and_normalize(label: str, value: str) -> tuple[str | None, str]:
         label_l = (label or "").strip().lower().replace("ё", "е")
         value = (value or "").strip()
         if not value:
@@ -182,7 +182,7 @@ def prompt_fields_dialog(
         nonlocal result
         values: list[str] = []
         for entry, (label, _initial) in zip(entries, rows):
-            normalized, problem = validate_and_normalize(label, entry.get().strip())
+            normalized, problem = _validate_and_normalize(label, entry.get().strip())
             if normalized is None:
                 error_label.config(text=problem or f"Проверьте поле: {label}")
                 entry.focus_set()

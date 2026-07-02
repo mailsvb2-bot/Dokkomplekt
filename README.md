@@ -2,9 +2,9 @@
 
 Version: `v1.4.89_release_gate_runtime_isolation_SOURCE`
 
-## Hotfix — discharge custom case propagation
+## v1.4.89 hotfix — discharge custom case propagation
 
-Fixes doctor-owned discharge epicrisis generation so parsed primary-document data and doctor-confirmed UI/popup values reach custom DOCX placeholders instead of producing empty output. The regression contour now includes a doctor-owned discharge template replay that checks patient identity, case number, dates, complaints, anamnesis, status, discharge condition, diagnosis and treatment in the generated DOCX.
+This hotfix is part of the v1.4.89 release line. It fixes doctor-owned discharge epicrisis generation so parsed primary-document data and doctor-confirmed UI/popup values reach custom DOCX placeholders instead of producing empty output. The regression contour includes a doctor-owned discharge template replay that checks patient identity, case number, dates, complaints, anamnesis, status, discharge condition, diagnosis and treatment in the generated DOCX.
 
 ## v1.4.89 — release-gate runtime isolation
 
