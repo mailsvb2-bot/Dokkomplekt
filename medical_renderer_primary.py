@@ -49,7 +49,7 @@ class MedicalRendererPrimaryMixin:
         # В итоговом первичном осмотре не оставляем шаблонные варианты
         # «состоит/не состоит», «нужен/не нужен», «да/нет». Если источник не
         # содержит значения, строка остаётся с чистой подписью без мусорной подсказки.
-        editor.replace_block(["На учёте у психиатров", "На учете у психиатров"], "Профильное наблюдение:", data.psych_account, PRIMARY_MARKERS, allow_empty=True)
+        editor.replace_block(["Профильное наблюдение", "Диспансерное наблюдение"], "Профильное наблюдение:", data.profile_observation, PRIMARY_MARKERS, allow_empty=True)
         editor.replace_block(["Работает в организации"], "Работает в организации:", data.work_org, PRIMARY_MARKERS, allow_empty=True)
         editor.replace_block(["Должность"], "Должность:", data.position, PRIMARY_MARKERS, allow_empty=True)
         editor.replace_block(["Больничный лист"], "Больничный лист:", data.sick_leave, PRIMARY_MARKERS, allow_empty=True)
@@ -70,7 +70,7 @@ class MedicalRendererPrimaryMixin:
         editor.replace_block(["Жалобы на момент осмотра", "Жалобы"], "Жалобы на момент осмотра:", data.complaints, PRIMARY_MARKERS)
         editor.replace_block(["Анамнез жизни"], "Анамнез жизни:", data.life_anamnesis, PRIMARY_MARKERS)
         editor.replace_block(["Анамнез заболевания"], "Анамнез заболевания:", data.disease_anamnesis, PRIMARY_MARKERS)
-        editor.replace_block(["Психический статус"], "Профильный статус:", data.mental_status, PRIMARY_MARKERS)
+        editor.replace_block(["Профильный статус", "Статус при поступлении", "Клинический статус"], "Профильный статус:", data.profile_status, PRIMARY_MARKERS)
         editor.replace_block(["Соматический статус"], "Соматический статус:", data.somatic_status, PRIMARY_MARKERS)
         editor.replace_block(["План обследования"], "План обследования:", data.examination_plan, PRIMARY_MARKERS)
         editor.replace_block(["План лечения"], "План лечения:", data.treatment_plan, PRIMARY_MARKERS)
@@ -119,7 +119,7 @@ class MedicalRendererPrimaryMixin:
         editor.replace_block(["Жалобы при поступлении", "Жалобы"], "Жалобы при поступлении:", data.complaints, DISCHARGE_MARKERS)
         editor.replace_block(["Анамнез жизни"], "Анамнез жизни:", data.life_anamnesis, DISCHARGE_MARKERS)
         editor.replace_block(["Анамнез заболевания"], "Анамнез заболевания:", data.disease_anamnesis, DISCHARGE_MARKERS)
-        editor.replace_block(["Психический статус при поступлении", "Психический статус"], "Профильный статус при поступлении:", data.mental_status, DISCHARGE_MARKERS)
+        editor.replace_block(["Профильный статус при поступлении", "Статус при поступлении", "Клинический статус"], "Профильный статус при поступлении:", data.profile_status, DISCHARGE_MARKERS)
         diagnosis = sanitize_diagnosis(data.diagnosis)
         if diagnosis:
             diagnosis_sentence = (
