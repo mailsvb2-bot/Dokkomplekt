@@ -1,5 +1,11 @@
 # Release notes — v1.4.89_release_gate_runtime_isolation_SOURCE
 
+## Hotfix — discharge custom case propagation
+
+This v1.4.89 source line includes a discharge custom case propagation fix for doctor-owned DOCX templates. Parsed primary-document data and doctor-confirmed UI/popup values are overlaid into custom discharge epicrisis placeholders before rendering, so patient identity, case number, dates, complaints, anamnesis, status, discharge condition, diagnosis and treatment do not silently disappear from generated output.
+
+The hotfix is intentionally documented here and in `README.md` under the same release label. `tests/test_build_check_wiring_v1495.py` locks that synchronization so future hotfix documentation cannot drift away from the release metadata.
+
 ## v1.4.89 — release-gate runtime isolation
 
 This release fixes the Windows source-release problem where the release gate itself could create `.medical_diary_autofill_data\desktop_intake_agent.log` after all behavioral checks had passed.
