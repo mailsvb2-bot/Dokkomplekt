@@ -20,7 +20,7 @@ from docx import Document
 from diary_table_columns import find_day_column, find_hospitalization_day_column, is_data_row
 from diary_table_numbers import cell_int
 
-DIARY_SCHEDULE_LOCK_VERSION = "v1.2"
+DIARY_SCHEDULE_LOCK_VERSION = "v1.3"
 DIARY_SCHEDULE_DOCTOR_CONFIRMATION_REQUIRED = True
 DIARY_MANUAL_DAY_INPUT_MIN_COUNT = 10
 DIARY_HOURLY_MODE_IS_PATIENT_LEVEL_CHOICE = True
@@ -29,13 +29,17 @@ DIARY_SCHEDULE_EXTENDS_DAY_PATTERN_INSTEAD_OF_CYCLING = True
 DIARY_HOURLY_VALUES_ARE_INTERVALS = True
 DIARY_SCHEDULE_REJECTS_BOOL_VALUES = True
 DIARY_SCHEDULE_TOLERATES_BAD_CONFIDENCE = True
+DIARY_CALENDAR_NO_TEMPLATE_REQUIRED = True
+DIARY_CALENDAR_STARTS_AFTER_ADMISSION = True
+DEFAULT_CALENDAR_DIARY_DAY_OFFSETS: tuple[int, ...] = tuple(range(1, 11))
+CLINICAL_CALENDAR_DIARY_DAY_OFFSETS: tuple[int, ...] = (1, 2, 3, 7, 10, 14, 17, 21, 24, 28)
 
 _SIGNED_INT_RE = re.compile(r"[-+]?\d+")
 
 
 @dataclass(frozen=True)
 class DiaryScheduleSpec:
-    """A saved date principle for custom diary templates."""
+    """A saved date principle for diary generation."""
 
     mode: str = "daily"  # daily / hourly
     day_offsets: tuple[int, ...] = ()
@@ -80,6 +84,32 @@ class DiaryScheduleSpec:
         return DiaryScheduleSpec(mode, self.day_offsets, self.hour_offsets, self.confidence, self.source)
 
 
+def default_calendar_diary_schedule() -> DiaryScheduleSpec:
+    return DiaryScheduleSpec("daily", DEFAULT_CALENDAR_DIARY_DAY_OFFSETS, (), 1.0, "program_calendar_daily_from_next_day")
+
+
+def diary_calendar_schedule_from_choice(choice: str) -> DiaryScheduleSpec:
+    """Turn the doctor's popup choice into a calendar schedule.
+
+    Accepted choices:
+    - ``1`` or daily wording: every calendar day from admission + 1 day;
+    - ``2`` or clinical wording: +1, +2, +3, +7, then the same distance pattern;
+    - any comma/space separated positive numbers: manual day offsets.
+    """
+
+    text = str(choice or "").strip().lower().replace("ё", "е")
+    if not text or text in {"1", "ежедневно", "каждый день", "каждодневно"} or "кажд" in text or "ежеднев" in text:
+        return default_calendar_diary_schedule()
+    if text in {"2", "клинически", "контроль"} or "клинич" in text or "контрол" in text:
+        return DiaryScheduleSpec("daily", CLINICAL_CALENDAR_DIARY_DAY_OFFSETS, (), 1.0, "program_calendar_clinical_control")
+    values = parse_day_offsets(text, require_minimum=False)
+    if not values:
+        raise ValueError(
+            "Введите 1 для ежедневных дневников, 2 для клинической схемы или свои дни: +1, +2, +3, +7, +14."
+        )
+    return DiaryScheduleSpec("daily", values, (), 1.0, "doctor_manual_calendar_popup")
+
+
 def parse_day_offsets(text: str, *, require_minimum: bool = False) -> tuple[int, ...]:
     """Parse doctor's input like '+1, 2, 3, 5, 7, 14'."""
 
@@ -95,7 +125,7 @@ def parse_hour_offsets(text: str) -> tuple[int, ...]:
     """Parse hourly diary interval pattern relative to admission time.
 
     The values are intervals, not absolute offsets.  For example ``1`` means
-    every 1 hour; ``1, 2, 3`` means +1h, then +2h, then +3h, repeating the
+every 1 hour; ``1, 2, 3`` means +1h, then +2h, then +3h, repeating the
     interval pattern for long tables.
     """
 
@@ -150,6 +180,10 @@ def describe_schedule(spec: DiaryScheduleSpec) -> str:
     if spec.mode == "hourly" and spec.hour_offsets:
         return "от момента поступления через интервалы: " + ", ".join(f"+{value} ч" for value in spec.hour_offsets[:16])
     if spec.day_offsets:
+        if spec.source == "program_calendar_daily_from_next_day":
+            return "календарь программы: ежедневно, начиная с даты госпитализации +1 день"
+        if spec.source == "program_calendar_clinical_control":
+            return "календарь программы: +1, +2, +3, +7 день, затем продолжение по той же схеме"
         return "от даты поступления: " + ", ".join(f"+{value} д" for value in spec.day_offsets[:16])
     return "принцип дат не определён автоматически"
 
@@ -214,7 +248,7 @@ def planned_diary_time_labels(spec: DiaryScheduleSpec, *, limit: int, admission_
 
 
 def assert_diary_schedule_lock() -> None:
-    if DIARY_SCHEDULE_LOCK_VERSION != "v1.2":
+    if DIARY_SCHEDULE_LOCK_VERSION != "v1.3":
         raise AssertionError("Diary schedule lock changed unexpectedly")
     if not DIARY_SCHEDULE_DOCTOR_CONFIRMATION_REQUIRED:
         raise AssertionError("Diary schedule inference must remain doctor-confirmed")
@@ -232,6 +266,12 @@ def assert_diary_schedule_lock() -> None:
         raise AssertionError("Bool values must not become diary day/hour offsets")
     if not DIARY_SCHEDULE_TOLERATES_BAD_CONFIDENCE:
         raise AssertionError("Bad saved confidence must not crash diary schedule loading")
+    if not DIARY_CALENDAR_NO_TEMPLATE_REQUIRED or not DIARY_CALENDAR_STARTS_AFTER_ADMISSION:
+        raise AssertionError("Program calendar must remain available without date DOCX templates")
+    if default_calendar_diary_schedule().day_offsets[:3] != (1, 2, 3):
+        raise AssertionError("Default diary calendar must start from admission +1 day")
+    if diary_calendar_schedule_from_choice("2").day_offsets[:4] != (1, 2, 3, 7):
+        raise AssertionError("Clinical calendar diary choice is broken")
     if expand_day_offsets((1, 2, 5), 5) != (1, 2, 5, 8, 11):
         raise AssertionError("Daily pattern extension contract is broken")
     if expand_hour_intervals((1,), 4) != (1, 2, 3, 4):
