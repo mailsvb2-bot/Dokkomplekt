@@ -32,6 +32,52 @@ def _not_working_value(value: str) -> bool:
 
 
 class RegressionStateOverlayMixin:
+    def choose_diary_files(self) -> None:
+        """The Dates button now confirms the program calendar principle.
+
+        Old date-template DOCX files remain supported through lower-level
+        compatibility paths, but the visible production flow no longer requires a
+        date template: the doctor confirms how to compose diary dates in a popup.
+        """
+        try:
+            from diary_constants import DIARY_KIND
+            from diary_creation_wizard import prompt_diary_calendar_principle
+            if not prompt_diary_calendar_principle(self):
+                return None
+            try:
+                self.output_vars[DIARY_KIND].set(True)
+            except Exception as exc:
+                record_soft_exception("app.diary_calendar_select_output", exc)
+            try:
+                self._update_diary_template_label(success=True)
+                self._redraw_selection_controls()
+            except Exception as exc:
+                record_soft_exception("app.diary_calendar_refresh_ui", exc)
+            try:
+                if hasattr(self, "_update_selected_outputs_status"):
+                    self._update_selected_outputs_status()
+            except Exception as exc:
+                record_soft_exception("app.diary_calendar_status", exc)
+            try:
+                self._log("\n✅ Принцип дат дневников подтверждён: календарь программы, без обязательного шаблона дат.\n")
+            except Exception as exc:
+                record_soft_exception("app.diary_calendar_log", exc)
+            return None
+        except Exception as exc:
+            record_soft_exception("app.choose_diary_calendar_principle", exc)
+            return super().choose_diary_files()  # type: ignore[misc]
+
+    def _diary_template_label_text(self) -> str:
+        if not getattr(self, "diary_files", None) and not getattr(self, "diary_template_dir", ""):
+            principle = str(getattr(self, "_doctor_confirmed_diary_principle", "") or "календарь программы: +1 день")
+            text = "Даты: " + principle
+            try:
+                return self._truncate_label_text(text, max_chars=42 if getattr(self, "_compact_ui", False) else 78)
+            except Exception as exc:
+                record_soft_exception("app.diary_calendar_label", exc)
+                return text
+        return super()._diary_template_label_text()  # type: ignore[misc]
+
     def _vk_mse_work_position_value(self) -> str:
         if hasattr(self, "vk_mse_work_position_var"):
             return self.vk_mse_work_position_var.get().strip()
@@ -111,6 +157,14 @@ class RegressionStateOverlayMixin:
             self._set_vk_mse_work_position_value("")
         except Exception as exc:
             record_soft_exception("regression_state_overlay.reset_vk_mse_work_position", exc)
+        try:
+            self._doctor_confirmed_diary_day_offsets = ()
+            self._doctor_confirmed_diary_hour_offsets = ()
+            self._doctor_confirmed_diary_principle = ""
+            if hasattr(self, "diary_calendar_principle_var"):
+                self.diary_calendar_principle_var.set("")
+        except Exception as exc:
+            record_soft_exception("regression_state_overlay.reset_diary_calendar", exc)
         return result
 
     def _vk_mse_details_complete(self) -> bool:
@@ -147,7 +201,7 @@ class RegressionStateOverlayMixin:
         try:
             pack = self._load_or_create_universal_pack()
             selected = {str(item).strip() for item in selected_custom_ids if str(item).strip()}
-            for document in tuple(getattr(pack, "documents", ()) or ()):
+            for document in tuple(getattr(pack, "documents", ()) or ()): 
                 if selected and getattr(document, "id", "") not in selected:
                     continue
                 required = " ".join(str(item or "") for item in tuple(getattr(document, "required_fields", ()) or ()))
