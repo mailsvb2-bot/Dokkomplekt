@@ -33,7 +33,34 @@ def test_primary_parser_understands_solid_text_core_fields():
     assert "заболел" in data.disease_anamnesis.lower()
     assert data.life_anamnesis
     assert "терап" in data.treatment_plan.lower()
+    assert data.has_treatment_section
     assert data.diagnosis
+
+
+def test_compact_popup_date_100526_normalizes_to_full_date():
+    from medical_formatting import parse_date
+    from medical_date_state import normalize_date_value
+
+    parsed = parse_date("100526")
+
+    assert parsed is not None
+    assert parsed.strftime("%d.%m.%Y") == "10.05.2026"
+    assert normalize_date_value("100526") == "10.05.2026"
+
+
+def test_dialog_date_validation_does_not_reject_admission_compact_source():
+    source = Path("dialog_fields_core.py").read_text(encoding="utf-8")
+
+    assert "semantic_key != \"admission_date\"" in source
+    assert "parse_date(value)" in source
+
+
+def test_visible_diary_flow_forces_text_docx_not_table_template():
+    source = Path("actions_diary_flow.py").read_text(encoding="utf-8")
+
+    assert "text_output = True" in source
+    assert "diary_files=[]" in source
+    assert "self.diary_files = []" in source
 
 
 def test_discharge_custom_template_receives_primary_case_fields(tmp_path: Path) -> None:
