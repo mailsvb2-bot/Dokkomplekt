@@ -13,9 +13,10 @@ from diary_schedule import (
 )
 from medical_date_state import current_semantic_date
 
-DIARY_CREATION_WIZARD_LOCK_VERSION = "v1.5"
+DIARY_CREATION_WIZARD_LOCK_VERSION = "v1.6"
 DIARY_WIZARD_USES_PROGRAM_CALENDAR_WITHOUT_DATE_TEMPLATE = True
 DIARY_WIZARD_HEADLESS_SAFE = True
+DIARY_WIZARD_HAS_NO_LEGACY_TABLE_MODE = True
 
 
 @dataclass(frozen=True)
@@ -23,9 +24,7 @@ class DiaryWizardReview:
     patient_name: str
     admission_date: str
     discharge_date: str
-    template_files: tuple[str, ...]
     text_files: tuple[str, ...]
-    text_output: bool = False
     sick_leave_dynamic_epicrisis: bool = False
     frequency_mode: str = "daily"
     day_offsets: tuple[int, ...] = ()
@@ -44,14 +43,13 @@ class DiaryWizardReview:
             f"Пациент: {self.patient_name or 'не указан'}",
             f"Дата госпитализации: {self.admission_date or 'не найдена'}",
             f"Дата выписки: {self.discharge_date or 'не указана'}",
-            f"Режим: {'календарный текстовый DOCX без шаблона дат' if self.text_output else 'таблица дневников'}",
+            "Режим: текстовый DOCX по календарю программы",
             f"Частота: {'по часам' if self.frequency_mode == 'hourly' else 'ежедневно'}",
             "Принцип дат: " + (self.calendar_description or "календарь программы: ежедневно с +1 дня"),
+            f"Финальная запись выписки: {'да' if self.discharge_date else 'нет — нужна дата выписки'}",
             f"Динамический эпикриз по больничному: {'да' if self.sick_leave_dynamic_epicrisis else 'нет'}",
-            "Шаблоны дат:",
+            "Тексты дневников:",
         ]
-        lines.extend([f"  - {name}" for name in self.template_files] or ["  - не требуются: даты ставит календарь программы"])
-        lines.append("Тексты дневников:")
         lines.extend([f"  - {name}" for name in self.text_files] or ["  - не выбраны"])
         if self.day_offsets:
             lines.append("Дни дневников: " + ", ".join(f"+{item}" for item in self.day_offsets[:20]))
@@ -134,7 +132,7 @@ def current_diary_calendar_schedule(app: object, fallback: DiaryScheduleSpec | N
 
 def prompt_diary_calendar_principle(app: object) -> bool:
     if _headless_or_ci(app):
-        if not getattr(app, "_doctor_confirmed_diary_day_offsets", ()):  # deterministic default for tests/release gates
+        if not getattr(app, "_doctor_confirmed_diary_day_offsets", ()):
             _set_confirmed_schedule(app, default_calendar_diary_schedule(), "1")
         return True
     try:
@@ -150,7 +148,7 @@ def prompt_diary_calendar_principle(app: object) -> bool:
         "1 — ежедневно, начиная со следующего дня после госпитализации (+1, +2, +3...)\n"
         "2 — клиническая схема: +1, +2, +3, +7, +10, +14...\n"
         "Или напишите свои дни через запятую: +1, +2, +3, +5, +7, +14.\n\n"
-        "Шаблон с датами больше не обязателен: даты ставит календарь программы."
+        "Даты ставит календарь программы. Отдельный шаблон дат не используется."
     )
     while True:
         choice = simpledialog.askstring("Как составлять дневники", prompt, initialvalue=current, parent=getattr(app, "root", None))
@@ -170,9 +168,7 @@ def build_diary_wizard_review(app: object) -> DiaryWizardReview:
     patient = _get_var(app, "patient_name_var")
     admission = current_semantic_date(app, "admission_date") or _get_var(app, "admission_date_var")
     discharge = current_semantic_date(app, "discharge_date") or _get_var(app, "discharge_date_var")
-    templates = tuple(Path(item).name for item in getattr(app, "diary_files", []) or [])
     texts = tuple(Path(item).name for item in getattr(app, "status_files", []) or [])
-    text_output = bool(getattr(app, "_diary_text_output_enabled", False))
     sick_leave_dynamic_epicrisis = _normalize_yes_no(_get_var(app, "expert_sick_leave_needed_var")) == "да"
     frequency_mode = _get_var(app, "diary_frequency_mode_var") or "daily"
     if frequency_mode not in {"daily", "hourly"}:
@@ -182,8 +178,6 @@ def build_diary_wizard_review(app: object) -> DiaryWizardReview:
     hour_offsets: tuple[int, ...] = ()
     if frequency_mode == "hourly":
         hour_offsets = tuple(int(item) for item in getattr(schedule, "hour_offsets", ()) or ())
-    if not templates and getattr(app, "diary_template_dir", ""):
-        templates = (f"папка: {Path(str(getattr(app, 'diary_template_dir'))).name}",)
     if not texts and getattr(app, "diary_texts_dir", ""):
         texts = (f"папка: {Path(str(getattr(app, 'diary_texts_dir'))).name}",)
     warnings: list[str] = []
@@ -192,7 +186,7 @@ def build_diary_wizard_review(app: object) -> DiaryWizardReview:
     if not admission:
         warnings.append("Не найдена дата госпитализации; календарь дневников не знает, с какой даты начать.")
     if not discharge:
-        warnings.append("Не указана Дата выписки; программа не знает, на какой строке закончить дневники.")
+        warnings.append("Не указана Дата выписки; программа не знает, где поставить финальную запись выписки.")
     if not texts:
         warnings.append("Выберите тексты дневников через кнопку Тексты или настройте автоподбор по диагнозу.")
     if not day_offsets and frequency_mode != "hourly":
@@ -203,9 +197,7 @@ def build_diary_wizard_review(app: object) -> DiaryWizardReview:
         patient,
         admission,
         discharge,
-        templates,
         texts,
-        text_output,
         sick_leave_dynamic_epicrisis,
         frequency_mode,
         day_offsets,
@@ -238,16 +230,20 @@ def confirm_diary_creation(app: object) -> bool:
 
 
 def assert_diary_creation_wizard_lock() -> None:
-    if DIARY_CREATION_WIZARD_LOCK_VERSION != "v1.5":
+    if DIARY_CREATION_WIZARD_LOCK_VERSION != "v1.6":
         raise AssertionError("Diary creation wizard lock changed unexpectedly")
     if not DIARY_WIZARD_USES_PROGRAM_CALENDAR_WITHOUT_DATE_TEMPLATE:
         raise AssertionError("Diary wizard must not require a DOCX date template")
     if not DIARY_WIZARD_HEADLESS_SAFE:
         raise AssertionError("Diary wizard must auto-confirm safely in CI/headless tests")
+    if not DIARY_WIZARD_HAS_NO_LEGACY_TABLE_MODE:
+        raise AssertionError("Diary wizard must not expose legacy table mode")
     empty = type("Empty", (), {})()
     review = build_diary_wizard_review(empty)
     text = review.as_text()
     if review.ok or "МАСТЕР ДНЕВНИКОВ" not in text or "Принцип дат:" not in text:
         raise AssertionError("Diary wizard must block incomplete diary state and show calendar principle")
-    if "не требуются: даты ставит календарь программы" not in text:
-        raise AssertionError("Diary wizard must explain that date templates are not required")
+    if "таблица дневников" in text.lower() or "шаблоны дат" in text.lower():
+        raise AssertionError("Diary wizard must not expose legacy table/date-template wording")
+    if "текстовый DOCX по календарю программы" not in text:
+        raise AssertionError("Diary wizard must present the single text-calendar route")
