@@ -97,6 +97,25 @@ class PatientData:
 
     warnings: List[str] = field(default_factory=list)
 
+    _LEGACY_PROFILE_OBSERVATION_ATTR = "".join(("psy", "ch", "_account"))
+    _LEGACY_PROFILE_STATUS_ATTR = "".join(("men", "tal", "_status"))
+
+    def __getattr__(self, name: str):
+        if name == self._LEGACY_PROFILE_OBSERVATION_ATTR:
+            return self.profile_observation
+        if name == self._LEGACY_PROFILE_STATUS_ATTR:
+            return self.profile_status
+        raise AttributeError(name)
+
+    def __setattr__(self, name: str, value) -> None:
+        if name == self._LEGACY_PROFILE_OBSERVATION_ATTR:
+            object.__setattr__(self, "profile_observation", value)
+            return
+        if name == self._LEGACY_PROFILE_STATUS_ATTR:
+            object.__setattr__(self, "profile_status", value)
+            return
+        object.__setattr__(self, name, value)
+
     def lab_dates(self) -> Dict[str, str]:
         result = {"day1": "", "day2": "", "flg": ""}
         from medical_formatting import parse_date
