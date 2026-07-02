@@ -33,9 +33,9 @@ def _labs_results_for_case(data: PatientData) -> str:
 def patient_data_to_case(data: PatientData, *, source_document: str = "") -> PatientCase:
     """Convert legacy PatientData, including popup requisites, into PatientCase."""
     case = PatientCase()
-    objective_status = _first_text(data.somatic_status, data.mental_status)
-    discharge_condition = _first_text(data.epi_text, data.additional_info_text, data.somatic_status, data.mental_status)
-    treatment_result = _first_text(data.epi_text, data.additional_info_text, data.somatic_status, data.mental_status)
+    objective_status = _first_text(data.somatic_status, data.profile_status)
+    discharge_condition = _first_text(data.epi_text, data.additional_info_text, data.somatic_status, data.profile_status)
+    treatment_result = _first_text(data.epi_text, data.additional_info_text, data.somatic_status, data.profile_status)
     pairs = {
         "patient.fio": data.output_fio or data.fio,
         "patient.birth_date": data.birth,
@@ -57,7 +57,7 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
         "expert.sick_leave_from": data.expert_sick_leave_from,
         "expert.sick_leave_number": data.expert_sick_leave_number,
         "status.objective": objective_status,
-        "status.mental": data.mental_status,
+        "status.specialty": data.profile_status,
         "status.somatic": data.somatic_status,
         "diagnosis.main": data.diagnosis,
         "diagnosis.icd10": _icd10_code_from_diagnosis(data.diagnosis),
