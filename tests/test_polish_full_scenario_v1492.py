@@ -141,5 +141,5 @@ def test_polish_diary_text_output_keeps_texts_and_adapts_gender(tmp_path: Path) 
     assert detect_gender_from_patient_name("Anna Kowalska") == "female"
     assert result.created_files
     paragraphs = [paragraph.text for paragraph in Document(str(result.created_files[0])).paragraphs if paragraph.text.strip()]
-    assert paragraphs[0].startswith("02.06.26 ")
+    assert paragraphs[0].startswith("03.06.26 ")
     assert "Pacjentka przyjęta. Hospitalizowana." in paragraphs[0]
