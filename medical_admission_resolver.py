@@ -327,6 +327,15 @@ def _date_has_birth_context_strict(text: str, match: re.Match[str]) -> bool:
         return True
     if birth_near and admission_near:
         match_pos = match.start()
+        normalized_full = normalize_match(text or "")
+        birth_preceding = _preceding_marker_distance(normalized_full, match_pos, _BIRTH_MARKERS)
+        admission_preceding = _preceding_marker_distance(normalized_full, match_pos, _ADMISSION_MARKERS)
+        if birth_preceding is not None or admission_preceding is not None:
+            if admission_preceding is None:
+                return True
+            if birth_preceding is not None and birth_preceding < admission_preceding:
+                return True
+            return False
         birth_distance = _nearest_marker_distance(low, match_pos, _BIRTH_MARKERS)
         admission_distance = _nearest_marker_distance(normalize_match(text or ""), match_pos, _ADMISSION_MARKERS)
         if birth_distance is not None and admission_distance is not None and birth_distance <= admission_distance:
@@ -347,8 +356,20 @@ def _date_has_non_discharge_context(text: str, match: re.Match[str]) -> bool:
         return True
     if blocker_near and discharge_near:
         match_pos = match.start()
-        blocker_distance = _nearest_marker_distance(normalize_match(text or ""), match_pos, blocking_markers)
-        discharge_distance = _nearest_marker_distance(normalize_match(text or ""), match_pos, _DISCHARGE_MARKERS)
+        normalized_full = normalize_match(text or "")
+        # A date belongs to the label immediately to its left. Prefer the
+        # nearest *preceding* marker; fall back to bidirectional distance only
+        # when no marker precedes the date at all.
+        blocker_preceding = _preceding_marker_distance(normalized_full, match_pos, blocking_markers)
+        discharge_preceding = _preceding_marker_distance(normalized_full, match_pos, _DISCHARGE_MARKERS)
+        if blocker_preceding is not None or discharge_preceding is not None:
+            if discharge_preceding is None:
+                return True
+            if blocker_preceding is not None and blocker_preceding < discharge_preceding:
+                return True
+            return False
+        blocker_distance = _nearest_marker_distance(normalized_full, match_pos, blocking_markers)
+        discharge_distance = _nearest_marker_distance(normalized_full, match_pos, _DISCHARGE_MARKERS)
         if blocker_distance is not None and discharge_distance is not None and blocker_distance <= discharge_distance:
             return True
     return False
@@ -367,6 +388,35 @@ def _nearest_marker_distance(text: str, pos: int, markers: tuple[str, ...]) -> i
             distances.append(abs(pos - found))
             start = found + max(1, len(marker_norm))
     return min(distances) if distances else None
+
+
+def _preceding_marker_distance(text: str, pos: int, markers: tuple[str, ...]) -> int | None:
+    """Distance from ``pos`` back to the nearest marker that STARTS at or before it.
+
+    In Russian clinical records a date belongs to the label printed immediately
+    to its left ("Дата выписки: 20.02.2026"), even when another label with its
+    own date sits on the same line ("Дата поступления: 10.02.2026. Дата
+    выписки: 20.02.2026."). Measuring distance in both directions made the
+    admission date bind to the discharge marker on single-line records, so the
+    discharge date silently became the admission date. Binding each date to its
+    nearest *preceding* marker removes that ambiguity at the root.
+    """
+    normalized_text = normalize_match(text or "")
+    best: int | None = None
+    for marker in markers:
+        marker_norm = normalize_match(marker)
+        start = 0
+        while True:
+            found = normalized_text.find(marker_norm, start)
+            if found < 0:
+                break
+            marker_end = found + len(marker_norm)
+            if marker_end <= pos + 1:
+                distance = pos - found
+                if best is None or distance < best:
+                    best = distance
+            start = found + max(1, len(marker_norm))
+    return best
 
 
 def assert_admission_resolver_lock() -> None:

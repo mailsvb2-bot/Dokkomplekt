@@ -275,6 +275,65 @@ def _build_dated_entries(
     return tuple(entries)
 
 
+def _hourly_text_diary_datetimes(
+    admission_value: str,
+    discharge_date_value: date | None,
+    *,
+    limit: int,
+    hour_offsets: Sequence[int],
+) -> tuple[datetime, ...]:
+    """Hourly observation schedule for the text diary route.
+
+    Hourly diaries (intensive observation) start from the admission date-time
+    and advance by the doctor-confirmed hour intervals. The route was lost when
+    the legacy table path was removed; this restores it natively for the text
+    paragraphs route instead of re-adding table logic.
+    """
+
+    if limit <= 0:
+        return ()
+    try:
+        base = parse_full_datetime(admission_value)
+    except ValueError:
+        return ()
+    from diary_schedule import expand_hour_intervals
+
+    offsets = expand_hour_intervals(tuple(int(item) for item in hour_offsets) or (1,), limit)
+    result: list[datetime] = []
+    for offset in offsets:
+        planned = base + timedelta(hours=int(offset))
+        if discharge_date_value is not None and planned.date() > discharge_date_value:
+            break
+        result.append(planned)
+        if len(result) >= limit:
+            break
+    return tuple(result)
+
+
+def _build_hourly_entries(
+    statuses: Sequence[str],
+    moments: Sequence[datetime],
+    patient_gender: str | None,
+    repeat_statuses: bool,
+) -> tuple[tuple[date, str], ...]:
+    entries: list[tuple[date, str]] = []
+    status_index = 0
+    for moment in moments:
+        if not statuses:
+            text = ""
+        else:
+            if status_index >= len(statuses):
+                if repeat_statuses:
+                    status_index = 0
+                else:
+                    break
+            text = statuses[status_index]
+            status_index += 1
+        adapted, _changed = adapt_text_to_patient_gender(text, patient_gender)
+        entries.append((moment.date(), f"{moment:%d.%m.%y %H:%M} {clean_status_text(adapted)}".rstrip()))
+    return tuple(entries)
+
+
 def _split_regular_and_final_text_diary_dates(
     dates: Sequence[date],
     *,
@@ -377,23 +436,48 @@ def _fill_text_diary_batch(
     patient_gender: str | None, sick_leave_dynamic_epicrisis: bool, treatment_correction: str,
     birth_date: str, complaints: str, treatment: str, profile_status: str, sick_leave_from: str,
     write_report: bool, diary_day_offsets: Sequence[int], force_final_diary: bool,
+    diary_hour_offsets: Sequence[int] = (), diary_frequency_mode: str = "daily",
     removed_after_discharge_rows: int = 0,
 ) -> DiaryBatchResult:
+    """Build the text diary DOCX for one patient on the single production route.
+
+    Daily mode writes one paragraph per calendar date starting the day after
+    admission ("дд.мм.гг текст"), optionally closing with a neutral final
+    discharge entry. Hourly mode (intensive observation) writes one paragraph
+    per confirmed hour offset from the admission date-time
+    ("дд.мм.гг ЧЧ:ММ текст"). Dynamic sick-leave epicrises are appended as
+    separate dated blocks when requested.
+    """
     if admission_date_value is None:
         admission_date_value = parse_full_date(admission_value)
     rough_limit = max(10, min(120, (discharge_date_value - admission_date_value).days + 10)) if discharge_date_value else max(10, len(statuses) or 10)
-    dates = _text_diary_dates(
-        admission_date_value,
-        discharge_date_value,
-        limit=rough_limit,
-        day_offsets=diary_day_offsets,
-    )
-    regular_dates, final_date = _split_regular_and_final_text_diary_dates(
-        dates,
-        discharge_date_value=discharge_date_value,
-        force_final_diary=force_final_diary,
-    )
-    entries = list(_build_dated_entries(statuses, regular_dates, patient_gender, repeat_statuses))
+    hourly_mode = str(diary_frequency_mode or "daily").strip().lower() == "hourly"
+    if hourly_mode:
+        # Hourly observation: more entries fit into the same stay, so widen the
+        # cap; each entry carries its own date+time paragraph.
+        hourly_limit = max(rough_limit, min(240, rough_limit * 12))
+        moments = _hourly_text_diary_datetimes(
+            admission_value,
+            discharge_date_value,
+            limit=hourly_limit,
+            hour_offsets=diary_hour_offsets,
+        )
+        dates = tuple(moment.date() for moment in moments)
+        final_date = None
+        entries = list(_build_hourly_entries(statuses, moments, patient_gender, repeat_statuses))
+    else:
+        dates = _text_diary_dates(
+            admission_date_value,
+            discharge_date_value,
+            limit=rough_limit,
+            day_offsets=diary_day_offsets,
+        )
+        regular_dates, final_date = _split_regular_and_final_text_diary_dates(
+            dates,
+            discharge_date_value=discharge_date_value,
+            force_final_diary=force_final_diary,
+        )
+        entries = list(_build_dated_entries(statuses, regular_dates, patient_gender, repeat_statuses))
     final_rows_filled = 0
     if final_date is not None:
         entries.append(_neutral_final_diary_entry(final_date, patient_gender))
@@ -454,7 +538,7 @@ def fill_diary_batch(
     doctor-owned diary texts and the confirmed day-offset schedule.
     """
 
-    _ = (reset_each_file, keep_signature, fill_months, remove_holiday_rows, diary_hour_offsets, diary_frequency_mode, text_output)
+    _ = (reset_each_file, keep_signature, fill_months, remove_holiday_rows, text_output)
     status_file_paths = _existing_docx_files(status_files, "тексты дневников") if status_files else []
     if not status_file_paths and not allow_empty_statuses:
         raise ValueError("Сначала выберите тексты дневников. Даты берутся из календарного принципа программы, а не из старой таблицы дневников.")
@@ -487,6 +571,8 @@ def fill_diary_batch(
         complaints=complaints, treatment=treatment, profile_status=profile_status,
         sick_leave_from=sick_leave_from, write_report=write_report,
         diary_day_offsets=tuple(int(x) for x in diary_day_offsets),
+        diary_hour_offsets=tuple(int(x) for x in diary_hour_offsets),
+        diary_frequency_mode=str(diary_frequency_mode or "daily").strip().lower(),
         force_final_diary=force_final_diary,
         removed_after_discharge_rows=legacy_removed_after_discharge_rows,
     )

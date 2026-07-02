@@ -203,8 +203,16 @@ with TemporaryDirectory() as tmp:
     )
     assert result.filled_rows >= 1
     created_text = extract_docx_text(result.created_files[0])
-    assert "10" in created_text
-    assert "02.2026" in created_text
+    # Canonical diary contract (see diary_schedule.py and USER_BEHAVIOR_CONTRACT):
+    # entries are paragraphs "дд.мм.гг текст", the calendar starts on the day
+    # AFTER admission (10.02 -> first entry 11.02), and years are two-digit.
+    # Admission day itself is covered by the primary/intake status, not a diary
+    # paragraph, so "10.02" must NOT appear as a diary date and the full
+    # four-digit "02.2026" must NOT be produced.
+    assert "11.02.26" in created_text
+    assert "12.02.26" in created_text
+    assert "10.02.26" not in created_text
+    assert "02.2026" not in created_text
     assert "Состояние стабильное" in created_text
 
 # 9) Useful selection principles from v1.3.18 must remain available without

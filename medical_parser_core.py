@@ -144,6 +144,13 @@ class MedicalParserCoreMixin:
         cleaned = clean_value(value)
         if not cleaned:
             return ""
+        # Primary documents often glue demographics to the name in one line:
+        # "Петрова Анна Сергеевна, 1975 г.р." / "Иванов Иван Иванович, 1980 года
+        # рождения, пол мужской". A patient name never contains digits, so cut
+        # the tail at the first comma-or-digit boundary after the name words.
+        # Otherwise the birth year leaks into document headers and the patient
+        # folder name.
+        cleaned = re.split(r"\s*[,;]\s*(?=\d)|\s+(?=\d{4}\b)", cleaned, maxsplit=1)[0].strip().rstrip(",;")
         low = cleaned.lower()
         forbidden = (
             "лечение", "диагноз", "документ", "шаблон", "кнопк",

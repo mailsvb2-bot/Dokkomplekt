@@ -296,7 +296,10 @@ def _assert_ui_selected_state_contract() -> None:
         "При фактическом нажатии большая кнопка получает лёгкий",
         "или нажмите здесь, чтобы выбрать файл",
         "selected=lambda: bool(self.status_files)",
-        'selected=lambda: bool(self.diary_files or getattr(self, "diary_template_dir", ""))',
+        # Diary selected-state follows the production text-calendar route: the
+        # button lights up when the doctor confirmed day/hour offsets, not when
+        # legacy table diary files are picked.
+        'selected=lambda: bool(getattr(self, "_doctor_confirmed_diary_day_offsets", ()) or getattr(self, "_doctor_confirmed_diary_hour_offsets", ()))',
         "persistent selected state",
     ]
     missing = [snippet for snippet in required_snippets if snippet not in source]
@@ -536,7 +539,7 @@ def _assert_discharge_date_contract() -> None:
         'drop.grid_propagate(False)',
         'drop_height = self._px(96 if self._compact_ui else 106, 78)',
         'self.primary_drop_hint_label.config(text="", fg=FIELD)',
-        'строка статуса не меняет высоту',
+        'только курсор и нижняя строка статуса — геометрия кнопок стабильна',
         'def _on_discharge_date_field_commit',
     ]
     missing = [snippet for snippet in required_snippets if snippet not in source]

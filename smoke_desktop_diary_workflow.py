@@ -505,7 +505,9 @@ def _assert_diary_batch_generation(tmp: Path) -> None:
     )
     assert result.created_files and result.created_files[0].exists()
     text = _doc_text(result.created_files[0])
-    assert "11" in text and "06.2026" in text and "Пациент спокоен" in text
+    # Canonical diary contract: paragraphs "дд.мм.гг текст", first entry the day
+    # after admission (10.06 -> 11.06), two-digit years.
+    assert "11.06.26" in text and "06.2026" not in text and "Пациент спокоен" in text
 
     hourly_out = tmp / "hourly"
     hourly_result = fill_diary_batch(

@@ -95,8 +95,12 @@ def main() -> None:
         )
         assert result.created_files
         output_text = extract_docx_text(result.created_files[0])
-        assert "10" in output_text
-        assert "02.2026" in output_text
+        # Canonical diary contract: paragraphs "дд.мм.гг текст", calendar starts
+        # the day AFTER admission (10.02 -> 11.02), two-digit years.
+        assert "11.02.26" in output_text
+        assert "12.02.26" in output_text
+        assert "10.02.26" not in output_text
+        assert "02.2026" not in output_text
         assert "Состояние стабильное" in output_text
         assert _history_dir(patient_dir) != patient_dir / "_medical_autofill_history"
         assert not (patient_dir / "_medical_autofill_history").exists()
