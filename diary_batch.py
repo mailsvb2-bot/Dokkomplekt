@@ -152,8 +152,30 @@ def open_folder(path: str | Path) -> bool:
         return False
 
 
-def _build_dated_entries(statuses: Sequence[str], dates: Sequence[date], patient_gender: str | None, repeat_statuses: bool) -> tuple[str, ...]:
-    entries: list[str] = []
+def _optional_full_date(value: str) -> date | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return parse_full_date(text)
+    except ValueError:
+        return None
+
+
+def _dynamic_epicrisis_base_date(admission_date_value: date, sick_leave_from: str) -> date:
+    sick_leave_date = _optional_full_date(sick_leave_from)
+    if sick_leave_date is None:
+        return admission_date_value
+    return max(admission_date_value, sick_leave_date)
+
+
+def _build_dated_entries(
+    statuses: Sequence[str],
+    dates: Sequence[date],
+    patient_gender: str | None,
+    repeat_statuses: bool,
+) -> tuple[tuple[date, str], ...]:
+    entries: list[tuple[date, str]] = []
     status_index = 0
     for item_date in dates:
         if not statuses:
@@ -167,21 +189,29 @@ def _build_dated_entries(statuses: Sequence[str], dates: Sequence[date], patient
             text = statuses[status_index]
             status_index += 1
         adapted, _changed = adapt_text_to_patient_gender(text, patient_gender)
-        entries.append(f"{item_date:%d.%m.%y} {clean_status_text(adapted)}".rstrip())
+        entries.append((item_date, f"{item_date:%d.%m.%y} {clean_status_text(adapted)}".rstrip()))
     return tuple(entries)
 
 
-def _create_text_diary_document(output_dir: Path, patient_name: str, entries: Sequence[str], epicrisis_entries: Sequence[tuple[date, str]]) -> Path:
+def _create_text_diary_document(
+    output_dir: Path,
+    patient_name: str,
+    entries: Sequence[tuple[date, str]],
+    epicrisis_entries: Sequence[tuple[date, str]],
+) -> Path:
     target = available_path(output_dir / safe_filename(make_diary_output_name(safe_filename_part(patient_name), file_index=1, total_files=1)))
     doc = Document()
-    for entry in entries:
-        doc.add_paragraph(str(entry or "").strip())
+    blocks: list[tuple[date, int, tuple[str, ...]]] = []
+    for item_date, entry in entries:
+        blocks.append((item_date, 0, (str(entry or "").strip(),)))
     for item_date, text in epicrisis_entries:
-        if doc.paragraphs:
+        lines = str(text or "").splitlines()
+        first_line = f"{item_date:%d.%m.%y} {lines[0] if lines else ''}".rstrip()
+        blocks.append((item_date, 1, tuple([first_line, *lines[1:]])))
+    for _item_date, block_kind, lines in sorted(blocks, key=lambda block: (block[0], block[1])):
+        if block_kind == 1 and doc.paragraphs:
             doc.add_paragraph("")
-        lines = text.splitlines()
-        doc.add_paragraph(f"{item_date:%d.%m.%y} {lines[0] if lines else ''}".rstrip())
-        for line in lines[1:]:
+        for line in lines:
             doc.add_paragraph(line)
     doc.save(str(target))
     return target
@@ -201,8 +231,21 @@ def _fill_text_diary_batch(
     entries = _build_dated_entries(statuses, dates, patient_gender, repeat_statuses)
     epicrisis_entries: list[tuple[date, str]] = []
     if sick_leave_dynamic_epicrisis:
-        data = DynamicEpicrisisInput(patient_name, birth_date, sick_leave_from or admission_value, complaints, treatment, profile_status, treatment_correction)
-        epicrisis_entries = [(d, build_dynamic_epicrisis_text(data)) for d in dynamic_epicrisis_dates(admission_date_value, discharge_date=discharge_date_value, limit=12)]
+        epicrisis_base_date = _dynamic_epicrisis_base_date(admission_date_value, sick_leave_from)
+        sick_leave_display = f"{epicrisis_base_date:%d.%m.%Y}"
+        data = DynamicEpicrisisInput(
+            patient_name,
+            birth_date,
+            sick_leave_display,
+            complaints,
+            treatment,
+            profile_status,
+            treatment_correction,
+        )
+        epicrisis_entries = [
+            (d, build_dynamic_epicrisis_text(data))
+            for d in dynamic_epicrisis_dates(epicrisis_base_date, discharge_date=discharge_date_value, limit=12)
+        ]
     created = _create_text_diary_document(result_dir, patient_name, entries, epicrisis_entries)
     report_path: Path | None = None
     if write_report:
