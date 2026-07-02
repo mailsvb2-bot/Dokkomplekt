@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Iterable, Sequence
+import re
 
 from docx import Document
 
@@ -13,10 +14,10 @@ from diary_gender import adapt_text_to_patient_gender, detect_gender_from_patien
 from diary_models import DiaryBatchResult
 from diary_paths import available_path, make_diary_output_name, safe_filename_part
 from diary_schedule import DEFAULT_CALENDAR_DIARY_DAY_OFFSETS, expand_day_offsets
-from diary_text_parser import clean_status_text, extract_statuses_from_docx, remove_examinee_words
+from diary_text_parser import clean_status_text, extract_statuses_from_docx, is_signature_paragraph_text, remove_examinee_words
 from diary_writer_apply import NEUTRAL_FINAL_DIARY_TEXT
 from medical_docx_xml_fragments import ensure_docx_compatible, existing_word_file
-from medical_formatting import safe_filename, technical_ref, technical_report_path
+from medical_formatting import redact_technical_text, safe_filename, technical_ref, technical_report_path
 
 _FIXED_HOLIDAY_RANGES: tuple[tuple[int, int, int], ...] = ((1, 1, 9), (5, 1, 9))
 
@@ -128,11 +129,48 @@ def _resolve_output_dir(output_dir: str | Path | None, fallback_dir: Path) -> Pa
     return result
 
 
+def _fallback_statuses_from_docx(path: str | Path) -> list[str]:
+    """Accept short doctor-owned diary text snippets when the strict parser finds none."""
+
+    doc = Document(str(path))
+    result: list[str] = []
+    seen: set[str] = set()
+
+    def add(text: str) -> None:
+        cleaned = clean_status_text(text)
+        low = cleaned.lower().replace("ё", "е")
+        if not cleaned or len(cleaned) < 3 or is_signature_paragraph_text(cleaned):
+            return
+        if re.fullmatch(r"[\d\s./-]+", cleaned):
+            return
+        if low in seen:
+            return
+        seen.add(low)
+        result.append(cleaned)
+
+    for paragraph in doc.paragraphs:
+        add(paragraph.text)
+    for table in doc.tables:
+        for row in table.rows:
+            seen_cells: set[int] = set()
+            for cell in row.cells:
+                tc_id = id(cell._tc)
+                if tc_id in seen_cells:
+                    continue
+                seen_cells.add(tc_id)
+                for paragraph in cell.paragraphs:
+                    add(paragraph.text)
+    return result
+
+
 def read_statuses_from_files(paths: Iterable[str | Path]) -> list[str]:
     statuses: list[str] = []
     seen: set[str] = set()
     for path in _existing_docx_files(paths, "тексты дневников"):
-        for status in extract_statuses_from_docx(path):
+        path_statuses = extract_statuses_from_docx(path)
+        if not path_statuses:
+            path_statuses = _fallback_statuses_from_docx(path)
+        for status in path_statuses:
             key = " ".join(status.strip().lower().replace("ё", "е").split())
             if key not in seen:
                 statuses.append(status.strip())
@@ -285,12 +323,61 @@ def _create_text_diary_document(
     return target
 
 
+def _legacy_row_date_after_discharge(row, discharge_date_value: date) -> bool:
+    if len(row.cells) < 2:
+        return False
+    day_text = ""
+    for cell in row.cells[:2]:
+        match = re.search(r"\b(\d{1,2})\b", cell.text or "")
+        if match:
+            day_text = match.group(1)
+    if not day_text:
+        return False
+    month_text = row.cells[2].text if len(row.cells) >= 3 else ""
+    month_match = re.search(r"(\d{1,2})\s*[./-]\s*(\d{2,4})", month_text or "")
+    if month_match:
+        month = int(month_match.group(1))
+        year = int(month_match.group(2))
+        if year < 100:
+            year += 2000
+    else:
+        month = discharge_date_value.month
+        year = discharge_date_value.year
+    try:
+        item_date = date(year, month, int(day_text))
+    except ValueError:
+        return False
+    return item_date > discharge_date_value
+
+
+def _count_legacy_rows_after_discharge(paths: Sequence[str | Path], discharge_date_value: date | None) -> int:
+    """Compatibility metric only; it must not switch generation to the old table path."""
+
+    if discharge_date_value is None:
+        return 0
+    total = 0
+    for raw_path in paths or ():
+        try:
+            path = Path(raw_path).expanduser()
+            if not path.exists():
+                continue
+            doc = Document(str(ensure_docx_compatible(path, label="diary calendar metadata")))
+            for table in doc.tables:
+                for row in table.rows[1:]:
+                    if _legacy_row_date_after_discharge(row, discharge_date_value):
+                        total += 1
+        except Exception as exc:
+            record_soft_exception("diary_batch.legacy_after_discharge_metric", exc, detail=str(raw_path))
+    return total
+
+
 def _fill_text_diary_batch(
     *, statuses: Sequence[str], result_dir: Path, patient_name: str, admission_value: str,
     admission_date_value, discharge_date_value, gender_source_name: str, repeat_statuses: bool,
     patient_gender: str | None, sick_leave_dynamic_epicrisis: bool, treatment_correction: str,
     birth_date: str, complaints: str, treatment: str, profile_status: str, sick_leave_from: str,
     write_report: bool, diary_day_offsets: Sequence[int], force_final_diary: bool,
+    removed_after_discharge_rows: int = 0,
 ) -> DiaryBatchResult:
     if admission_date_value is None:
         admission_date_value = parse_full_date(admission_value)
@@ -331,18 +418,20 @@ def _fill_text_diary_batch(
     created = _create_text_diary_document(result_dir, patient_name, entries, epicrisis_entries)
     report_path: Path | None = None
     if write_report:
+        patient_filename = safe_filename_part(patient_name)
         lines = [
             "ОТЧЁТ: текстовые дневники",
             f"Дата запуска: {datetime.now():%d.%m.%Y %H:%M:%S}",
             "Карточка пациента: обезличена",
-            "Технический идентификатор: " + technical_ref(patient_name, gender_source_name, admission_value),
+            "Технический идентификатор: " + technical_ref(patient_filename, gender_source_name, admission_value),
+            "Технический контекст: " + redact_technical_text(f"{patient_filename} {gender_source_name} {admission_value}"),
             f"Дневниковых дат: {len(dates)}",
             f"Финальных записей: {final_rows_filled}",
             f"Динамических эпикризов: {len(epicrisis_entries)}",
         ]
         report_path = technical_report_path(result_dir, "ОТЧЁТ_дневники.txt")
         report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return DiaryBatchResult([created], report_path, 1, len(entries), len(entries), 0, final_rows_filled, 0, 0, 0)
+    return DiaryBatchResult([created], report_path, 1, len(entries), len(entries), 0, final_rows_filled, 0, 0, removed_after_discharge_rows)
 
 
 def fill_diary_batch(
@@ -365,7 +454,7 @@ def fill_diary_batch(
     doctor-owned diary texts and the confirmed day-offset schedule.
     """
 
-    _ = (diary_files, reset_each_file, keep_signature, fill_months, remove_holiday_rows, diary_hour_offsets, diary_frequency_mode, text_output)
+    _ = (reset_each_file, keep_signature, fill_months, remove_holiday_rows, diary_hour_offsets, diary_frequency_mode, text_output)
     status_file_paths = _existing_docx_files(status_files, "тексты дневников") if status_files else []
     if not status_file_paths and not allow_empty_statuses:
         raise ValueError("Сначала выберите тексты дневников. Даты берутся из календарного принципа программы, а не из старой таблицы дневников.")
@@ -386,6 +475,7 @@ def fill_diary_batch(
         raise ValueError("В выбранных файлах с текстами дневников не найдено подходящих текстов.")
     first_dir = status_file_paths[0].parent if status_file_paths else Path.cwd()
     result_dir = _resolve_output_dir(output_dir, first_dir)
+    legacy_removed_after_discharge_rows = _count_legacy_rows_after_discharge(diary_files, discharge_date_value)
 
     result = _fill_text_diary_batch(
         statuses=statuses, result_dir=result_dir, patient_name=patient_name,
@@ -398,6 +488,7 @@ def fill_diary_batch(
         sick_leave_from=sick_leave_from, write_report=write_report,
         diary_day_offsets=tuple(int(x) for x in diary_day_offsets),
         force_final_diary=force_final_diary,
+        removed_after_discharge_rows=legacy_removed_after_discharge_rows,
     )
     if open_result_folder:
         open_folder(result_dir)
