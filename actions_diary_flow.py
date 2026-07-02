@@ -9,29 +9,33 @@ from medical_primary_document_state import selected_primary_document_path
 
 class ActionsDiaryFlowMixin:
     def _create_diaries_impl(self):
-        """Create the doctor-selected diary output for the current patient case.
-
-        The production diary contract is ``Тексты + Даты``.  Doctor-owned text
-        files provide the diary wording and doctor-owned date/table templates
-        provide the document shape and date principle.  Plain text diary output is
-        kept only as a fallback when no date/table template is available.
-        """
+        """Create the doctor-selected diary output for the current patient case."""
         primary_path = selected_primary_document_path(self)
         title_admission_value = self._sync_admission_date_from_title(force=False)
         diary_admission_value = current_semantic_date(self, "admission_date") or title_admission_value
         if not self.status_files:
             self._auto_select_diary_text_by_diagnosis(ask_folder=False)
         if not self.status_files:
+            self._auto_select_diary_text_by_diagnosis(ask_folder=True)
+        if not self.status_files:
             self.choose_status_files()
         if not self.status_files:
             raise ValueError("Выберите файл(ы) с текстами дневников. Тексты можно выбирать из DOCX/DOCM/DOC.")
-        self._auto_select_numbered_diary_template(ask_folder=False)
-        text_output = not bool(getattr(self, "diary_files", None))
+
+        if getattr(self, "diary_files", None) and getattr(self, "_diary_files_auto_selected", False):
+            self.diary_files = []
+            self._diary_files_auto_selected = False
+            try:
+                self._update_diary_template_label(success=True)
+            except Exception as exc:
+                record_soft_exception("actions_diary_flow.clear_auto_date_template", exc)
+        manual_date_table = bool(getattr(self, "diary_files", None)) and not getattr(self, "_diary_files_auto_selected", False)
+        text_output = not manual_date_table
         self._diary_text_output_enabled = bool(text_output)
         try:
             from diary_creation_wizard import confirm_diary_creation
             if not confirm_diary_creation(self):
-                raise ValueError("Создание дневников остановлено мастером дневников: проверьте дату госпитализации, тексты и шаблон дат дневников.")
+                raise ValueError("Создание дневников остановлено мастером дневников: проверьте дату госпитализации, дату выписки, тексты и принцип дневников.")
         except ValueError:
             raise
         except Exception as exc:
@@ -58,12 +62,13 @@ class ActionsDiaryFlowMixin:
             raise ValueError("Не удалось найти дату поступления в первичном документе или popup/UI.")
 
         from diary_batch import fill_diary_batch
-        diary_schedule = self._selected_profile_diary_schedule()
+        from diary_creation_wizard import current_diary_calendar_schedule
+        diary_schedule = current_diary_calendar_schedule(self, fallback=self._selected_profile_diary_schedule())
         sick_leave_yes = self._normalize_yes_no(getattr(self, "expert_sick_leave_needed_var", None).get() if getattr(self, "expert_sick_leave_needed_var", None) else "") == "да"
         treatment_correction = str(getattr(getattr(self, "diary_treatment_correction_var", None), "get", lambda: "")() or "").strip()
         result = fill_diary_batch(
             status_files=self.status_files,
-            diary_files=self.diary_files,
+            diary_files=[] if text_output else self.diary_files,
             output_dir=str(self._result_output_dir()),
             patient_name=diary_patient_name,
             admission_value=diary_admission_value,
