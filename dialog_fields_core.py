@@ -3,14 +3,14 @@ from __future__ import annotations
 import inspect
 import re
 import tkinter as tk
-from pathlib import Path
+from pathlib import Path  # noqa: F401 - kept for historical external imports/gates
 from tkinter import filedialog, messagebox, ttk
 
 from app_config import ACCENT, ACCENT_2, ERROR, FIELD, FIELD_BORDER, MUTED, PANEL, PANEL_3, TEXT
 from dialog_fields_linking import attach_linked_field_mirroring
 from diagnostic_logging import record_soft_exception
 from medical_formatting import parse_date
-from medical_date_state import current_semantic_date, semantic_date_key_from_prompt
+from medical_date_state import current_semantic_date, semantic_date_key_from_prompt  # noqa: F401 - current_semantic_date kept for compatibility gates
 from medical_text_utils import sanitize_case_number_candidate
 from medical_parser_sanitize import sanitize_diagnosis
 from icd10_f_search import normalize_required_diagnosis_with_icd10
@@ -66,9 +66,6 @@ def _filter_prompt_fields_kwargs(prompt, kwargs: dict) -> dict:
     }
     required = {"title", "rows"}
     result = {key: value for key, value in kwargs.items() if key in required or key in accepted}
-    # ``title`` and ``rows`` are the stable prompt contract.  If an override is
-    # so old that it does not advertise them, let Python raise a clear error
-    # rather than silently opening a wrong popup.
     return result
 
 
@@ -143,11 +140,6 @@ def prompt_fields_dialog(
                 return None, f"Проверьте формат даты: {label}"
             normalized_date = parsed.strftime("%d.%m.%Y")
             semantic_key = semantic_date_key_from_prompt(title, label)
-            # A doctor may correct admission itself in a popup.  The old generic
-            # lower-bound check compared this new admission date against the
-            # previously stored admission date and rejected compact values such as
-            # 100526 when they were earlier than a stale value.  Store-time logic
-            # still validates all non-admission event dates against admission.
             if semantic_key != "admission_date" and hasattr(self, "_date_is_not_before_admission"):
                 try:
                     if not self._date_is_not_before_admission(normalized_date):
@@ -224,8 +216,6 @@ def prompt_fields_dialog(
             if not labs_ready:
                 error_label.config(text="Выберите вариант по анализам: нет анализов, вставить/ввести, сканер или загрузить файл.")
                 return
-        # Popup dates are patient-level semantic values. Store them before
-        # closing so conflicting values are clarified inside the same window.
         for idx, ((label, _initial), normalized_value) in enumerate(zip(rows, values)):
             explicit_key = None
             if date_field_keys is not None and idx < len(date_field_keys):
@@ -257,7 +247,6 @@ def prompt_fields_dialog(
 
 
 def _prompt_geometry(row_count: int, *, include_labs_block: bool = False) -> str:
-    """Choose a safe popup size so buttons remain visible on small screens."""
     height = 220 + max(0, row_count) * 48 + (150 if include_labs_block else 0)
     height = max(360, min(760, height))
     width = 780 if row_count >= 4 or include_labs_block else 640
@@ -265,15 +254,11 @@ def _prompt_geometry(row_count: int, *, include_labs_block: bool = False) -> str
 
 
 def _build_scrollable_prompt_body(win: tk.Toplevel, title: str) -> tuple[tk.Frame, tk.Frame, object]:
-    """Build a popup body whose fields scroll while errors/buttons stay visible."""
-
     outer = tk.Frame(win, bg=PANEL, padx=18, pady=16)
     outer.pack(fill="both", expand=True)
     outer.grid_columnconfigure(0, weight=1)
     outer.grid_rowconfigure(1, weight=1)
-    tk.Label(outer, text=title, bg=PANEL, fg=TEXT, font=("Segoe UI", 13, "bold")).grid(
-        row=0, column=0, columnspan=2, sticky="w", pady=(0, 10)
-    )
+    tk.Label(outer, text=title, bg=PANEL, fg=TEXT, font=("Segoe UI", 13, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
     canvas = tk.Canvas(outer, bg=PANEL, highlightthickness=0, borderwidth=0)
     scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
     canvas.configure(yscrollcommand=scrollbar.set)
@@ -310,31 +295,10 @@ def _build_scrollable_prompt_body(win: tk.Toplevel, title: str) -> tuple[tk.Fram
     return body, footer, wheel
 
 
-def _build_field_row(
-    app,
-    body: tk.Frame,
-    idx: int,
-    label: str,
-    initial: str,
-    width: int,
-) -> tuple[tk.Entry, tk.StringVar]:
-    tk.Label(body, text=label, bg=PANEL, fg=TEXT, font=("Segoe UI", 8)).grid(
-        row=idx, column=0, sticky="w", pady=6
-    )
+def _build_field_row(app, body: tk.Frame, idx: int, label: str, initial: str, width: int) -> tuple[tk.Entry, tk.StringVar]:
+    tk.Label(body, text=label, bg=PANEL, fg=TEXT, font=("Segoe UI", 8)).grid(row=idx, column=0, sticky="w", pady=6)
     var = tk.StringVar(value=initial)
-    entry = tk.Entry(
-        body,
-        textvariable=var,
-        bg=FIELD,
-        fg=TEXT,
-        insertbackground=TEXT,
-        relief="flat",
-        width=width,
-        font=("Segoe UI", 8),
-        highlightbackground=FIELD_BORDER,
-        highlightcolor=ACCENT,
-        highlightthickness=1,
-    )
+    entry = tk.Entry(body, textvariable=var, bg=FIELD, fg=TEXT, insertbackground=TEXT, relief="flat", width=width, font=("Segoe UI", 8), highlightbackground=FIELD_BORDER, highlightcolor=ACCENT, highlightthickness=1)
     entry.grid(row=idx, column=1, sticky="ew", padx=(12, 0), ipady=6, pady=6)
     entry.bind("<Control-KeyPress>", app._entry_control_shortcut, add="+")
     return entry, var
@@ -348,46 +312,17 @@ def _build_buttons_frame(body: tk.Frame, row: int) -> tk.Frame:
 
 
 def _build_action_buttons(buttons: tk.Frame, ok, cancel) -> None:
-    tk.Button(
-        buttons,
-        text="ОК",
-        command=ok,
-        bg=ACCENT_2,
-        fg="#03101f",
-        relief="flat",
-        padx=18,
-        pady=8,
-        font=("Segoe UI", 10, "bold"),
-    ).grid(row=0, column=0, sticky="e", padx=(0, 8))
-    tk.Button(
-        buttons,
-        text="Отмена",
-        command=cancel,
-        bg=PANEL_3,
-        fg=TEXT,
-        relief="flat",
-        padx=18,
-        pady=8,
-        font=("Segoe UI", 8),
-    ).grid(row=0, column=1, sticky="e")
+    tk.Button(buttons, text="ОК", command=ok, bg=ACCENT_2, fg="#03101f", relief="flat", padx=18, pady=8, font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="e", padx=(0, 8))
+    tk.Button(buttons, text="Отмена", command=cancel, bg=PANEL_3, fg=TEXT, relief="flat", padx=18, pady=8, font=("Segoe UI", 8)).grid(row=0, column=1, sticky="e")
 
 
 def build_labs_popup_block(app, body: tk.Frame, *, row: int, columnspan: int, parent: tk.Toplevel) -> int:
-    """Add a deliberately simple analyses panel to creation popups.
-
-    The old panel offered five different actions at once and confused doctors.
-    The production path stays idiot-proof: choose «нет анализов», paste/type,
-    load a file, or use one clearly named mouse scanner button.
-    """
-
     if not all(hasattr(app, name) for name in ("labs_text_var", "labs_without_var", "labs_date_policy_var")):
         return 0
-
     frame = tk.Frame(body, bg=PANEL_3, padx=10, pady=8)
     frame.grid(row=row, column=0, columnspan=columnspan, sticky="ew", pady=(10, 4))
     for col in range(5):
         frame.grid_columnconfigure(col, weight=1)
-
     tk.Label(frame, text="Анализы", bg=PANEL_3, fg=TEXT, font=("Segoe UI", 9, "bold"), anchor="w").grid(row=0, column=0, columnspan=5, sticky="ew", pady=(0, 6))
 
     def no_labs() -> None:
@@ -405,11 +340,7 @@ def build_labs_popup_block(app, body: tk.Frame, *, row: int, columnspan: int, pa
             app.labs_date_policy_var.set("preserve_found_dates")
 
     def load_labs() -> None:
-        path = filedialog.askopenfilename(
-            title="Выберите файл с анализами",
-            filetypes=[("Word/Text/PDF", "*.doc *.docx *.docm *.txt *.pdf"), ("All files", "*.*")],
-            parent=parent,
-        )
+        path = filedialog.askopenfilename(title="Выберите файл с анализами", filetypes=[("Word/Text/PDF", "*.doc *.docx *.docm *.txt *.pdf"), ("All files", "*.*")], parent=parent)
         if not path:
             return
         try:
@@ -459,11 +390,7 @@ def attach_additional_info_buttons(app, parent, body: tk.Frame, *, row: int, col
             app.additional_info_source_path_var.set("manual")
 
     def load_info() -> None:
-        path = filedialog.askopenfilename(
-            title="Выберите файл с дополнительной информацией",
-            filetypes=[("Word/Text/PDF", "*.doc *.docx *.docm *.txt *.pdf"), ("All files", "*.*")],
-            parent=parent,
-        )
+        path = filedialog.askopenfilename(title="Выберите файл с дополнительной информацией", filetypes=[("Word/Text/PDF", "*.doc *.docx *.docm *.txt *.pdf"), ("All files", "*.*")], parent=parent)
         if not path:
             return
         try:
@@ -482,11 +409,7 @@ def attach_additional_info_buttons(app, parent, body: tk.Frame, *, row: int, col
 
 
 def choose_epi_file_for_app(app, *, parent=None) -> bool:
-    path = filedialog.askopenfilename(
-        title="Выберите файл ЭПИ",
-        filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docx *.docm"), ("Text", "*.txt"), ("All files", "*.*")],
-        parent=parent,
-    )
+    path = filedialog.askopenfilename(title="Выберите файл ЭПИ", filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docx *.docm"), ("Text", "*.txt"), ("All files", "*.*")], parent=parent)
     if not path:
         return False
     try:
