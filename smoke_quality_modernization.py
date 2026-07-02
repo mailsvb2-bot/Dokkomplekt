@@ -41,7 +41,8 @@ def main() -> None:
     assert "except Exception:\n" not in diary_discovery
     assert diary_discovery.count("record_soft_exception") >= 12
 
-    assert not _missing_large_docstrings()
+    missing_large_docstrings = _missing_large_docstrings()
+    assert not missing_large_docstrings, "Large functions without docstrings:\n" + "\n".join(missing_large_docstrings)
 
     app_init = _read("app_initialization.py")
     for snippet in ("<F5>", "<F8>", "<F9>", "_undo_last_key_field", "_field_undo_stack"):
