@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-from diagnostic_logging import record_soft_exception
-"""Robust admission-date resolver for primary medical documents.
+"""Robust admission/discharge date resolvers for primary medical documents.
 
-The old diary flow intentionally preferred the date written near the primary
-source title.  Desktop intake exposed a practical gap: real referral forms often
-write the hospitalization/admission date deeper in the document while the top
-area also contains a birth date.  This resolver is still conservative: it only
-accepts dates near explicit admission/hospitalization markers and rejects
-birth/demographic contexts.
+Admission and discharge dates are separate patient-event dates.  The program must
+not fill a discharge epicrisis with a random title date, a birth date, an
+admission date or a stale UI value.  Both resolvers therefore accept only dates
+near explicit semantic markers and reject demographic contexts.
 """
 
+from diagnostic_logging import record_soft_exception
 import re
 from pathlib import Path
 
@@ -26,6 +24,8 @@ ADMISSION_RESOLVER_REJECTS_BIRTH_CONTEXT = True
 ADMISSION_RESOLVER_USES_EXPLICIT_ADMISSION_MARKERS = True
 ADMISSION_RESOLVER_EXPLICIT_MARKERS_OVERRIDE_BIRTHY_TITLE = True
 ADMISSION_RESOLVER_COMPARES_MARKER_DISTANCE_WITH_ORIGINAL_POSITIONS = True
+DISCHARGE_RESOLVER_USES_EXPLICIT_DISCHARGE_MARKERS = True
+DISCHARGE_RESOLVER_REJECTS_ADMISSION_AND_BIRTH_CONTEXT = True
 
 _ADMISSION_MARKERS = (
     "дата поступления",
@@ -56,6 +56,24 @@ _ADMISSION_MARKERS = (
     "skierowanie na hospitalizację",
     "skierowanie na hospitalizacje",
     "skierowanie do szpitala",
+)
+_DISCHARGE_MARKERS = (
+    "дата выписки",
+    "дата выписания",
+    "дата выписного эпикриза",
+    "выписан",
+    "выписана",
+    "выписывается",
+    "выписать",
+    "к выписке",
+    "окончание госпитализации",
+    "окончание лечения",
+    "data wypisu",
+    "data wypisania",
+    "wypisany",
+    "wypisana",
+    "wypisano",
+    "wypis",
 )
 _BIRTH_MARKERS = (
     "дата рождения",
@@ -102,6 +120,23 @@ def extract_admission_date_from_primary_docx(path: str | Path) -> str:
     # birth date into an admission date while still preserving legacy title-only
     # documents when no explicit admission marker exists.
     return explicit_date or title_date
+
+
+def extract_discharge_date_from_primary_docx(path: str | Path) -> str:
+    """Return a safe discharge date from a primary/discharge-source DOCX.
+
+    Unlike admission, there is no title fallback here: a random title date is too
+    often the document date or admission date.  Discharge is accepted only from
+    explicit discharge/wypis context, so the renderer either uses the true date
+    from the source or asks the doctor in the popup.
+    """
+
+    try:
+        text = extract_docx_text(path)
+    except Exception as exc:
+        record_soft_exception("medical_discharge_resolver.extract_text", exc, detail=str(path))
+        return ""
+    return extract_discharge_date_from_primary_text(text)
 
 
 def extract_admission_date_from_primary_text(text: str) -> str:
@@ -152,15 +187,67 @@ def extract_admission_date_from_primary_text(text: str) -> str:
     return ""
 
 
+def extract_discharge_date_from_primary_text(text: str) -> str:
+    value = normalize_text(text or "")
+    if not value:
+        return ""
+    lines = [line.strip() for line in value.splitlines() if line.strip()]
+
+    for idx, line in enumerate(lines[:260]):
+        line_date = _date_from_discharge_context(line)
+        if line_date:
+            return line_date
+        if _has_discharge_marker(line):
+            forward_neighbors = lines[idx: min(len(lines), idx + 4)]
+            joined = " | ".join(forward_neighbors)
+            joined_date = _date_from_discharge_context(joined)
+            if joined_date:
+                return joined_date
+            backward_neighbors = lines[max(0, idx - 1): min(len(lines), idx + 3)]
+            joined = " | ".join(backward_neighbors)
+            joined_date = _date_from_discharge_context(joined)
+            if joined_date:
+                return joined_date
+
+    flat = normalize_text(" | ".join(lines[:320]))
+    low = normalize_match(flat)
+    for marker in _DISCHARGE_MARKERS:
+        start = 0
+        marker_norm = normalize_match(marker)
+        while True:
+            pos = low.find(marker_norm, start)
+            if pos < 0:
+                break
+            window_start = max(0, pos - 90)
+            window_end = min(len(flat), pos + len(marker) + 160)
+            window = flat[window_start:window_end]
+            found = _best_discharge_date(window)
+            if found:
+                return found
+            start = pos + max(1, len(marker_norm))
+    return ""
+
+
 def _has_admission_marker(text: str) -> bool:
     low = normalize_match(text or "")
-    return any(marker in low for marker in _ADMISSION_MARKERS)
+    return any(normalize_match(marker) in low for marker in _ADMISSION_MARKERS)
+
+
+def _has_discharge_marker(text: str) -> bool:
+    low = normalize_match(text or "")
+    return any(normalize_match(marker) in low for marker in _DISCHARGE_MARKERS)
 
 
 def _date_from_admission_context(text: str) -> str:
     if not _has_admission_marker(text):
         return ""
     return _best_non_birth_date(text)
+
+
+def _date_from_discharge_context(text: str) -> str:
+    if not _has_discharge_marker(text):
+        return ""
+    return _best_discharge_date(text)
 
 
 def _best_non_birth_date(text: str) -> str:
@@ -189,9 +276,39 @@ def _best_non_birth_date(text: str) -> str:
     return sorted(candidates, key=lambda item: item[0])[0][1]
 
 
+def _best_discharge_date(text: str) -> str:
+    normalized = normalize_text(text or "")
+    if not normalized:
+        return ""
+    candidates: list[tuple[int, str]] = []
+    for match in _TITLE_DATE_RE.finditer(normalized):
+        if re.fullmatch(r"\d{4}", match.group(0).strip()):
+            continue
+        date_value = _normalize_full_date_match(match)
+        if not date_value:
+            continue
+        if _date_has_non_discharge_context(normalized, match):
+            continue
+        distance = _distance_to_discharge_marker(normalized, match.start())
+        if distance is None:
+            continue
+        candidates.append((distance, date_value))
+    if not candidates:
+        return ""
+    return sorted(candidates, key=lambda item: item[0])[0][1]
+
+
 def _distance_to_admission_marker(text: str, pos: int) -> int | None:
     low = normalize_match(text or "")
-    positions = [low.find(marker) for marker in _ADMISSION_MARKERS if low.find(marker) >= 0]
+    positions = [low.find(normalize_match(marker)) for marker in _ADMISSION_MARKERS if low.find(normalize_match(marker)) >= 0]
+    if not positions:
+        return None
+    return min(abs(pos - marker_pos) for marker_pos in positions)
+
+
+def _distance_to_discharge_marker(text: str, pos: int) -> int | None:
+    low = normalize_match(text or "")
+    positions = [low.find(normalize_match(marker)) for marker in _DISCHARGE_MARKERS if low.find(normalize_match(marker)) >= 0]
     if not positions:
         return None
     return min(abs(pos - marker_pos) for marker_pos in positions)
@@ -217,6 +334,26 @@ def _date_has_birth_context_strict(text: str, match: re.Match[str]) -> bool:
     return False
 
 
+def _date_has_non_discharge_context(text: str, match: re.Match[str]) -> bool:
+    if _date_match_has_birth_context(text, match):
+        return True
+    low_original = (text or "").lower().replace("ё", "е")
+    around_original = low_original[max(0, match.start() - 140):min(len(low_original), match.end() + 100)]
+    around = normalize_match(around_original)
+    discharge_near = any(normalize_match(marker) in around for marker in _DISCHARGE_MARKERS)
+    blocking_markers = _BIRTH_MARKERS + _ADMISSION_MARKERS
+    blocker_near = any(normalize_match(marker) in around for marker in blocking_markers)
+    if blocker_near and not discharge_near:
+        return True
+    if blocker_near and discharge_near:
+        match_pos = match.start()
+        blocker_distance = _nearest_marker_distance(normalize_match(text or ""), match_pos, blocking_markers)
+        discharge_distance = _nearest_marker_distance(normalize_match(text or ""), match_pos, _DISCHARGE_MARKERS)
+        if blocker_distance is not None and discharge_distance is not None and blocker_distance <= discharge_distance:
+            return True
+    return False
+
+
 def _nearest_marker_distance(text: str, pos: int, markers: tuple[str, ...]) -> int | None:
     distances: list[int] = []
     normalized_text = normalize_match(text or "")
@@ -231,6 +368,7 @@ def _nearest_marker_distance(text: str, pos: int, markers: tuple[str, ...]) -> i
             start = found + max(1, len(marker_norm))
     return min(distances) if distances else None
 
+
 def assert_admission_resolver_lock() -> None:
     if ADMISSION_RESOLVER_LOCK_VERSION != "v1.4":
         raise AssertionError("Admission resolver lock changed unexpectedly")
@@ -242,9 +380,17 @@ def assert_admission_resolver_lock() -> None:
         raise AssertionError("Admission resolver must prefer explicit admission markers over birth-like title-neighbour dates")
     if not ADMISSION_RESOLVER_COMPARES_MARKER_DISTANCE_WITH_ORIGINAL_POSITIONS:
         raise AssertionError("Admission resolver must compare birth/admission marker distance using stable positions")
+    if not DISCHARGE_RESOLVER_USES_EXPLICIT_DISCHARGE_MARKERS:
+        raise AssertionError("Discharge resolver must require explicit discharge markers")
+    if not DISCHARGE_RESOLVER_REJECTS_ADMISSION_AND_BIRTH_CONTEXT:
+        raise AssertionError("Discharge resolver must reject admission/birth contexts")
     if extract_admission_date_from_primary_text("Data urodzenia\n04.01.2000\nData przyjęcia\n23.06.2026") != "23.06.2026":
         raise AssertionError("Polish admission resolver must not prefer birth date over admission date")
     if extract_admission_date_from_primary_text("Дата рождения\n04.01.2000\nДата поступления\n23.06.2026") != "23.06.2026":
         raise AssertionError("Admission resolver must not prefer birth date over adjacent admission date")
     if extract_admission_date_from_primary_text("10.06.2026 Первичный осмотр\nГод рождения: 1980\nВ 3 отделение КДП поступает добровольно") == "01.09.1980":
         raise AssertionError("Bare birth years must not override the admission/title date")
+    if extract_discharge_date_from_primary_text("Дата рождения\n04.01.2000\nДата поступления\n23.06.2026\nДата выписки\n30.06.2026") != "30.06.2026":
+        raise AssertionError("Discharge resolver must pick explicit discharge date")
+    if extract_discharge_date_from_primary_text("Дата рождения 04.01.2000 Дата поступления 23.06.2026"):
+        raise AssertionError("Discharge resolver must not invent discharge date from birth/admission dates")
