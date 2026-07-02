@@ -16,8 +16,6 @@ class ActionsDiaryFlowMixin:
         if not self.status_files:
             self._auto_select_diary_text_by_diagnosis(ask_folder=False)
         if not self.status_files:
-            self._auto_select_diary_text_by_diagnosis(ask_folder=True)
-        if not self.status_files:
             self.choose_status_files()
         if not self.status_files:
             raise ValueError("Выберите файл(ы) с текстами дневников. Тексты можно выбирать из DOCX/DOCM/DOC.")
