@@ -75,6 +75,7 @@ class MedicalParserCoreMixin:
         return normalize_text(repaired)
 
     def parse_text(self, text: str) -> PatientData:
+        """Parse primary-document text into sanitized patient data for document creation."""
         text = self._split_solid_primary_text(text)
         data = PatientData()
         data.input_document_kind = self._detect_document_kind(text)
