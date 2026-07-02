@@ -13,8 +13,9 @@ from diary_schedule import (
 )
 from medical_date_state import current_semantic_date
 
-DIARY_CREATION_WIZARD_LOCK_VERSION = "v1.4"
+DIARY_CREATION_WIZARD_LOCK_VERSION = "v1.5"
 DIARY_WIZARD_USES_PROGRAM_CALENDAR_WITHOUT_DATE_TEMPLATE = True
+DIARY_WIZARD_HEADLESS_SAFE = True
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,15 @@ def _get_var(app: object, name: str) -> str:
         return ""
 
 
+def _headless_or_ci(app: object) -> bool:
+    if os.environ.get("CI") or os.environ.get("MEDICAL_AUTOFILL_DISABLE_AUTOSTART"):
+        return True
+    root = getattr(app, "root", None)
+    if root is None:
+        return True
+    return not hasattr(root, "tk")
+
+
 def _set_confirmed_schedule(app: object, spec: DiaryScheduleSpec, choice_text: str = "") -> DiaryScheduleSpec:
     description = describe_schedule(spec)
     setattr(app, "_doctor_confirmed_diary_day_offsets", tuple(spec.day_offsets))
@@ -123,7 +133,7 @@ def current_diary_calendar_schedule(app: object, fallback: DiaryScheduleSpec | N
 
 
 def prompt_diary_calendar_principle(app: object) -> bool:
-    if os.environ.get("CI"):
+    if _headless_or_ci(app):
         if not getattr(app, "_doctor_confirmed_diary_day_offsets", ()):  # deterministic default for tests/release gates
             _set_confirmed_schedule(app, default_calendar_diary_schedule(), "1")
         return True
@@ -214,7 +224,7 @@ def confirm_diary_creation(app: object) -> bool:
             app._last_diary_wizard_review = review
     except Exception as exc:
         record_soft_exception("diary_creation_wizard.store_review", exc)
-    if os.environ.get("CI"):
+    if _headless_or_ci(app):
         return review.ok
     try:
         from tkinter import messagebox
@@ -228,10 +238,12 @@ def confirm_diary_creation(app: object) -> bool:
 
 
 def assert_diary_creation_wizard_lock() -> None:
-    if DIARY_CREATION_WIZARD_LOCK_VERSION != "v1.4":
+    if DIARY_CREATION_WIZARD_LOCK_VERSION != "v1.5":
         raise AssertionError("Diary creation wizard lock changed unexpectedly")
     if not DIARY_WIZARD_USES_PROGRAM_CALENDAR_WITHOUT_DATE_TEMPLATE:
         raise AssertionError("Diary wizard must not require a DOCX date template")
+    if not DIARY_WIZARD_HEADLESS_SAFE:
+        raise AssertionError("Diary wizard must auto-confirm safely in CI/headless tests")
     empty = type("Empty", (), {})()
     review = build_diary_wizard_review(empty)
     text = review.as_text()
