@@ -36,6 +36,61 @@ def test_primary_parser_understands_solid_text_core_fields():
     assert data.diagnosis
 
 
+def test_discharge_custom_template_receives_primary_case_fields(tmp_path: Path) -> None:
+    from docx import Document
+    from medical_models import PatientData
+    from universal_case_adapter import patient_data_to_case
+    from universal_generation import render_documents_from_pack
+    from universal_profiles import DocumentPack
+    from universal_template_engine import attach_template_to_pack
+
+    template = tmp_path / "discharge.docx"
+    document = Document()
+    document.add_paragraph("Пациент {{patient.fio}} | ИБ {{case.number}}")
+    document.add_paragraph("Даты {{admission.date}} — {{discharge.date}} | Возраст {{patient.age}}")
+    document.add_paragraph("Жалобы {{complaints}}")
+    document.add_paragraph("Анамнез {{anamnesis.disease}}")
+    document.add_paragraph("Статус {{status.objective}}")
+    document.add_paragraph("Состояние {{condition.discharge}}")
+    document.add_paragraph("Диагноз {{diagnosis.main}}")
+    document.add_paragraph("Лечение {{treatment.plan}}")
+    document.add_paragraph("Итог {{treatment.result}}")
+    document.save(template)
+
+    data = PatientData(
+        fio="Петров Пётр Петрович",
+        birth="45 лет",
+        case_number="777",
+        admission_date="01.06.2026",
+        discharge_date="10.06.2026",
+        complaints="головная боль",
+        disease_anamnesis="заболел остро",
+        somatic_status="соматически стабилен",
+        mental_status="профильный статус без отрицательной динамики",
+        diagnosis="J20 Острый бронхит",
+        treatment_plan="режим, терапия",
+        epi_text="выписывается в стабильном состоянии",
+    )
+    case = patient_data_to_case(data, source_document="primary.docx")
+    pack = DocumentPack(pack_id="doctor.discharge", name="Профиль врача")
+    spec, _copied = attach_template_to_pack(pack, template, tmp_path / "profile", button_label="Выписной эпикриз", role_id="dischargeEpicrisis")
+
+    result = render_documents_from_pack(pack=pack, case=case, document_ids=[spec.id], output_dir=tmp_path / "out", base_dir=tmp_path / "profile", strict=True)
+
+    assert result.ok
+    text = "\n".join(paragraph.text for paragraph in Document(result.created_files[0]).paragraphs)
+    assert "Петров Пётр Петрович" in text
+    assert "ИБ 777" in text
+    assert "01.06.2026 — 10.06.2026" in text
+    assert "Возраст 45 лет" in text
+    assert "головная боль" in text
+    assert "заболел остро" in text
+    assert "соматически стабилен" in text
+    assert "выписывается в стабильном состоянии" in text
+    assert "J20 Острый бронхит" in text
+    assert "режим, терапия" in text
+
+
 def test_desktop_intake_top_level_docx_is_launch_intent(tmp_path, monkeypatch):
     import desktop_intake
 
