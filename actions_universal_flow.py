@@ -90,6 +90,9 @@ class ActionsUniversalFlowMixin:
         add("case.number", case_number)
         add("diagnosis.main", str(getattr(self, "_popup_diagnosis_override", "") or "").strip() or var_text("diagnosis_var"))
         add("treatment.plan", var_text("assigned_treatment_var"))
+        additional_info = var_text("additional_info_text_var")
+        add("additional.info", additional_info)
+        add("recommendations", additional_info)
 
         for semantic_key, field_id in _SEMANTIC_DATE_CASE_FIELDS.items():
             add(field_id, current_semantic_date(self, semantic_key))
