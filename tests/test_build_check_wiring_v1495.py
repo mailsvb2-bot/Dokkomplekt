@@ -3,6 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+CURRENT_VERSION = "1.4.89"
+CURRENT_VERSION_LABEL = "v1.4.89_release_gate_runtime_isolation_SOURCE"
+CURRENT_VERSION_TUPLE = "(1, 4, 89, 0)"
+HOTFIX_PHRASE = "discharge custom case propagation"
 
 
 def _read(relative: str) -> str:
@@ -35,3 +39,24 @@ def test_build_checks_are_wired_into_ci_and_release_gate():
 
     assert "test_regression_state_overlay_v1491.py" in runner
     assert "smoke_user_reported" in runner
+
+
+def test_release_metadata_and_hotfix_notes_stay_synchronized():
+    readme = _read("README.md")
+    release_notes = _read("RELEASE_NOTES.md")
+    app_config = _read("app_config.py")
+    pyproject = _read("pyproject.toml")
+    version_info = _read("version_info.txt")
+    baseline = _read("BASELINE_VERSION.txt")
+
+    assert f"Version: `{CURRENT_VERSION_LABEL}`" in readme.splitlines()[:8]
+    assert release_notes.lstrip().startswith(f"# Release notes — {CURRENT_VERSION_LABEL}")
+    assert f'APP_VERSION = "{CURRENT_VERSION_LABEL}"' in app_config
+    assert f'version = "{CURRENT_VERSION}"' in pyproject
+    assert f"filevers={CURRENT_VERSION_TUPLE}" in version_info
+    assert f"prodvers={CURRENT_VERSION_TUPLE}" in version_info
+    assert f"StringStruct('FileVersion', '{CURRENT_VERSION_LABEL}')" in version_info
+    assert f"StringStruct('ProductVersion', '{CURRENT_VERSION_LABEL}')" in version_info
+    assert CURRENT_VERSION_LABEL in baseline
+    assert HOTFIX_PHRASE in readme
+    assert HOTFIX_PHRASE in release_notes
