@@ -20,13 +20,12 @@ class ActionsDiaryFlowMixin:
         if not self.status_files:
             raise ValueError("Выберите файл(ы) с текстами дневников. Тексты можно выбирать из DOCX/DOCM/DOC.")
 
-        # Visible production workflow: diaries are generated as a plain text DOCX
-        # from doctor-owned status texts and the program calendar.  Old 01-31
-        # table templates remain available only through lower-level compatibility
-        # paths; a stale manually selected date-table file must not switch the UI
-        # back to table output after the doctor chose «Тексты».
-        if getattr(self, "diary_files", None):
-            self.diary_files = []
+        # Единственный видимый production-путь дневников: тексты врача +
+        # календарный принцип программы (+1/+2/...) + финальная запись выписки.
+        # Случайно сохранённые файлы дат не имеют права переключать генерацию
+        # обратно в табличный сценарий.
+        self.diary_files = []
+        self.diary_template_dir = ""
         self._diary_files_auto_selected = False
         try:
             self._update_diary_template_label(success=True)
