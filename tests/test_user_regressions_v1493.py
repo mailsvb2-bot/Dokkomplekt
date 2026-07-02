@@ -89,12 +89,21 @@ def test_visible_diary_flow_forces_text_docx_not_table_template():
     assert "self.diary_files = []" in source
 
 
-def test_created_document_preview_popup_is_diagnostic_opt_in_only():
-    source = Path("actions_creation_execution.py").read_text(encoding="utf-8")
+def test_created_document_preview_popup_is_diagnostic_opt_in_only(monkeypatch, tmp_path: Path):
+    from actions_creation_execution import ActionsCreationExecutionMixin
+    import actions_creation_execution
 
-    assert "MEDICAL_AUTOFILL_SHOW_CREATED_PREVIEW" in source
-    assert "Production creation must not open an unsolicited modal window" in source
-    assert "not enabled" not in source  # keep the guard positive/explicit, not a second warning popup
+    class Harness(ActionsCreationExecutionMixin):
+        pass
+
+    calls = []
+    monkeypatch.delenv("MEDICAL_AUTOFILL_SHOW_CREATED_PREVIEW", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setattr(actions_creation_execution.messagebox, "showinfo", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    Harness()._show_created_document_preview([tmp_path / "created.docx"])
+
+    assert calls == []
 
 
 def test_discharge_custom_template_receives_primary_case_fields(tmp_path: Path) -> None:
