@@ -1,24 +1,26 @@
-# Fix report — v1.4.85_baseline_foundation_SOURCE
+# Fix report v1.4.85 baseline foundation
 
 ## Fixed
 
-1. Added a safe rename path for doctor-created block-03 buttons. The rename updates only profile-owned `button_label` metadata and preserves internal document id, template, role, required fields and generation behavior.
-2. Added a safe delete path for doctor-created block-03 buttons. The delete removes the button from the active profile while intentionally keeping the copied DOCX template file available for re-adding.
-3. Added setup-center UI actions: `Переименовать созданную кнопку` and `Удалить созданную кнопку`.
-4. Kept first-run and normal setup flows intact: doctors can still create buttons in batch, add one template manually, configure folder naming, train source-document reading, import/export profiles and check templates.
-5. Added regression tests that prove popup-entered numeric requisites are overlaid into custom DOCX generation and rendered into created documents.
-6. Added regression tests that prove patient subfolder names follow the doctor-confirmed naming principle, including discharge-date based names, instead of falling back to the legacy default.
-7. Kept all existing user workflows: no bundled medical templates were restored, no doctor-owned profile behavior was removed, and previous semantic/role/placeholder fixes remain intact.
+1. Safe rename path for doctor created block 03 buttons.
+2. Safe delete path for doctor created block 03 buttons.
+3. Setup center UI actions for rename and delete.
+4. First run and normal setup flows preserved.
+5. Regression coverage for popup values in custom document generation.
+6. Regression coverage for patient subfolder naming.
+7. Existing doctor owned profile behavior preserved.
 
 ## Latest CI rebuild note
 
-- Restored the full analyses popup modal contract: manual input, mouse scanner, Word scanner, labs normalization, explicit modal close handlers and direct `labs_text_var` storage.
-- Rebuild requested for a fresh Windows EXE artifact after the analyses popup contract restoration.
+- Restored the full analyses popup modal contract.
+- Documented large dialog field modal functions for release quality gate.
+- Improved release quality gate diagnostics for remaining large functions.
+- Fresh Windows EXE rebuild requested after release gate hardening.
 
 ## Verification
 
-- `python -m compileall -q .`
-- `python -m pytest -q`
-- `python prod_audit.py`
-- `python release_check.py`
-- smoke/project audit checks
+- python -m compileall -q .
+- python -m pytest -q
+- python prod_audit.py
+- python release_check.py
+- smoke and project audit checks
