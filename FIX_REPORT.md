@@ -10,6 +10,11 @@
 6. Added regression tests that prove patient subfolder names follow the doctor-confirmed naming principle, including discharge-date based names, instead of falling back to the legacy default.
 7. Kept all existing user workflows: no bundled medical templates were restored, no doctor-owned profile behavior was removed, and previous semantic/role/placeholder fixes remain intact.
 
+## Latest CI rebuild note
+
+- Restored the full analyses popup modal contract: manual input, mouse scanner, Word scanner, labs normalization, explicit modal close handlers and direct `labs_text_var` storage.
+- Rebuild requested for a fresh Windows EXE artifact after the analyses popup contract restoration.
+
 ## Verification
 
 - `python -m compileall -q .`
