@@ -93,7 +93,7 @@ def test_discharge_custom_template_receives_primary_case_fields(tmp_path: Path) 
         complaints="головная боль",
         disease_anamnesis="заболел остро",
         somatic_status="соматически стабилен",
-        mental_status="профильный статус без отрицательной динамики",
+        profile_status="профильный статус без отрицательной динамики",
         diagnosis="J20 Острый бронхит",
         treatment_plan="режим, терапия",
         epi_text="выписывается в стабильном состоянии",
