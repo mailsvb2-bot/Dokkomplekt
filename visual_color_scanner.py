@@ -17,6 +17,7 @@ external_word_clipboard_selection = "Сканер Word: открыть и взя
 source_extraction = "source_extraction"
 template_replace = "template_replace"
 template_insert_after = "template_insert_after"
+VisualScannerAction = Literal["source_extraction", "template_replace", "template_insert_after"]
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,7 @@ class VisualColorMark:
     selected_text: str
     start: int = -1
     end: int = -1
-    action: Literal["source_extraction", "template_replace", "template_insert_after"] = source_extraction
+    action: VisualScannerAction = "source_extraction"
 
     @property
     def placeholder(self) -> str:
