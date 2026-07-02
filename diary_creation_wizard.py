@@ -44,7 +44,7 @@ class DiaryWizardReview:
             f"Пациент: {self.patient_name or 'не указан'}",
             f"Дата госпитализации: {self.admission_date or 'не найдена'}",
             f"Дата выписки: {self.discharge_date or 'не указана'}",
-            f"Режим: {'календарный DOCX без шаблона дат' if self.text_output else 'таблица дневников'}",
+            f"Режим: {'календарный текстовый DOCX без шаблона дат' if self.text_output else 'таблица дневников'}",
             f"Частота: {'по часам' if self.frequency_mode == 'hourly' else 'ежедневно'}",
             "Принцип дат: " + (self.calendar_description or "календарь программы: ежедневно с +1 дня"),
             f"Динамический эпикриз по больничному: {'да' if self.sick_leave_dynamic_epicrisis else 'нет'}",
