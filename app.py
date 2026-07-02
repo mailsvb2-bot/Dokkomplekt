@@ -32,6 +32,12 @@ def _not_working_value(value: str) -> bool:
 
 
 class RegressionStateOverlayMixin:
+    def _auto_select_numbered_diary_template(self, *, ask_folder: bool = False) -> bool:
+        """Do not auto-pick legacy 01-31 date DOCX files for the new diary flow."""
+        if not ask_folder:
+            return False
+        return super()._auto_select_numbered_diary_template(ask_folder=ask_folder)  # type: ignore[misc]
+
     def choose_diary_files(self) -> None:
         """The Dates button now confirms the program calendar principle.
 
@@ -201,7 +207,7 @@ class RegressionStateOverlayMixin:
         try:
             pack = self._load_or_create_universal_pack()
             selected = {str(item).strip() for item in selected_custom_ids if str(item).strip()}
-            for document in tuple(getattr(pack, "documents", ()) or ()): 
+            for document in tuple(getattr(pack, "documents", ()) or ()):
                 if selected and getattr(document, "id", "") not in selected:
                     continue
                 required = " ".join(str(item or "") for item in tuple(getattr(document, "required_fields", ()) or ()))
