@@ -327,8 +327,63 @@ def build_labs_popup_block(app, body: tk.Frame, *, row: int, columnspan: int, pa
     tk.Button(frame, text="Вставить / ввести", command=lambda: _prompt_manual_labs(app, parent), bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=1, sticky="ew", padx=(0, 6))
     tk.Button(frame, text="Файл", command=load_labs, bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=2, sticky="ew", padx=(0, 6))
     tk.Button(frame, text="Сканер мышкой", command=lambda: open_labs_selection_scanner(app, parent), bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=3, sticky="ew", padx=(0, 6))
+    tk.Button(frame, text="Сканер Word", command=lambda: open_external_word_selection_scanner_dialog(app, parent), bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=4, sticky="ew")
     tk.Label(frame, textvariable=app.labs_source_path_var, bg=PANEL_3, fg=MUTED, font=("Segoe UI", 8), anchor="w").grid(row=2, column=0, columnspan=5, sticky="ew", pady=(6, 0))
     return 3
+
+
+def open_external_word_selection_scanner_dialog(app, parent) -> None:
+    win = tk.Toplevel(parent)
+    win.title("Сканер Word")
+    win.configure(bg=PANEL)
+    win.resizable(False, False)
+    win.transient(parent)
+    win.grab_set()
+    tk.Label(
+        win,
+        text="Сканер Word: откройте документ, выделите нужные анализы и вставьте текст в это окно.",
+        bg=PANEL,
+        fg=TEXT,
+        font=("Segoe UI", 9),
+        wraplength=420,
+        justify="left",
+        padx=16,
+        pady=12,
+    ).pack(fill="x")
+    text = tk.Text(win, height=8, width=58, bg=FIELD, fg=TEXT, insertbackground=TEXT, relief="flat")
+    text.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+
+    def open_source() -> None:
+        source = ""
+        try:
+            source = str(app.labs_source_path_var.get() or "").strip()
+        except Exception as exc:
+            record_soft_exception("dialog_fields_core.word_scanner_source", exc)
+        if source and source not in {"manual", "mouse_scanner", "without_labs"}:
+            try:
+                open_desktop_path(source)
+            except Exception as exc:
+                record_soft_exception("dialog_fields_core.word_scanner_open_source", exc, detail=source)
+                messagebox.showwarning("Сканер Word", f"Не удалось открыть источник:\n{exc}", parent=win)
+        else:
+            messagebox.showinfo("Сканер Word", "Выберите или откройте Word-документ с анализами, затем вставьте текст сюда.", parent=win)
+
+    def apply_text() -> None:
+        value = text.get("1.0", "end").strip()
+        if value:
+            app.labs_text_var.set(value)
+            app.labs_source_path_var.set("word_selection_scanner")
+            app.labs_without_var.set(False)
+            app.labs_date_policy_var.set("preserve_found_dates")
+        win.destroy()
+
+    buttons = tk.Frame(win, bg=PANEL)
+    buttons.pack(fill="x", padx=16, pady=(0, 14))
+    tk.Button(buttons, text="Открыть источник", command=open_source, bg=FIELD, fg=TEXT, relief="flat", padx=10, pady=6).pack(side="left")
+    tk.Button(buttons, text="Применить", command=apply_text, bg=ACCENT_2, fg="#03101f", relief="flat", padx=10, pady=6).pack(side="right")
+    tk.Button(buttons, text="Отмена", command=win.destroy, bg=PANEL_3, fg=TEXT, relief="flat", padx=10, pady=6).pack(side="right", padx=(0, 8))
+    text.focus_set()
+    parent.wait_window(win)
 
 
 def open_labs_selection_scanner(app, parent) -> None:
