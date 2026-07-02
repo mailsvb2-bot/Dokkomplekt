@@ -10,11 +10,11 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from app_config import ACCENT, ACCENT_2, ERROR, FIELD, FIELD_BORDER, MUTED, PANEL, PANEL_3, TEXT
 from dialog_fields_linking import attach_linked_field_mirroring
 from diagnostic_logging import record_soft_exception
-from medical_formatting import parse_date
-from medical_date_state import current_semantic_date, semantic_date_key_from_prompt  # noqa: F401 - current_semantic_date kept for compatibility gates
-from medical_text_utils import sanitize_case_number_candidate
-from medical_parser_sanitize import sanitize_diagnosis
 from icd10_f_search import normalize_required_diagnosis_with_icd10
+from medical_date_state import current_semantic_date, semantic_date_key_from_prompt  # noqa: F401 - current_semantic_date kept for compatibility gates
+from medical_formatting import parse_date
+from medical_parser_sanitize import sanitize_diagnosis
+from medical_text_utils import sanitize_case_number_candidate
 from dialog_fields_popup import DialogDiagnosisPopup
 from printer_platform import open_desktop_path  # noqa: F401 - architecture contract: UI opens paths through platform helper
 
@@ -293,6 +293,26 @@ def _build_action_buttons(buttons: tk.Frame, ok, cancel) -> None:
     tk.Button(buttons, text="Отмена", command=cancel, bg=PANEL_3, fg=TEXT, relief="flat", padx=18, pady=8, font=("Segoe UI", 8)).grid(row=0, column=1, sticky="e")
 
 
+def normalize_labs_block(value: str, *, field_id: str = "labs.results") -> str:
+    """Normalize manually entered or scanned analyses before storing them."""
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if field_id == "labs.results":
+        lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
+        text = "\n".join(line for line in lines if line)
+    return text
+
+
+def _apply_labs_text(app, value: str, *, source: str) -> bool:
+    normalized = normalize_labs_block(value, field_id="labs.results")
+    if not normalized:
+        return False
+    app.labs_text_var.set(normalize_labs_block(value, field_id="labs.results"))
+    app.labs_source_path_var.set(source)
+    app.labs_without_var.set(False)
+    app.labs_date_policy_var.set("preserve_found_dates")
+    return True
+
+
 def build_labs_popup_block(app, body: tk.Frame, *, row: int, columnspan: int, parent: tk.Toplevel) -> int:
     if not all(hasattr(app, name) for name in ("labs_text_var", "labs_without_var", "labs_date_policy_var")):
         return 0
@@ -315,10 +335,8 @@ def build_labs_popup_block(app, body: tk.Frame, *, row: int, columnspan: int, pa
         try:
             from medical_labs_loader import load_labs_text
             loaded = load_labs_text(path)
-            app.labs_text_var.set(loaded.text)
-            app.labs_source_path_var.set(str(path))
-            app.labs_without_var.set(False)
-            app.labs_date_policy_var.set("preserve_found_dates")
+            if not _apply_labs_text(app, loaded.text, source=str(path)):
+                messagebox.showwarning("Анализы", "В документе не найден текст анализов.", parent=parent)
         except Exception as exc:
             record_soft_exception("dialog_fields_core.load_labs", exc, detail=str(path))
             messagebox.showwarning("Анализы", f"Не удалось прочитать анализы:\n{exc}", parent=parent)
@@ -330,6 +348,39 @@ def build_labs_popup_block(app, body: tk.Frame, *, row: int, columnspan: int, pa
     tk.Button(frame, text="Сканер Word", command=lambda: open_external_word_selection_scanner_dialog(app, parent), bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=4, sticky="ew")
     tk.Label(frame, textvariable=app.labs_source_path_var, bg=PANEL_3, fg=MUTED, font=("Segoe UI", 8), anchor="w").grid(row=2, column=0, columnspan=5, sticky="ew", pady=(6, 0))
     return 3
+
+
+def _prompt_manual_labs(app, parent) -> None:
+    win = tk.Toplevel(parent)
+    win.title("Введите текст анализов")
+    win.configure(bg=PANEL)
+    win.transient(parent)
+    win.grab_set()
+    tk.Label(win, text="Введите текст анализов", bg=PANEL, fg=TEXT, font=("Segoe UI", 10, "bold"), padx=14, pady=10).pack(fill="x")
+    text = tk.Text(win, height=8, width=58, bg=FIELD, fg=TEXT, insertbackground=TEXT, relief="flat")
+    text.pack(fill="both", expand=True, padx=14, pady=(0, 10))
+
+    def close_manual_labs() -> None:
+        try:
+            win.grab_release()
+        except tk.TclError as exc:
+            record_soft_exception("dialog_fields_core.manual_labs_grab_release", exc)
+        win.destroy()
+
+    def apply_manual_labs() -> None:
+        value = text.get("1.0", "end")
+        if not _apply_labs_text(app, value, source="manual"):
+            messagebox.showwarning("Анализы", "Введите текст анализов.", parent=win)
+            return
+        close_manual_labs()
+
+    buttons = tk.Frame(win, bg=PANEL)
+    buttons.pack(fill="x", padx=14, pady=(0, 12))
+    tk.Button(buttons, text="Применить", command=apply_manual_labs, bg=ACCENT_2, fg="#03101f", relief="flat", padx=10, pady=6).pack(side="right")
+    tk.Button(buttons, text="Отмена", command=close_manual_labs, bg=PANEL_3, fg=TEXT, relief="flat", padx=10, pady=6).pack(side="right", padx=(0, 8))
+    win.protocol("WM_DELETE_WINDOW", close_manual_labs)
+    text.focus_set()
+    parent.wait_window(win)
 
 
 def open_external_word_selection_scanner_dialog(app, parent) -> None:
@@ -353,13 +404,20 @@ def open_external_word_selection_scanner_dialog(app, parent) -> None:
     text = tk.Text(win, height=8, width=58, bg=FIELD, fg=TEXT, insertbackground=TEXT, relief="flat")
     text.pack(fill="both", expand=True, padx=16, pady=(0, 10))
 
+    def close_word_scanner() -> None:
+        try:
+            win.grab_release()
+        except tk.TclError as exc:
+            record_soft_exception("dialog_fields_core.word_scanner_grab_release", exc)
+        win.destroy()
+
     def open_source() -> None:
         source = ""
         try:
             source = str(app.labs_source_path_var.get() or "").strip()
         except Exception as exc:
             record_soft_exception("dialog_fields_core.word_scanner_source", exc)
-        if source and source not in {"manual", "mouse_scanner", "without_labs"}:
+        if source and source not in {"manual", "mouse_scanner", "without_labs", "word_selection_scanner"}:
             try:
                 open_desktop_path(source)
             except Exception as exc:
@@ -368,20 +426,19 @@ def open_external_word_selection_scanner_dialog(app, parent) -> None:
         else:
             messagebox.showinfo("Сканер Word", "Выберите или откройте Word-документ с анализами, затем вставьте текст сюда.", parent=win)
 
-    def apply_text() -> None:
-        value = text.get("1.0", "end").strip()
-        if value:
-            app.labs_text_var.set(value)
-            app.labs_source_path_var.set("word_selection_scanner")
-            app.labs_without_var.set(False)
-            app.labs_date_policy_var.set("preserve_found_dates")
-        win.destroy()
+    def apply_word_scanner() -> None:
+        value = text.get("1.0", "end")
+        if not _apply_labs_text(app, value, source="word_selection_scanner"):
+            messagebox.showwarning("Сканер Word", "В документе не найден текст. Вставьте выделенный фрагмент анализов вручную.", parent=win)
+            return
+        close_word_scanner()
 
     buttons = tk.Frame(win, bg=PANEL)
     buttons.pack(fill="x", padx=16, pady=(0, 14))
     tk.Button(buttons, text="Открыть источник", command=open_source, bg=FIELD, fg=TEXT, relief="flat", padx=10, pady=6).pack(side="left")
-    tk.Button(buttons, text="Применить", command=apply_text, bg=ACCENT_2, fg="#03101f", relief="flat", padx=10, pady=6).pack(side="right")
-    tk.Button(buttons, text="Отмена", command=win.destroy, bg=PANEL_3, fg=TEXT, relief="flat", padx=10, pady=6).pack(side="right", padx=(0, 8))
+    tk.Button(buttons, text="Применить", command=apply_word_scanner, bg=ACCENT_2, fg="#03101f", relief="flat", padx=10, pady=6).pack(side="right")
+    tk.Button(buttons, text="Отмена", command=close_word_scanner, bg=PANEL_3, fg=TEXT, relief="flat", padx=10, pady=6).pack(side="right", padx=(0, 8))
+    win.protocol("WM_DELETE_WINDOW", close_word_scanner)
     text.focus_set()
     parent.wait_window(win)
 
@@ -405,27 +462,16 @@ def open_labs_selection_scanner(app, parent) -> None:
             messagebox.showwarning("Сканер мышкой", f"Не удалось получить текст анализов:\n{exc}", parent=parent)
             return
     if not scan.blocks:
-        messagebox.showwarning("Сканер мышкой", "Выделенный текст анализов не найден. Попробуйте ещё раз или вставьте текст вручную.", parent=parent)
+        messagebox.showwarning("Сканер мышкой", "В документе не найден текст анализов. Попробуйте ещё раз или вставьте текст вручную.", parent=parent)
         return
     win = tk.Toplevel(parent)
     win.withdraw()
     try:
         text = "\n".join(str(block).strip() for block in scan.blocks if str(block).strip()).strip()
-        app.labs_text_var.set(text)
-        app.labs_source_path_var.set("mouse_scanner")
-        app.labs_without_var.set(False)
-        app.labs_date_policy_var.set("preserve_found_dates")
+        if not _apply_labs_text(app, text, source="mouse_scanner"):
+            messagebox.showwarning("Сканер мышкой", "В документе не найден текст анализов.", parent=parent)
     finally:
         win.destroy()
-
-
-def _prompt_manual_labs(app, parent) -> None:
-    value = simpledialog.askstring("Анализы", "Вставьте или введите текст анализов:", parent=parent)
-    if value:
-        app.labs_text_var.set(value.strip())
-        app.labs_source_path_var.set("manual")
-        app.labs_without_var.set(False)
-        app.labs_date_policy_var.set("preserve_found_dates")
 
 
 def attach_additional_info_buttons(app, parent, body: tk.Frame, *, row: int, columnspan: int = 2) -> int:
@@ -462,7 +508,7 @@ def attach_additional_info_buttons(app, parent, body: tk.Frame, *, row: int, col
 
 
 def choose_epi_file_for_app(app, *, parent=None) -> bool:
-    path = filedialog.askopenfilename(title="Выберите файл ЭПИ", filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docm *.docx"), ("Text", "*.txt"), ("All files", "*.*")], parent=parent)
+    path = filedialog.askopenfilename(title="Выберите файл ЭПИ", filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docx *.docm"), ("Text", "*.txt"), ("All files", "*.*")], parent=parent)
     if not path:
         return False
     try:
