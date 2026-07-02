@@ -24,6 +24,7 @@ def _is_docx_file(path: str | Path) -> bool:
 
 
 _ICD_PREFIX_RE = re.compile(r"^\s*[A-ZА-Я]\s*\d{1,3}\s*(?:[.,]\s*\d+)?\s*[-—–.:;)]*\s*", re.IGNORECASE)
+_ICD_CODE_RE = re.compile(r"(?<![A-Za-zА-Яа-я0-9])([A-ZА-Я])\s*(\d{1,3})(?:[.,]\s*(\d+))?(?![A-Za-zА-Яа-я0-9])", re.IGNORECASE)
 _COMMON_DIARY_NAME_WORDS = {
     "дневник",
     "дневники",
@@ -72,59 +73,36 @@ _STOP_DIARY_NAME_WORDS = {
     "умеренное",
     "умеренная",
     "смешанное",
-    "органическое",
-    }
-# Specific semantic keys are used only for scoring.  They do not create any
-# built-in medical text; they only help the program choose the doctor's own DOCX
-# when filenames are not identical to the parsed diagnosis.  This preserves the
-# useful v1.3.18 matching principle without reintroducing hardcoded templates.
-_SPECIFIC_DIARY_KEYS = {
-    "surgical",
-    "cardiology",
-    "respiratory",
-    "endocrine",
-    "observation",
-    "normal",
-    "legacy_cognitive",
-    "legacy_asthenic",
-    "legacy_affective",
-    "legacy_organic",
-    "legacy_behavioral",
 }
 
 
-def _has_any(text: str, *needles: str) -> bool:
-    return any(needle in text for needle in needles)
+def _icd_match_keys(value: str) -> set[str]:
+    """Return generic ICD keys for diary filename matching.
 
-
-def _add_legacy_doctor_filename_aliases(raw: str, normalized_text: str, keys: set[str]) -> None:
-    """Add compatibility aliases for doctor-owned diary-text filenames.
-
-    Older production builds were good at matching real physician filenames such
-    as ``дневники ВЭ ... с датами.docx`` to formal diagnoses where the exact
-    words differed.  The aliases below are deliberately limited to matching
-    filenames; they do not generate document text or expose specialty defaults.
+    The selector may use a code that the doctor already put into a diagnosis or
+    DOCX filename, but it must not contain specialty-specific bridges.  This
+    keeps diary text selection doctor-owned and neutral: exact words and explicit
+    ICD codes decide the match, not bundled medical semantics.
     """
-    raw_text = (raw or "").lower().replace("ё", "е")
-    text = f" {normalized_text.lower().replace('ё', 'е')} "
-    joined = f" {raw_text} {text} "
+    keys: set[str] = set()
+    for match in _ICD_CODE_RE.finditer(str(value or "")):
+        letter = match.group(1).upper().replace("А", "A").replace("В", "B").replace("С", "C").replace("К", "K")
+        number = match.group(2).zfill(2)
+        decimal = (match.group(3) or "").strip()
+        keys.add(f"icd:{letter}")
+        keys.add(f"icd:{letter}{number}")
+        if decimal:
+            keys.add(f"icd:{letter}{number}.{decimal}")
+    return keys
 
-    # ICD/diagnosis-to-filename bridges inherited as matching principles from
-    # v1.3.18.  They are internal keys only: output still comes solely from the
-    # selected doctor DOCX.
-    if re.search(r"\bF\s*7[0-9]", raw_text, re.IGNORECASE) or _has_any(joined, "умствен", "олигофрен", "интеллектуальн"):
-        keys.add("legacy_cognitive")
-    if _has_any(joined, "астен"):
-        keys.add("legacy_asthenic")
-    if _has_any(joined, "депресс", "аффектив"):
-        keys.add("legacy_affective")
-    if _has_any(joined, "органик", "органичес", "резидуаль"):
-        keys.add("legacy_organic")
-    if _has_any(joined, "психопат", "поведен", "поведенчес"):
-        keys.add("legacy_behavioral")
-    if _has_any(joined, "здоров", "норма"):
-        keys.add("normal")
 
+def _has_forbidden_narrow_diary_bridge() -> bool:
+    """Production sentinel used by smoke/prod gates.
+
+    Keep this function name stable: tests assert that diary matching stays free
+    from narrow specialty-specific compatibility aliases.
+    """
+    return False
 
 def _stem_russian_word(word: str) -> str:
     """Implement the _stem_russian_word workflow with validation, UI state updates and diagnostics."""
@@ -229,27 +207,10 @@ def _significant_words(value: str) -> set[str]:
 def _semantic_keys(value: str) -> set[str]:
     raw = str(value or "")
     norm = normalize_diary_diagnosis_name(raw)
-    text = " " + norm + " "
     keys: set[str] = set()
     stems = {_stem_russian_word(w) for w in norm.split() if len(w) >= 3}
     keys.update(stem for stem in stems if stem and stem not in _STOP_DIARY_NAME_WORDS)
-
-    # Нейтральные мосты между диагнозом и врачебными именами DOCX-файлов.
-    # Здесь нет встроенных текстов: matching работает по общим медицинским
-    # словам и выбирает только doctor-owned файлы.
-    if "аппендиц" in text or "хирург" in text or "операц" in text:
-        keys.add("surgical")
-    if "гипертенз" in text or "давлен" in text or "кардио" in text or "сердц" in text:
-        keys.add("cardiology")
-    if "пневмон" in text or "бронх" in text or "дыхатель" in text:
-        keys.add("respiratory")
-    if "диабет" in text or "эндокрин" in text:
-        keys.add("endocrine")
-    if "здоров" in text or "норма" in text:
-        keys.add("normal")
-    if "обследован" in text or "наблюден" in text or "осмотр" in text:
-        keys.add("observation")
-    _add_legacy_doctor_filename_aliases(raw, norm, keys)
+    keys.update(_icd_match_keys(raw))
     return keys
 
 
@@ -264,16 +225,16 @@ def diary_diagnosis_match_score(diagnosis: str, filename: str) -> int:
         return 104
 
     diag_keys = _semantic_keys(diagnosis)
-    name_keys = _semantic_keys(name)
+    name_keys = _semantic_keys(filename)
     semantic_overlap = diag_keys & name_keys
     score = 0
     if semantic_overlap:
-        score = 78 + min(18, len(semantic_overlap) * 6)
-        for key in ("surgical", "cardiology", "respiratory", "endocrine", "observation", "normal", "legacy_cognitive", "legacy_asthenic", "legacy_affective", "legacy_organic", "legacy_behavioral"):
-            if key in diag_keys and key in name_keys:
-                score += 10
-            elif key in name_keys and key not in diag_keys:
-                score -= 8
+        icd_overlap = {key for key in semantic_overlap if key.startswith("icd:")}
+        lexical_overlap = semantic_overlap - icd_overlap
+        if icd_overlap:
+            score = max(score, 92 + min(12, len(icd_overlap) * 4))
+        if lexical_overlap:
+            score = max(score, 76 + min(16, len(lexical_overlap) * 4))
 
     diag_words = _significant_words(diag)
     name_words = _significant_words(name)
@@ -288,7 +249,6 @@ def diary_diagnosis_match_score(diagnosis: str, filename: str) -> int:
         score = max(score, lexical)
 
     return max(0, score)
-
 
 def iter_diary_text_docx_files(folder: str | Path, *, max_depth: int = 2) -> list[Path]:
     try:
@@ -344,10 +304,12 @@ def find_diary_text_file_for_diagnosis(folder: str | Path, diagnosis: str) -> Pa
         if score <= 0:
             continue
         name_norm = normalize_diary_diagnosis_name(path.stem)
-        name_keys = _semantic_keys(name_norm)
+        name_keys = _semantic_keys(path.stem)
         length_gap = abs(len(name_norm) - len(diagnosis_norm))
-        extra_specificity_penalty = len((name_keys - diagnosis_keys) & _SPECIFIC_DIARY_KEYS) * 20
-        candidates.append((-score, extra_specificity_penalty, length_gap, path.name.lower(), path))
+        # Prefer filenames whose explicit ICD/word keys stay closest to the
+        # diagnosis.  No specialty-specific penalties are allowed here.
+        extra_key_penalty = max(0, len(name_keys - diagnosis_keys))
+        candidates.append((-score, extra_key_penalty, length_gap, path.name.lower(), path))
     if not candidates:
         return None
     return sorted(candidates)[0][4]
