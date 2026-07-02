@@ -37,6 +37,32 @@ def test_primary_parser_understands_solid_text_core_fields():
     assert data.diagnosis
 
 
+def test_primary_parser_captures_explicit_discharge_date_without_stealing_other_dates():
+    from medical_admission_resolver import extract_discharge_date_from_primary_text
+    from medical_parser import MedicalTextParser
+
+    text = "\n".join(
+        [
+            "Первичный осмотр",
+            "Дата рождения",
+            "04.01.1980",
+            "Дата поступления",
+            "01.06.2026",
+            "История болезни № 12345",
+            "ФИО: Иванов Иван Иванович",
+            "Дата выписки",
+            "10.06.2026",
+            "Диагноз: J20 Острый бронхит",
+        ]
+    )
+
+    data = MedicalTextParser().parse_text(text)
+
+    assert data.admission_date == "01.06.2026"
+    assert data.discharge_date == "10.06.2026"
+    assert extract_discharge_date_from_primary_text("Дата рождения 04.01.1980 Дата поступления 01.06.2026") == ""
+
+
 def test_compact_popup_date_100526_normalizes_to_full_date():
     from medical_formatting import parse_date
     from medical_date_state import normalize_date_value
@@ -61,6 +87,14 @@ def test_visible_diary_flow_forces_text_docx_not_table_template():
     assert "text_output = True" in source
     assert "diary_files=[]" in source
     assert "self.diary_files = []" in source
+
+
+def test_created_document_preview_popup_is_diagnostic_opt_in_only():
+    source = Path("actions_creation_execution.py").read_text(encoding="utf-8")
+
+    assert "MEDICAL_AUTOFILL_SHOW_CREATED_PREVIEW" in source
+    assert "Production creation must not open an unsolicited modal window" in source
+    assert "not enabled" not in source  # keep the guard positive/explicit, not a second warning popup
 
 
 def test_discharge_custom_template_receives_primary_case_fields(tmp_path: Path) -> None:
