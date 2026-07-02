@@ -13,6 +13,7 @@ from diary_dates import parse_admission_month_year, parse_full_date, parse_full_
 from diary_gender import adapt_text_to_patient_gender, detect_gender_from_patient_name
 from diary_models import DiaryBatchResult
 from diary_paths import available_path, make_diary_output_name, safe_filename_part
+from diary_schedule import DEFAULT_CALENDAR_DIARY_DAY_OFFSETS, expand_day_offsets
 from diary_text_parser import clean_status_text, extract_statuses_from_docx
 from diary_writer import fill_diary_file
 from medical_docx_xml_fragments import ensure_docx_compatible, existing_word_file
@@ -169,6 +170,35 @@ def _dynamic_epicrisis_base_date(admission_date_value: date, sick_leave_from: st
     return max(admission_date_value, sick_leave_date)
 
 
+def _calendar_text_diary_dates(
+    admission_date_value: date,
+    discharge_date_value: date | None,
+    *,
+    limit: int,
+    day_offsets: Sequence[int] = (),
+) -> tuple[date, ...]:
+    """Program-calendar diary dates for text output.
+
+    The calendar path deliberately starts with admission +1 day.  It no longer
+    depends on a doctor-owned DOCX table with dates; the doctor confirms the
+    date principle in the diary wizard and the program expands that principle.
+    """
+
+    if limit <= 0:
+        return ()
+    offsets = tuple(int(item) for item in (day_offsets or DEFAULT_CALENDAR_DIARY_DAY_OFFSETS))
+    expanded_offsets = expand_day_offsets(offsets, max(limit * 3, len(offsets), 10))
+    result: list[date] = []
+    for offset in expanded_offsets:
+        planned = admission_date_value + timedelta(days=max(1, int(offset)))
+        if discharge_date_value is not None and planned > discharge_date_value:
+            break
+        result.append(planned)
+        if len(result) >= limit:
+            break
+    return tuple(result)
+
+
 def _build_dated_entries(
     statuses: Sequence[str],
     dates: Sequence[date],
@@ -207,7 +237,7 @@ def _create_text_diary_document(
     for item_date, text in epicrisis_entries:
         lines = str(text or "").splitlines()
         first_line = f"{item_date:%d.%m.%y} {lines[0] if lines else ''}".rstrip()
-        blocks.append((item_date, 1, tuple([first_line, *lines[1:]])))
+        blocks.append((item_date, 1, tuple([first_line, *lines[1:])))
     for _item_date, block_kind, lines in sorted(blocks, key=lambda block: (block[0], block[1])):
         if block_kind == 1 and doc.paragraphs:
             doc.add_paragraph("")
@@ -222,12 +252,17 @@ def _fill_text_diary_batch(
     admission_date_value, discharge_date_value, gender_source_name: str, repeat_statuses: bool,
     patient_gender: str | None, sick_leave_dynamic_epicrisis: bool, treatment_correction: str,
     birth_date: str, complaints: str, treatment: str, profile_status: str, sick_leave_from: str,
-    write_report: bool,
+    write_report: bool, diary_day_offsets: Sequence[int],
 ) -> DiaryBatchResult:
     if admission_date_value is None:
         admission_date_value = parse_full_date(admission_value)
-    rough_limit = max(10, min(80, (discharge_date_value - admission_date_value).days + 10)) if discharge_date_value else max(10, len(statuses) or 10)
-    dates = default_observation_diary_dates(admission_date_value, limit=rough_limit, discharge_date=discharge_date_value)
+    rough_limit = max(10, min(120, (discharge_date_value - admission_date_value).days + 10)) if discharge_date_value else max(10, len(statuses) or 10)
+    dates = _calendar_text_diary_dates(
+        admission_date_value,
+        discharge_date_value,
+        limit=rough_limit,
+        day_offsets=diary_day_offsets,
+    )
     entries = _build_dated_entries(statuses, dates, patient_gender, repeat_statuses)
     epicrisis_entries: list[tuple[date, str]] = []
     if sick_leave_dynamic_epicrisis:
@@ -277,13 +312,13 @@ def fill_diary_batch(
     """Create diary documents from selected doctor-owned text and date sources.
 
     This public batch boundary keeps the old table workflow working while also
-    supporting the text-output contract. It validates selected Word files,
-    converts legacy DOC files locally when possible, adapts diary text by patient
-    gender, keeps output folders safe, and optionally adds periodic dynamic
-    epicrisis entries for sick-leave cases.
+    supporting the program-calendar text-output contract. It validates selected
+    Word text files, converts legacy DOC files locally when possible, adapts
+    diary text by patient gender, keeps output folders safe, and optionally adds
+    periodic dynamic epicrisis entries for sick-leave cases.
     """
     if not diary_files and not text_output:
-        raise ValueError("Сначала выберите файлы-таблицы дневников, которые нужно заполнить.")
+        raise ValueError("Сначала выберите файлы-таблицы дневников или создавайте дневники календарём программы без шаблона дат.")
     diary_file_paths = _existing_docx_files(diary_files, "таблица дневников") if diary_files else []
     status_file_paths = _existing_docx_files(status_files, "тексты дневников") if status_files else []
     if not status_files and not allow_empty_statuses:
@@ -322,6 +357,7 @@ def fill_diary_batch(
             treatment_correction=treatment_correction, birth_date=birth_date,
             complaints=complaints, treatment=treatment, profile_status=profile_status,
             sick_leave_from=sick_leave_from, write_report=write_report,
+            diary_day_offsets=tuple(int(x) for x in diary_day_offsets),
         )
         if open_result_folder:
             open_folder(result_dir)
