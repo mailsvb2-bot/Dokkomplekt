@@ -33,23 +33,19 @@ def _not_working_value(value: str) -> bool:
 
 class RegressionStateOverlayMixin:
     def _auto_select_numbered_diary_template(self, *, ask_folder: bool = False) -> bool:
-        """Do not auto-pick legacy 01-31 date DOCX files for the new diary flow."""
-        if not ask_folder:
-            return False
-        return super()._auto_select_numbered_diary_template(ask_folder=ask_folder)  # type: ignore[misc]
+        """Legacy numbered diary date templates are not part of the visible flow."""
+        return False
 
     def choose_diary_files(self) -> None:
-        """The Dates button now confirms the program calendar principle.
-
-        Old date-template DOCX files remain supported through lower-level
-        compatibility paths, but the visible production flow no longer requires a
-        date template: the doctor confirms how to compose diary dates in a popup.
-        """
+        """The Dates button confirms the program calendar principle only."""
         try:
             from diary_constants import DIARY_KIND
             from diary_creation_wizard import prompt_diary_calendar_principle
             if not prompt_diary_calendar_principle(self):
                 return None
+            self.diary_files = []
+            self.diary_template_dir = ""
+            self._diary_files_auto_selected = False
             try:
                 self.output_vars[DIARY_KIND].set(True)
             except Exception as exc:
@@ -65,24 +61,22 @@ class RegressionStateOverlayMixin:
             except Exception as exc:
                 record_soft_exception("app.diary_calendar_status", exc)
             try:
-                self._log("\n✅ Принцип дат дневников подтверждён: календарь программы, без обязательного шаблона дат.\n")
+                self._log("\n✅ Принцип дат дневников подтверждён: календарь программы (+1/+2/...), без шаблона дат.\n")
             except Exception as exc:
                 record_soft_exception("app.diary_calendar_log", exc)
             return None
         except Exception as exc:
             record_soft_exception("app.choose_diary_calendar_principle", exc)
-            return super().choose_diary_files()  # type: ignore[misc]
+            return None
 
     def _diary_template_label_text(self) -> str:
-        if not getattr(self, "diary_files", None) and not getattr(self, "diary_template_dir", ""):
-            principle = str(getattr(self, "_doctor_confirmed_diary_principle", "") or "календарь программы: +1 день")
-            text = "Даты: " + principle
-            try:
-                return self._truncate_label_text(text, max_chars=42 if getattr(self, "_compact_ui", False) else 78)
-            except Exception as exc:
-                record_soft_exception("app.diary_calendar_label", exc)
-                return text
-        return super()._diary_template_label_text()  # type: ignore[misc]
+        principle = str(getattr(self, "_doctor_confirmed_diary_principle", "") or "календарь программы: +1 день")
+        text = "Даты: " + principle
+        try:
+            return self._truncate_label_text(text, max_chars=42 if getattr(self, "_compact_ui", False) else 78)
+        except Exception as exc:
+            record_soft_exception("app.diary_calendar_label", exc)
+            return text
 
     def _vk_mse_work_position_value(self) -> str:
         if hasattr(self, "vk_mse_work_position_var"):
@@ -167,6 +161,8 @@ class RegressionStateOverlayMixin:
             self._doctor_confirmed_diary_day_offsets = ()
             self._doctor_confirmed_diary_hour_offsets = ()
             self._doctor_confirmed_diary_principle = ""
+            self.diary_files = []
+            self.diary_template_dir = ""
             if hasattr(self, "diary_calendar_principle_var"):
                 self.diary_calendar_principle_var.set("")
         except Exception as exc:
