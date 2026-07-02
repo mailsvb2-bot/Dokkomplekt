@@ -16,7 +16,8 @@ The contour protects the real doctor workflow, not only isolated functions:
 6. patient subfolders follow the naming principle confirmed by the doctor;
 7. role-aware placeholders stay correct for VK/MSE, sick-leave VK, RVK and joint commission documents;
 8. no bundled medical DOCX/DOCM templates or narrow-profile defaults are reintroduced;
-9. the 75-case production interaction matrix stays green for aliases, roles, popups, folders and intake handshakes.
+9. the 75-case production interaction matrix stays green for aliases, roles, popups, folders and intake handshakes;
+10. direct user-reported regression locks (`tests/test_user_regressions_v1493.py`) stay inside the strict contour instead of living only in broad pytest.
 
 ## Mandatory local command
 
@@ -26,7 +27,7 @@ Run this before creating a release archive or pushing a release branch:
 python tools/run_regression_contour.py
 ```
 
-The runner executes a focused behavior suite and selected smoke checks.  It does
+The runner executes a focused behavior suite, the direct user-reported regression locks, and selected smoke checks.  It does
 not replace `release_check.py`; it is an earlier regression gate that should fail
 fast when a user-facing behavior is broken.
 
