@@ -43,9 +43,6 @@ class LayoutSourcesMixin:
         drop.grid_propagate(False)
         drop.grid_columnconfigure(0, weight=1)
         drop.grid_rowconfigure(0, minsize=self._px(38 if self._compact_ui else 44, 28))
-        # Строка 1 — единая строка сообщения: сначала подсказка, после выбора
-        # файла — зелёный статус. Так текст не проваливается вниз, а высота
-        # drop-зоны остаётся стабильной.
         drop.grid_rowconfigure(1, minsize=self._px(24 if self._compact_ui else 28, 18))
         drop.grid_rowconfigure(2, minsize=self._px(14 if self._compact_ui else 18, 10))
 
@@ -70,10 +67,6 @@ class LayoutSourcesMixin:
             pady=0,
         )
         hint.grid(row=1, column=0, sticky="ew", pady=(0, self._px(12 if self._compact_ui else 15, 7)))
-
-        # Подсказка визуально исчезает после выбора файла, но её grid-слот
-        # остаётся зарезервированным. Поэтому строка статуса не меняет высоту
-        # drop-зоны и не двигает кнопки первого блока.
         self.primary_drop_hint_label = hint
 
         self.primary_selected_status_var = tk.StringVar(value=" ")
@@ -89,9 +82,6 @@ class LayoutSourcesMixin:
             justify="center",
             anchor="center",
         )
-        # Статус выбранного файла занимает ту же вертикальную строку, что и
-        # подсказка. Подсказка становится пустой, но не снимается с grid,
-        # поэтому блок 01 не прыгает, а зелёный текст выглядит выше и ровнее.
         status.grid(row=1, column=0, sticky="ew", pady=(0, self._px(10, 5)))
         for widget in (drop, title, hint, status):
             widget.bind("<Button-1>", lambda _event: self.choose_navigation())
@@ -138,9 +128,6 @@ class LayoutSourcesMixin:
     def _set_primary_drop_selected(self, path: str) -> None:
         """Показать выбранный первичный файл и подтверждённую дату выписки зелёной строкой."""
         if hasattr(self, "primary_drop_hint_label"):
-            # После выбора файла фраза «или нажмите здесь…» уже не нужна.
-            # Но сам label не снимаем с grid: строка остаётся зарезервированной,
-            # поэтому первый блок и кнопки «Нет/Да» не меняют координаты.
             self.primary_drop_hint_label.config(text="", fg=FIELD)
         if hasattr(self, "primary_selected_status_var"):
             self.primary_selected_status_var.set(self._primary_selected_status_text(path))
@@ -149,7 +136,6 @@ class LayoutSourcesMixin:
         ttk.Label(parent, text="Тип первичного документа", style="Card.TLabel", font=self._font(11)).grid(
             row=row, column=0, sticky="w", pady=self._px(4 if self._compact_ui else 5, 2)
         )
-        # Визуально это теперь такое же тёмное поле, как в референсе, без квадратной combobox-стрелки.
         self._rounded_entry_canvas(parent, self.primary_document_type_display_var, height=self._px(40, 27), calendar=False, font=self._font(12)).grid(
             row=row, column=1, sticky="ew", padx=(self._px(16, 9), self._px(14, 8)), pady=self._px(4 if self._compact_ui else 5, 2)
         )
@@ -174,10 +160,8 @@ class LayoutSourcesMixin:
         value = "Файлы не выбраны"
         if kind == "status" and self.status_files:
             value = f"Выбрано файлов: {len(self.status_files)}"
-        elif kind == "diary" and self.diary_files:
-            value = "Выбран: " + Path(self.diary_files[0]).name
-        elif kind == "diary" and self.diary_template_dir:
-            value = "Папка: " + Path(self.diary_template_dir).name
+        elif kind == "diary" and getattr(self, "_doctor_confirmed_diary_principle", ""):
+            value = "Даты: " + str(getattr(self, "_doctor_confirmed_diary_principle", ""))
         display_canvas, display = self._rounded_label_canvas(
             parent,
             value,
@@ -192,11 +176,11 @@ class LayoutSourcesMixin:
         else:
             self.diary_files_label = display
             command = self.choose_diary_files
-        button_text = "Папка" if kind == "diary" else "Выбрать"
+        button_text = "Даты" if kind == "diary" else "Выбрать"
         self._small_neon_button(parent, text=button_text, command=command).grid(row=row, column=2, sticky="ew", pady=self._px(4 if self._compact_ui else 5, 2))
 
     def _diary_compact_row(self, parent, row: int) -> None:
-        """Компактный блок выбора текстов и дат дневников."""
+        """Компактный блок выбора текстов и календарного принципа дневников."""
         ttk.Label(parent, text="Дневники", style="Card.TLabel", font=self._font(11)).grid(
             row=row, column=0, sticky="w", pady=self._px(2, 1)
         )
@@ -215,7 +199,7 @@ class LayoutSourcesMixin:
         self.status_files_label.grid(row=0, column=0, sticky="ew")
         self.diary_files_label = tk.Label(
             info,
-            text="Даты: не выбраны",
+            text="Даты: календарь программы",
             bg=PANEL,
             fg=MUTED,
             anchor="w",
@@ -238,6 +222,6 @@ class LayoutSourcesMixin:
             buttons,
             text="Даты",
             command=self.choose_diary_files,
-            selected=lambda: bool(self.diary_files or getattr(self, "diary_template_dir", "")),
+            selected=lambda: bool(getattr(self, "_doctor_confirmed_diary_day_offsets", ()) or getattr(self, "_doctor_confirmed_diary_hour_offsets", ())),
         )
         self.diary_dates_button.grid(row=0, column=1, sticky="ew", padx=(self._px(4, 2), 0))
