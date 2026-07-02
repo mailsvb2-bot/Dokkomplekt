@@ -85,13 +85,15 @@ def _get_var(app: object, name: str) -> str:
 
 
 def _set_confirmed_schedule(app: object, spec: DiaryScheduleSpec, choice_text: str = "") -> DiaryScheduleSpec:
+    description = describe_schedule(spec)
     setattr(app, "_doctor_confirmed_diary_day_offsets", tuple(spec.day_offsets))
     setattr(app, "_doctor_confirmed_diary_hour_offsets", tuple(spec.hour_offsets))
-    setattr(app, "_doctor_confirmed_diary_principle", choice_text or describe_schedule(spec))
+    setattr(app, "_doctor_confirmed_diary_principle", description)
+    setattr(app, "_doctor_confirmed_diary_choice", str(choice_text or "1").strip() or "1")
     try:
         var = getattr(app, "diary_calendar_principle_var", None)
         if var is not None:
-            var.set(choice_text or describe_schedule(spec))
+            var.set(description)
     except Exception as exc:
         record_soft_exception("diary_creation_wizard.set_principle_var", exc)
     try:
@@ -132,7 +134,7 @@ def prompt_diary_calendar_principle(app: object) -> bool:
         _set_confirmed_schedule(app, default_calendar_diary_schedule(), "1")
         return True
 
-    current = str(getattr(app, "_doctor_confirmed_diary_principle", "") or "").strip() or "1"
+    current = str(getattr(app, "_doctor_confirmed_diary_choice", "") or "").strip() or "1"
     prompt = (
         "Как составлять дневники?\n\n"
         "1 — ежедневно, начиная со следующего дня после госпитализации (+1, +2, +3...)\n"
