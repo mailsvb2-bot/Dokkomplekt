@@ -14,8 +14,9 @@ from diary_gender import adapt_text_to_patient_gender, detect_gender_from_patien
 from diary_models import DiaryBatchResult
 from diary_paths import available_path, make_diary_output_name, safe_filename_part
 from diary_schedule import DEFAULT_CALENDAR_DIARY_DAY_OFFSETS, expand_day_offsets
-from diary_text_parser import clean_status_text, extract_statuses_from_docx
+from diary_text_parser import clean_status_text, extract_statuses_from_docx, remove_examinee_words
 from diary_writer import fill_diary_file
+from diary_writer_apply import NEUTRAL_FINAL_DIARY_TEXT
 from medical_docx_xml_fragments import ensure_docx_compatible, existing_word_file
 from medical_formatting import redact_technical_text, safe_filename, technical_ref, technical_report_path
 
@@ -244,6 +245,37 @@ def _build_dated_entries(
     return tuple(entries)
 
 
+def _split_regular_and_final_text_diary_dates(
+    dates: Sequence[date],
+    *,
+    discharge_date_value: date | None,
+    force_final_diary: bool,
+) -> tuple[tuple[date, ...], date | None]:
+    """Preserve the diary meaning: regular statuses start at +1; final row is discharge.
+
+    The text-output path is the visible production diary workflow.  It must keep
+    the same semantic contract as the table workflow: ordinary diary texts fill
+    the planned observation dates, while the last/final entry is a discharge
+    entry.  When a discharge date is known, that final entry is exactly on the
+    discharge date and ordinary statuses do not consume that date.
+    """
+
+    normalized_dates = tuple(d for d in dates if isinstance(d, date))
+    if not force_final_diary:
+        return normalized_dates, None
+    if discharge_date_value is not None:
+        return tuple(d for d in normalized_dates if d < discharge_date_value), discharge_date_value
+    if not normalized_dates:
+        return normalized_dates, None
+    return normalized_dates[:-1], normalized_dates[-1]
+
+
+def _neutral_final_diary_entry(date_value: date, patient_gender: str | None) -> tuple[date, str]:
+    adapted_final_text, _changed = adapt_text_to_patient_gender(NEUTRAL_FINAL_DIARY_TEXT, patient_gender)
+    adapted_final_text = remove_examinee_words(adapted_final_text)
+    return date_value, f"{date_value:%d.%m.%y} {adapted_final_text}".rstrip()
+
+
 def _create_text_diary_document(
     output_dir: Path,
     patient_name: str,
@@ -273,7 +305,7 @@ def _fill_text_diary_batch(
     admission_date_value, discharge_date_value, gender_source_name: str, repeat_statuses: bool,
     patient_gender: str | None, sick_leave_dynamic_epicrisis: bool, treatment_correction: str,
     birth_date: str, complaints: str, treatment: str, profile_status: str, sick_leave_from: str,
-    write_report: bool, diary_day_offsets: Sequence[int],
+    write_report: bool, diary_day_offsets: Sequence[int], force_final_diary: bool,
 ) -> DiaryBatchResult:
     if admission_date_value is None:
         admission_date_value = parse_full_date(admission_value)
@@ -284,7 +316,16 @@ def _fill_text_diary_batch(
         limit=rough_limit,
         day_offsets=diary_day_offsets,
     )
-    entries = _build_dated_entries(statuses, dates, patient_gender, repeat_statuses)
+    regular_dates, final_date = _split_regular_and_final_text_diary_dates(
+        dates,
+        discharge_date_value=discharge_date_value,
+        force_final_diary=force_final_diary,
+    )
+    entries = list(_build_dated_entries(statuses, regular_dates, patient_gender, repeat_statuses))
+    final_rows_filled = 0
+    if final_date is not None:
+        entries.append(_neutral_final_diary_entry(final_date, patient_gender))
+        final_rows_filled = 1
     epicrisis_entries: list[tuple[date, str]] = []
     if sick_leave_dynamic_epicrisis:
         epicrisis_base_date = _dynamic_epicrisis_base_date(admission_date_value, sick_leave_from)
@@ -311,11 +352,12 @@ def _fill_text_diary_batch(
             "Карточка пациента: обезличена",
             "Технический идентификатор: " + technical_ref(patient_name, gender_source_name, admission_value),
             f"Дневниковых дат: {len(dates)}",
+            f"Финальных записей: {final_rows_filled}",
             f"Динамических эпикризов: {len(epicrisis_entries)}",
         ]
         report_path = technical_report_path(result_dir, "ОТЧЁТ_дневники.txt")
         report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return DiaryBatchResult([created], report_path, 1, len(entries), len(entries), 0, len(epicrisis_entries), 0, 0, 0)
+    return DiaryBatchResult([created], report_path, 1, len(entries), len(entries), 0, final_rows_filled, 0, 0, 0)
 
 
 def fill_diary_batch(
@@ -379,6 +421,7 @@ def fill_diary_batch(
             complaints=complaints, treatment=treatment, profile_status=profile_status,
             sick_leave_from=sick_leave_from, write_report=write_report,
             diary_day_offsets=tuple(int(x) for x in diary_day_offsets),
+            force_final_diary=force_final_diary,
         )
         if open_result_folder:
             open_folder(result_dir)
