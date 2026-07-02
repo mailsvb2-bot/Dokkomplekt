@@ -1,9 +1,4 @@
-"""Adapters between the old production ``PatientData`` and universal ``PatientCase``.
-
-The universal renderer should not import or depend on the old DOCX renderer.
-This small adapter keeps the boundary explicit: old parser output in,
-semantic field container out.
-"""
+"""Adapters between the old production ``PatientData`` and universal ``PatientCase``."""
 
 from __future__ import annotations
 
@@ -13,6 +8,14 @@ from typing import Mapping
 from icd10_f_search import normalize_required_diagnosis_with_icd10
 from medical_models import PatientData
 from universal_fields import PatientCase
+
+
+def _first_text(*values: str) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
 
 
 def _icd10_code_from_diagnosis(value: str) -> str:
@@ -30,9 +33,13 @@ def _labs_results_for_case(data: PatientData) -> str:
 def patient_data_to_case(data: PatientData, *, source_document: str = "") -> PatientCase:
     """Convert legacy PatientData, including popup requisites, into PatientCase."""
     case = PatientCase()
+    objective_status = _first_text(data.somatic_status, data.mental_status)
+    discharge_condition = _first_text(data.epi_text, data.somatic_status, data.mental_status)
+    treatment_result = _first_text(data.epi_text, data.additional_info_text)
     pairs = {
         "patient.fio": data.output_fio or data.fio,
         "patient.birth_date": data.birth,
+        "patient.age": data.birth,
         "patient.address": data.registered,
         "patient.work": data.work_org,
         "patient.position": data.position,
@@ -49,11 +56,17 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
         "expert.sick_leave_needed": data.expert_sick_leave_needed,
         "expert.sick_leave_from": data.expert_sick_leave_from,
         "expert.sick_leave_number": data.expert_sick_leave_number,
+        "status.objective": objective_status,
         "status.mental": data.mental_status,
         "status.somatic": data.somatic_status,
         "diagnosis.main": data.diagnosis,
         "diagnosis.icd10": _icd10_code_from_diagnosis(data.diagnosis),
         "treatment.plan": data.treatment_plan,
+        "condition.discharge": discharge_condition,
+        "treatment.result": treatment_result,
+        "epicrisis.text": data.epi_text,
+        "additional.info": data.additional_info_text,
+        "recommendations": data.additional_info_text,
         "labs.results": _labs_results_for_case(data),
         "labs.source": data.labs_source,
         "labs.date_policy": data.labs_date_policy,
@@ -75,7 +88,6 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
         "sick_leave_vk.work": data.sick_leave_vk_work_org,
         "sick_leave_vk.position": data.sick_leave_vk_position,
         "sick_leave_vk.work_position": data.sick_leave_vk_work_position,
-        "recommendations": "",
         "doctor.name": data.doctor,
         "head.name": data.head,
     }
