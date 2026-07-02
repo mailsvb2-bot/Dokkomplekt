@@ -124,8 +124,15 @@ class ActionsCreationExecutionMixin:
 
 
     def _show_created_document_preview(self, created_files: list[Path]) -> None:
-        """Show the first lines of the first created DOCX so the doctor sees the result immediately."""
-        if os.environ.get("CI") or not created_files:
+        """Show a DOCX preview only when an explicit diagnostic flag is enabled.
+
+        Production creation must not open an unsolicited modal window after the
+        doctor has already passed the preflight and received saved files.  The old
+        unconditional preview looked like a random popup in the normal workflow.
+        Keep the helper as opt-in diagnostics for support sessions only.
+        """
+        enabled = os.environ.get("MEDICAL_AUTOFILL_SHOW_CREATED_PREVIEW", "").strip().lower() in {"1", "true", "yes", "on"}
+        if os.environ.get("CI") or not enabled or not created_files:
             return
         first = Path(created_files[0])
         if first.suffix.lower() not in {".docx", ".docm"}:
@@ -287,4 +294,3 @@ class ActionsCreationExecutionMixin:
         opened_folder = self._open_output_folder_after_creation(created_files=created_files, creation_report=creation_report)
         self._set_status("Готово: файлы сохранены")
         self._log("\n✅ Готово: файлы сохранены.{}\n".format(" Папка результата открыта." if opened_folder else ""))
-
