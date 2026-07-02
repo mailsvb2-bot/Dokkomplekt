@@ -275,7 +275,7 @@ def _create_text_diary_document(
     for item_date, text in epicrisis_entries:
         lines = str(text or "").splitlines()
         first_line = f"{item_date:%d.%m.%y} {lines[0] if lines else ''}".rstrip()
-        blocks.append((item_date, 1, tuple([first_line, *lines[1:])))
+        blocks.append((item_date, 1, tuple([first_line, *lines[1:]])))
     for _item_date, block_kind, lines in sorted(blocks, key=lambda block: (block[0], block[1])):
         if block_kind == 1 and doc.paragraphs:
             doc.add_paragraph("")
