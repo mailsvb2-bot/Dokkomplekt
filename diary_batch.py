@@ -79,10 +79,10 @@ def dynamic_epicrisis_dates(admission: date, *, discharge_date: date | None = No
     result: list[date] = []
     current = admission + timedelta(days=10)
     while len(result) < limit:
-        if discharge_date is not None and current > discharge_date:
+        if discharge_date is not None and current >= discharge_date:
             break
         adjusted = next_working_day(current, used=result)
-        if discharge_date is not None and adjusted > discharge_date:
+        if discharge_date is not None and adjusted >= discharge_date:
             break
         result.append(adjusted)
         current += timedelta(days=10)
@@ -199,6 +199,27 @@ def _calendar_text_diary_dates(
     return tuple(result)
 
 
+def _text_diary_dates(
+    admission_date_value: date,
+    discharge_date_value: date | None,
+    *,
+    limit: int,
+    day_offsets: Sequence[int] = (),
+) -> tuple[date, ...]:
+    """Choose dates for text-output diaries.
+
+    UI/wizard calls pass explicit program-calendar offsets and therefore start
+    at admission +1 day.  Direct low-level API callers that do not pass a
+    schedule keep the legacy text-output contract and start from admission day;
+    this preserves older integrations such as the Polish full-scenario test.
+    """
+
+    explicit_offsets = tuple(int(item) for item in day_offsets)
+    if explicit_offsets:
+        return _calendar_text_diary_dates(admission_date_value, discharge_date_value, limit=limit, day_offsets=explicit_offsets)
+    return default_observation_diary_dates(admission_date_value, limit=limit, discharge_date=discharge_date_value)
+
+
 def _build_dated_entries(
     statuses: Sequence[str],
     dates: Sequence[date],
@@ -257,7 +278,7 @@ def _fill_text_diary_batch(
     if admission_date_value is None:
         admission_date_value = parse_full_date(admission_value)
     rough_limit = max(10, min(120, (discharge_date_value - admission_date_value).days + 10)) if discharge_date_value else max(10, len(statuses) or 10)
-    dates = _calendar_text_diary_dates(
+    dates = _text_diary_dates(
         admission_date_value,
         discharge_date_value,
         limit=rough_limit,
