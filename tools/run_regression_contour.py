@@ -28,6 +28,7 @@ COMMANDS: tuple[tuple[str, ...], ...] = (
         "tests/test_diary_filler_donor_parity_v1490.py",
         "tests/test_regression_state_overlay_v1491.py",
         "tests/test_build_check_wiring_v1495.py",
+        "tests/test_user_regressions_v1493.py",
         "tests/test_diary_manual_date_priority_v1496.py",
         "tests/test_diary_user_emulation_matrix_v1497.py",
     ),
