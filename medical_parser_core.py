@@ -96,6 +96,13 @@ class MedicalParserCoreMixin:
             if value:
                 setattr(data, field_name, value)
 
+        if data.treatment_plan.strip():
+            # User-facing contract: if treatment text was actually extracted from
+            # the primary DOCX, the creation flow must not ask the doctor to type
+            # the same treatment again only because the section-marker detector was
+            # stricter than the block parser.
+            data.has_treatment_section = True
+
         data.admission_date = extract_admission_date_from_primary_text(text) or self._extract_admission_date(text)
         self._repair_compact_demographics(data, text)
         self._repair_work_details(data, text)
