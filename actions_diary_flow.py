@@ -20,16 +20,20 @@ class ActionsDiaryFlowMixin:
         if not self.status_files:
             raise ValueError("Выберите файл(ы) с текстами дневников. Тексты можно выбирать из DOCX/DOCM/DOC.")
 
-        if getattr(self, "diary_files", None) and getattr(self, "_diary_files_auto_selected", False):
+        # Visible production workflow: diaries are generated as a plain text DOCX
+        # from doctor-owned status texts and the program calendar.  Old 01-31
+        # table templates remain available only through lower-level compatibility
+        # paths; a stale manually selected date-table file must not switch the UI
+        # back to table output after the doctor chose «Тексты».
+        if getattr(self, "diary_files", None):
             self.diary_files = []
-            self._diary_files_auto_selected = False
-            try:
-                self._update_diary_template_label(success=True)
-            except Exception as exc:
-                record_soft_exception("actions_diary_flow.clear_auto_date_template", exc)
-        manual_date_table = bool(getattr(self, "diary_files", None)) and not getattr(self, "_diary_files_auto_selected", False)
-        text_output = not manual_date_table
-        self._diary_text_output_enabled = bool(text_output)
+        self._diary_files_auto_selected = False
+        try:
+            self._update_diary_template_label(success=True)
+        except Exception as exc:
+            record_soft_exception("actions_diary_flow.force_text_output_label", exc)
+        text_output = True
+        self._diary_text_output_enabled = True
         try:
             from diary_creation_wizard import confirm_diary_creation
             if not confirm_diary_creation(self):
@@ -66,7 +70,7 @@ class ActionsDiaryFlowMixin:
         treatment_correction = str(getattr(getattr(self, "diary_treatment_correction_var", None), "get", lambda: "")() or "").strip()
         result = fill_diary_batch(
             status_files=self.status_files,
-            diary_files=[] if text_output else self.diary_files,
+            diary_files=[],
             output_dir=str(self._result_output_dir()),
             patient_name=diary_patient_name,
             admission_value=diary_admission_value,
