@@ -243,7 +243,8 @@ def assert_diary_creation_wizard_lock() -> None:
     text = review.as_text()
     if review.ok or "МАСТЕР ДНЕВНИКОВ" not in text or "Принцип дат:" not in text:
         raise AssertionError("Diary wizard must block incomplete diary state and show calendar principle")
-    if "таблица дневников" in text.lower() or "шаблоны дат" in text.lower():
-        raise AssertionError("Diary wizard must not expose legacy table/date-template wording")
+    forbidden = ("табличный режим", "устаревший шаблон")
+    if any(item in text.lower() for item in forbidden):
+        raise AssertionError("Diary wizard must present only the single text-calendar route")
     if "текстовый DOCX по календарю программы" not in text:
         raise AssertionError("Diary wizard must present the single text-calendar route")
