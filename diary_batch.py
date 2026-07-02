@@ -371,8 +371,7 @@ def fill_diary_batch(
         raise ValueError("Сначала выберите тексты дневников. Даты берутся из календарного принципа программы, а не из старой таблицы дневников.")
 
     try:
-        admission_datetime_value = parse_full_datetime(admission_value)
-        admission_date_value = admission_datetime_value.date()
+        admission_date_value = parse_full_datetime(admission_value).date()
     except ValueError:
         admission_date_value = None
     discharge_date_value = parse_optional_discharge_date(discharge_value)
