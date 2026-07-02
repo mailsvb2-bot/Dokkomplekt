@@ -34,8 +34,8 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
     """Convert legacy PatientData, including popup requisites, into PatientCase."""
     case = PatientCase()
     objective_status = _first_text(data.somatic_status, data.mental_status)
-    discharge_condition = _first_text(data.epi_text, data.somatic_status, data.mental_status)
-    treatment_result = _first_text(data.epi_text, data.additional_info_text)
+    discharge_condition = _first_text(data.epi_text, data.additional_info_text, data.somatic_status, data.mental_status)
+    treatment_result = _first_text(data.epi_text, data.additional_info_text, data.somatic_status, data.mental_status)
     pairs = {
         "patient.fio": data.output_fio or data.fio,
         "patient.birth_date": data.birth,
