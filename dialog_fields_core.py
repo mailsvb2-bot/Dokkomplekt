@@ -395,7 +395,8 @@ def open_labs_selection_scanner(app, parent) -> None:
         return
     try:
         scan = capture_labs_with_mouse(parent=parent)
-    except Exception:
+    except Exception as exc:
+        record_soft_exception("dialog_fields_core.scan_labs_primary", exc)
         try:
             text = capture_text_with_mouse(parent=parent)
             scan = SimpleNamespace(blocks=[text.strip()] if str(text or "").strip() else [])
@@ -461,7 +462,7 @@ def attach_additional_info_buttons(app, parent, body: tk.Frame, *, row: int, col
 
 
 def choose_epi_file_for_app(app, *, parent=None) -> bool:
-    path = filedialog.askopenfilename(title="Выберите файл ЭПИ", filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docx *.docm"), ("Text", "*.txt"), ("All files", "*.*")], parent=parent)
+    path = filedialog.askopenfilename(title="Выберите файл ЭПИ", filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docm *.docx"), ("Text", "*.txt"), ("All files", "*.*")], parent=parent)
     if not path:
         return False
     try:
