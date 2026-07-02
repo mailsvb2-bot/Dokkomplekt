@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import date
+
+from diary_batch import _dynamic_epicrisis_base_date, dynamic_epicrisis_dates
 from diary_dates import parse_full_date, parse_full_datetime, parse_optional_discharge_date
 from diary_schedule import DiaryScheduleSpec, expand_day_offsets, expand_hour_intervals
 from diary_text_parser import clean_status_text, looks_like_status, normalize_text
@@ -42,6 +45,11 @@ def test_diary_user_emulation_matrix_covers_fifty_plus_runtime_contracts():
     check(expand_hour_intervals((4,), 3) == (4, 8, 12), "hour schedule 3")
     check(expand_hour_intervals((), 3) == (), "empty hour schedule")
 
+    base_date = _dynamic_epicrisis_base_date(date(2026, 6, 1), "10.06.2026")
+    check(base_date == date(2026, 6, 10), "summary start date")
+    check(dynamic_epicrisis_dates(base_date, discharge_date=date(2026, 6, 30), limit=2) == (date(2026, 6, 22),), "summary working day")
+    check(_dynamic_epicrisis_base_date(date(2026, 6, 10), "01.06.2026") == date(2026, 6, 10), "summary not before admission")
+
     restored = DiaryScheduleSpec.from_dict({"mode": "hourly", "day_offsets": [True, 0, "1", -1], "hour_offsets": [False, "2", 3], "confidence": "bad"})
     check(restored.mode == "hourly", "mode")
     check(restored.day_offsets == (0, 1), "days")
@@ -63,4 +71,4 @@ def test_diary_user_emulation_matrix_covers_fifty_plus_runtime_contracts():
         value = f"{day:02d}.06.2026"
         check(parse_full_date(value).day == day, value)
 
-    check(checks >= 50, f"expected at least 50 checks, got {checks}")
+    check(checks >= 53, f"expected at least 53 checks, got {checks}")
