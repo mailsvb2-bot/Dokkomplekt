@@ -91,6 +91,25 @@ def test_discharge_custom_template_receives_primary_case_fields(tmp_path: Path) 
     assert "режим, терапия" in text
 
 
+def test_discharge_case_uses_additional_info_when_epi_text_is_absent() -> None:
+    from medical_models import PatientData
+    from universal_case_adapter import patient_data_to_case
+
+    data = PatientData(
+        fio="Сидоров Семён Семёнович",
+        case_number="888",
+        diagnosis="J20 Острый бронхит",
+        treatment_plan="режим, терапия",
+        additional_info_text="выписывается с улучшением, даны рекомендации",
+    )
+
+    case = patient_data_to_case(data, source_document="primary.docx")
+
+    assert case.get("condition.discharge") == "выписывается с улучшением, даны рекомендации"
+    assert case.get("treatment.result") == "выписывается с улучшением, даны рекомендации"
+    assert case.get("recommendations") == "выписывается с улучшением, даны рекомендации"
+
+
 def test_custom_requirement_flags_do_not_depend_on_overlay_super_method() -> None:
     from actions_universal_flow import ActionsUniversalFlowMixin
     from universal_profiles import DocumentPack, DocumentTemplateSpec
