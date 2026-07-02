@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from datetime import date
 
-from diary_batch import _dynamic_epicrisis_base_date, dynamic_epicrisis_dates
+from diary_batch import _calendar_text_diary_dates, _dynamic_epicrisis_base_date, dynamic_epicrisis_dates
 from diary_dates import parse_full_date, parse_full_datetime, parse_optional_discharge_date
-from diary_schedule import DiaryScheduleSpec, expand_day_offsets, expand_hour_intervals
+from diary_schedule import (
+    DiaryScheduleSpec,
+    default_calendar_diary_schedule,
+    diary_calendar_schedule_from_choice,
+    expand_day_offsets,
+    expand_hour_intervals,
+)
 from diary_text_parser import clean_status_text, looks_like_status, normalize_text
 
 
@@ -35,6 +41,13 @@ def test_diary_user_emulation_matrix_covers_fifty_plus_runtime_contracts():
     check(parse_full_datetime("02.06.2026").hour == 0, "date hour")
     check(parse_optional_discharge_date("") is None, "empty discharge")
     check(parse_optional_discharge_date("10.06.2026").isoformat() == "2026-06-10", "discharge")
+
+    check(default_calendar_diary_schedule().day_offsets[:4] == (1, 2, 3, 4), "default program calendar")
+    check(diary_calendar_schedule_from_choice("1").day_offsets[:3] == (1, 2, 3), "choice daily")
+    check(diary_calendar_schedule_from_choice("2").day_offsets[:4] == (1, 2, 3, 7), "choice clinical")
+    check(diary_calendar_schedule_from_choice("+1, +2, +5").day_offsets == (1, 2, 5), "choice manual")
+    check(_calendar_text_diary_dates(date(2026, 6, 1), date(2026, 6, 4), limit=10, day_offsets=()) == (date(2026, 6, 2), date(2026, 6, 3), date(2026, 6, 4)), "calendar starts +1")
+    check(_calendar_text_diary_dates(date(2026, 6, 1), date(2026, 6, 10), limit=3, day_offsets=(1, 3, 7)) == (date(2026, 6, 2), date(2026, 6, 4), date(2026, 6, 8)), "manual calendar offsets")
 
     check(expand_day_offsets((0, 1, 2, 7), 7) == (0, 1, 2, 7, 12, 17, 22), "day schedule 1")
     check(expand_day_offsets((1, 2, 5), 6) == (1, 2, 5, 8, 11, 14), "day schedule 2")
@@ -71,4 +84,4 @@ def test_diary_user_emulation_matrix_covers_fifty_plus_runtime_contracts():
         value = f"{day:02d}.06.2026"
         check(parse_full_date(value).day == day, value)
 
-    check(checks >= 53, f"expected at least 53 checks, got {checks}")
+    check(checks >= 59, f"expected at least 59 checks, got {checks}")
