@@ -23,7 +23,7 @@ class PatientData:
     output_fio: str = ""
     birth: str = ""
     registered: str = ""
-    psych_account: str = ""
+    profile_observation: str = ""
     work_org: str = ""
     position: str = ""
     sick_leave: str = ""
@@ -42,7 +42,7 @@ class PatientData:
     complaints: str = ""
     life_anamnesis: str = ""
     disease_anamnesis: str = ""
-    mental_status: str = ""
+    profile_status: str = ""
     somatic_status: str = ""
     examination_plan: str = ""
     treatment_plan: str = ""
@@ -124,7 +124,7 @@ class PatientData:
             ("жалобы", self.complaints),
             ("анамнез жизни", self.life_anamnesis),
             ("анамнез заболевания", self.disease_anamnesis),
-            ("профильный статус", self.mental_status),
+            ("профильный статус", self.profile_status),
             ("диагноз", self.diagnosis),
             ("план лечения", self.treatment_plan),
         ]
