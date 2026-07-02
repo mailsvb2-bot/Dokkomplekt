@@ -33,13 +33,14 @@ def format_preview(data: PatientData) -> str:
         f"Жалобы: {shorten(data.complaints, 180) or '—'}",
         f"Анамнез жизни: {len(data.life_anamnesis)} символов",
         f"Анамнез заболевания: {len(data.disease_anamnesis)} символов",
-        f"Профильный статус: {len(data.mental_status)} символов",
+        f"Профильный статус: {len(data.profile_status)} символов",
     ]
     if data.warnings:
         lines.append("")
         lines.append("⚠️ Предупреждения:")
         lines.extend(f"• {w}" for w in data.warnings)
     return "\n".join(lines)
+
 
 
 def shorten(text: str, limit: int) -> str:
