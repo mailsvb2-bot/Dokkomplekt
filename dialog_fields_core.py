@@ -19,6 +19,8 @@ from dialog_fields_popup import DialogDiagnosisPopup
 from printer_platform import open_desktop_path  # noqa: F401 - architecture contract: UI opens paths through platform helper
 
 
+LABS_MOUSE_SCANNER_HINT = "Выделите мышкой блок с анализами"
+
 
 def call_prompt_fields_compatible(
     owner,
@@ -197,7 +199,7 @@ def prompt_fields_dialog(
                 record_soft_exception("dialog_fields_core.labs_required_state", exc)
                 labs_ready = True
             if not labs_ready:
-                error_label.config(text="Выберите вариант по анализам: нет анализов, вставить/ввести, сканер или загрузить файл.")
+                error_label.config(text="Выберите вариант по анализам: Без анализов, Ввести анализы, Сканер мышкой или Загрузить файл.")
                 return
         for idx, ((label, _initial), normalized_value) in enumerate(zip(rows, values)):
             explicit_key = date_field_keys[idx] if date_field_keys is not None and idx < len(date_field_keys) else None
@@ -343,9 +345,9 @@ def build_labs_popup_block(app, body: tk.Frame, *, row: int, columnspan: int, pa
             record_soft_exception("dialog_fields_core.load_labs", exc, detail=str(path))
             messagebox.showwarning("Анализы", f"Не удалось прочитать анализы:\n{exc}", parent=parent)
 
-    tk.Button(frame, text="Нет анализов", command=no_labs, bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=0, sticky="ew", padx=(0, 6))
-    tk.Button(frame, text="Вставить / ввести", command=lambda: _prompt_manual_labs(app, parent), bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=1, sticky="ew", padx=(0, 6))
-    tk.Button(frame, text="Файл", command=load_labs, bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=2, sticky="ew", padx=(0, 6))
+    tk.Button(frame, text="Без анализов", command=no_labs, bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=0, sticky="ew", padx=(0, 6))
+    tk.Button(frame, text="Ввести анализы", command=lambda: _prompt_manual_labs(app, parent), bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=1, sticky="ew", padx=(0, 6))
+    tk.Button(frame, text="Загрузить файл", command=load_labs, bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=2, sticky="ew", padx=(0, 6))
     tk.Button(frame, text="Сканер мышкой", command=lambda: open_labs_selection_scanner(app, parent), bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=3, sticky="ew", padx=(0, 6))
     tk.Button(frame, text="Сканер Word", command=lambda: open_external_word_selection_scanner_dialog(app, parent), bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=4, sticky="ew")
     tk.Label(frame, textvariable=app.labs_source_path_var, bg=PANEL_3, fg=MUTED, font=("Segoe UI", 8), anchor="w").grid(row=2, column=0, columnspan=5, sticky="ew", pady=(6, 0))
@@ -456,6 +458,8 @@ def open_labs_selection_scanner(app, parent) -> None:
         messagebox.showwarning("Сканер мышкой", f"Не удалось запустить сканер:\n{exc}", parent=parent)
         return
     try:
+        scan = capture_labs_with_mouse(parent=parent, prompt=LABS_MOUSE_SCANNER_HINT)
+    except TypeError:
         scan = capture_labs_with_mouse(parent=parent)
     except Exception as exc:
         record_soft_exception("dialog_fields_core.scan_labs_primary", exc)
@@ -467,7 +471,7 @@ def open_labs_selection_scanner(app, parent) -> None:
             messagebox.showwarning("Сканер мышкой", f"Не удалось получить текст анализов:\n{exc}", parent=parent)
             return
     if not scan.blocks:
-        messagebox.showwarning("Сканер мышкой", "В документе не найден текст анализов. Попробуйте ещё раз или вставьте текст вручную.", parent=parent)
+        messagebox.showwarning("Сканер мышкой", "В документе не найден текст анализов. Выделите мышкой блок с анализами или вставьте текст вручную.", parent=parent)
         return
     win = tk.Toplevel(parent)
     win.withdraw()
