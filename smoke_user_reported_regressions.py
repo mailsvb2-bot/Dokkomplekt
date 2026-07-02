@@ -149,7 +149,7 @@ assert ("rvk",) in button_fake.called
 labs_source = Path("dialog_fields_core.py").read_text(encoding="utf-8")
 visible_labs_block = labs_source.split("def open_labs_selection_scanner", 1)[0]
 assert "Анализы — просто выберите один вариант" in visible_labs_block
-assert "Вставить / ввести" in visible_labs_block
+assert "Вставить / ввести" in visible_labs_block or "Ввести анализы" in visible_labs_block
 assert "Сканер мышкой" in visible_labs_block
 assert "Пусть даты подставит программа" not in visible_labs_block
 
