@@ -1,8 +1,8 @@
 # MedicalDiaryAutofill / Dokkomplekt
 
-Version: `v1.4.90_discharge_custom_case_propagation_SOURCE`
+Version: `v1.4.89_release_gate_runtime_isolation_SOURCE`
 
-## v1.4.90 — discharge custom case propagation
+## Hotfix — discharge custom case propagation
 
 Fixes doctor-owned discharge epicrisis generation so parsed primary-document data and doctor-confirmed UI/popup values reach custom DOCX placeholders instead of producing empty output. The regression contour now includes a doctor-owned discharge template replay that checks patient identity, case number, dates, complaints, anamnesis, status, discharge condition, diagnosis and treatment in the generated DOCX.
 
@@ -64,6 +64,6 @@ python project_auditor.py . --ci --quiet
 ## Regression policy
 
 `v1.4.85_baseline_foundation_SOURCE` remains the behavior baseline.  Starting
-with `v1.4.90_discharge_custom_case_propagation_SOURCE`, a future version is allowed to
+with `v1.4.89_release_gate_runtime_isolation_SOURCE`, a future version is allowed to
 be considered better only if it preserves `USER_BEHAVIOR_CONTRACT.md` and
 passes `REGRESSION_CONTOUR.md` / `REGRESSION_MATRIX.md` checks.
