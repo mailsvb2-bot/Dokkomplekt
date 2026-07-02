@@ -4,7 +4,8 @@ import inspect
 import re
 import tkinter as tk
 from pathlib import Path  # noqa: F401 - kept for historical external imports/gates
-from tkinter import filedialog, messagebox, ttk
+from types import SimpleNamespace
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from app_config import ACCENT, ACCENT_2, ERROR, FIELD, FIELD_BORDER, MUTED, PANEL, PANEL_3, TEXT
 from dialog_fields_linking import attach_linked_field_mirroring
@@ -15,6 +16,7 @@ from medical_text_utils import sanitize_case_number_candidate
 from medical_parser_sanitize import sanitize_diagnosis
 from icd10_f_search import normalize_required_diagnosis_with_icd10
 from dialog_fields_popup import DialogDiagnosisPopup
+from printer_platform import open_desktop_path  # noqa: F401 - architecture contract: UI opens paths through platform helper
 
 
 
@@ -28,16 +30,7 @@ def call_prompt_fields_compatible(
     include_labs_block: bool = False,
     date_field_keys: list[str | None] | None = None,
 ) -> list[str] | None:
-    """Call ``owner._prompt_fields`` without letting optional UI kwargs break old fakes.
-
-    Runtime uses :class:`DialogFieldsMixin`, which supports all parameters.
-    A lot of smoke/acceptance objects intentionally monkeypatch ``_prompt_fields``
-    with tiny lambdas that only accept the fields they check.  New popup features
-    must not break those harnesses, and old external overrides should continue to
-    work: unsupported optional parameters are dropped by signature, not by fragile
-    one-off ``try/except TypeError`` blocks in each dialog.
-    """
-
+    """Call ``owner._prompt_fields`` without letting optional UI kwargs break old fakes."""
     prompt = getattr(owner, "_prompt_fields")
     kwargs = {
         "title": title,
@@ -47,8 +40,7 @@ def call_prompt_fields_compatible(
         "include_labs_block": include_labs_block,
         "date_field_keys": date_field_keys,
     }
-    supported = _filter_prompt_fields_kwargs(prompt, kwargs)
-    return prompt(**supported)
+    return prompt(**_filter_prompt_fields_kwargs(prompt, kwargs))
 
 
 def _filter_prompt_fields_kwargs(prompt, kwargs: dict) -> dict:
@@ -65,8 +57,7 @@ def _filter_prompt_fields_kwargs(prompt, kwargs: dict) -> dict:
         if param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
     }
     required = {"title", "rows"}
-    result = {key: value for key, value in kwargs.items() if key in required or key in accepted}
-    return result
+    return {key: value for key, value in kwargs.items() if key in required or key in accepted}
 
 
 def prompt_fields_dialog(
@@ -79,7 +70,6 @@ def prompt_fields_dialog(
     include_labs_block: bool = False,
     date_field_keys: list[str | None] | None = None,
 ) -> list[str] | None:
-    """Implement the prompt_fields_dialog workflow with validation, UI state updates and diagnostics."""
     win = tk.Toplevel(self.root)
     win.title(title)
     win.configure(bg=PANEL)
@@ -94,16 +84,17 @@ def prompt_fields_dialog(
     entry_vars: list[tk.StringVar] = []
     entry_auto_values: list[str] = []
     diagnosis_popup = DialogDiagnosisPopup(
-        win, self.root, language_id=str(getattr(self, "_diagnosis_language", lambda: self.ui_language_var.get() if hasattr(self, "ui_language_var") else "ru")())
+        win,
+        self.root,
+        language_id=str(getattr(self, "_diagnosis_language", lambda: self.ui_language_var.get() if hasattr(self, "ui_language_var") else "ru")()),
     )
 
-    body, footer, _wheel = _build_scrollable_prompt_body(win, title)
-
+    body, footer, wheel = _build_scrollable_prompt_body(win, title)
     for idx, (label, initial) in enumerate(rows, start=1):
         entry, var = _build_field_row(self, body, idx, label, initial, width)
         if diagnosis_popup.is_diagnosis_label(label):
             diagnosis_popup.attach(entry, var)
-        entry.bind("<MouseWheel>", _wheel, add="+")
+        entry.bind("<MouseWheel>", wheel, add="+")
         entries.append(entry)
         entry_vars.append(var)
         entry_auto_values.append(initial)
@@ -123,18 +114,16 @@ def prompt_fields_dialog(
         record_soft_exception("dialog_fields_core.additional_info_block", exc)
 
     attach_linked_field_mirroring(entry_vars, entry_auto_values, linked_groups)
-
     error_label = tk.Label(footer, text="", bg=PANEL, fg=ERROR, font=("Segoe UI", 8))
     error_label.grid(row=0, column=0, sticky="w", pady=(0, 4))
     buttons = _build_buttons_frame(footer, 1)
 
-    def _validate_and_normalize(label: str, value: str) -> tuple[str | None, str]:
+    def validate_and_normalize(label: str, value: str) -> tuple[str | None, str]:
         label_l = (label or "").strip().lower().replace("ё", "е")
         value = (value or "").strip()
         if not value:
             return None, f"Заполните поле: {label}"
-        is_date_label = any(marker in label_l for marker in ("дата", "data", "urodzenia", "przyjęcia", "przyjecia", "wypisu", "hospitalizacji"))
-        if is_date_label:
+        if any(marker in label_l for marker in ("дата", "data", "urodzenia", "przyjęcia", "przyjecia", "wypisu", "hospitalizacji")):
             parsed = parse_date(value)
             if not parsed:
                 return None, f"Проверьте формат даты: {label}"
@@ -147,32 +136,26 @@ def prompt_fields_dialog(
                 except Exception as exc:
                     record_soft_exception("dialog_fields_core.date_episode_validation", exc, detail=f"{label}: {value}")
             return normalized_date, ""
-        is_diagnosis_label = any(marker in label_l for marker in ("диагноз", "мкб", "icd", "mkb", "rozpoznanie", "diagnoza", "kod rozpoznania"))
-        if is_diagnosis_label:
+        if any(marker in label_l for marker in ("диагноз", "мкб", "icd", "mkb", "rozpoznanie", "diagnoza", "kod rozpoznania")):
             sanitized = sanitize_diagnosis(value)
             compact = re.sub(r"\s+", "", sanitized.replace(",", "."))
             if re.fullmatch(r"\d{1,4}(?:\.\d+)?", compact):
                 return None, "Укажите диагноз текстом или полный шифр МКБ-10 с буквой класса, например K35 или I10."
             normalized = normalize_required_diagnosis_with_icd10(sanitized, language_id=getattr(self, "_diagnosis_language", lambda: "ru")())
             return (normalized or None), "" if normalized else "Выберите диагноз из МКБ-10 или укажите шифр с буквой класса, например K35 или I10."
-        is_case_number_label = (
+        if (
             "номер истории" in label_l
             or ("истори" in label_l and "болез" in label_l)
             or ("histori" in label_l and "chorob" in label_l)
             or "nr dokumentacji" in label_l
             or "numer dokumentacji" in label_l
             or "nr karty" in label_l
-        )
-        if is_case_number_label:
+        ):
             patient_name = ""
             try:
-                if hasattr(self, "_patient_name_for_case_number_guard"):
-                    patient_name = str(self._patient_name_for_case_number_guard())
-                elif hasattr(self, "patient_name_var"):
-                    patient_name = self.patient_name_var.get().strip()
+                patient_name = str(self._patient_name_for_case_number_guard()) if hasattr(self, "_patient_name_for_case_number_guard") else self.patient_name_var.get().strip()
             except Exception as exc:
                 record_soft_exception("dialog_fields_core.case_patient_name", exc)
-                patient_name = ""
             normalized_case = sanitize_case_number_candidate(value, patient_name=patient_name)
             return (normalized_case or None), "" if normalized_case else f"Проверьте поле: {label}"
         return value, ""
@@ -196,8 +179,7 @@ def prompt_fields_dialog(
         nonlocal result
         values: list[str] = []
         for entry, (label, _initial) in zip(entries, rows):
-            raw = entry.get().strip()
-            normalized, problem = _validate_and_normalize(label, raw)
+            normalized, problem = validate_and_normalize(label, entry.get().strip())
             if normalized is None:
                 error_label.config(text=problem or f"Проверьте поле: {label}")
                 entry.focus_set()
@@ -217,9 +199,7 @@ def prompt_fields_dialog(
                 error_label.config(text="Выберите вариант по анализам: нет анализов, вставить/ввести, сканер или загрузить файл.")
                 return
         for idx, ((label, _initial), normalized_value) in enumerate(zip(rows, values)):
-            explicit_key = None
-            if date_field_keys is not None and idx < len(date_field_keys):
-                explicit_key = date_field_keys[idx]
+            explicit_key = date_field_keys[idx] if date_field_keys is not None and idx < len(date_field_keys) else None
             semantic_key = explicit_key or semantic_date_key_from_prompt(title, label)
             if semantic_key and hasattr(self, "_store_popup_date_value"):
                 if not self._store_popup_date_value(semantic_key, normalized_value, parent=win, source_label=title):
@@ -233,15 +213,12 @@ def prompt_fields_dialog(
         result = values
         close_dialog()
 
-    def cancel() -> None:
-        close_dialog()
-
-    _build_action_buttons(buttons, ok, cancel)
+    _build_action_buttons(buttons, ok, close_dialog)
     if entries:
         entries[0].focus_set()
     win.bind("<Return>", lambda _event: ok())
-    win.bind("<Escape>", lambda _event: cancel())
-    win.protocol("WM_DELETE_WINDOW", cancel)
+    win.bind("<Escape>", lambda _event: close_dialog())
+    win.protocol("WM_DELETE_WINDOW", close_dialog)
     self.root.wait_window(win)
     return result
 
@@ -323,21 +300,13 @@ def build_labs_popup_block(app, body: tk.Frame, *, row: int, columnspan: int, pa
     frame.grid(row=row, column=0, columnspan=columnspan, sticky="ew", pady=(10, 4))
     for col in range(5):
         frame.grid_columnconfigure(col, weight=1)
-    tk.Label(frame, text="Анализы", bg=PANEL_3, fg=TEXT, font=("Segoe UI", 9, "bold"), anchor="w").grid(row=0, column=0, columnspan=5, sticky="ew", pady=(0, 6))
+    tk.Label(frame, text="Анализы — просто выберите один вариант", bg=PANEL_3, fg=TEXT, font=("Segoe UI", 9, "bold"), anchor="w").grid(row=0, column=0, columnspan=5, sticky="ew", pady=(0, 6))
 
     def no_labs() -> None:
         app.labs_without_var.set(True)
         app.labs_text_var.set("")
         app.labs_source_path_var.set("")
         app.labs_date_policy_var.set("without_labs")
-
-    def paste_labs() -> None:
-        value = tk.simpledialog.askstring("Анализы", "Вставьте или введите текст анализов:", parent=parent) if hasattr(tk, "simpledialog") else ""
-        if value:
-            app.labs_text_var.set(value.strip())
-            app.labs_source_path_var.set("manual")
-            app.labs_without_var.set(False)
-            app.labs_date_policy_var.set("preserve_found_dates")
 
     def load_labs() -> None:
         path = filedialog.askopenfilename(title="Выберите файл с анализами", filetypes=[("Word/Text/PDF", "*.doc *.docx *.docm *.txt *.pdf"), ("All files", "*.*")], parent=parent)
@@ -354,25 +323,53 @@ def build_labs_popup_block(app, body: tk.Frame, *, row: int, columnspan: int, pa
             record_soft_exception("dialog_fields_core.load_labs", exc, detail=str(path))
             messagebox.showwarning("Анализы", f"Не удалось прочитать анализы:\n{exc}", parent=parent)
 
-    def scan_labs() -> None:
-        try:
-            from medical_mouse_scanner import capture_text_with_mouse
-            text = capture_text_with_mouse(parent=parent)
-            if text:
-                app.labs_text_var.set(text.strip())
-                app.labs_source_path_var.set("mouse_scanner")
-                app.labs_without_var.set(False)
-                app.labs_date_policy_var.set("preserve_found_dates")
-        except Exception as exc:
-            record_soft_exception("dialog_fields_core.scan_labs", exc)
-            messagebox.showwarning("Сканер", f"Не удалось запустить сканер:\n{exc}", parent=parent)
-
     tk.Button(frame, text="Нет анализов", command=no_labs, bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=0, sticky="ew", padx=(0, 6))
-    tk.Button(frame, text="Ввести", command=paste_labs, bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=1, sticky="ew", padx=(0, 6))
+    tk.Button(frame, text="Вставить / ввести", command=lambda: _prompt_manual_labs(app, parent), bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=1, sticky="ew", padx=(0, 6))
     tk.Button(frame, text="Файл", command=load_labs, bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=2, sticky="ew", padx=(0, 6))
-    tk.Button(frame, text="Сканер", command=scan_labs, bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=3, sticky="ew", padx=(0, 6))
+    tk.Button(frame, text="Сканер мышкой", command=lambda: open_labs_selection_scanner(app, parent), bg=FIELD, fg=TEXT, relief="flat", padx=8, pady=6).grid(row=1, column=3, sticky="ew", padx=(0, 6))
     tk.Label(frame, textvariable=app.labs_source_path_var, bg=PANEL_3, fg=MUTED, font=("Segoe UI", 8), anchor="w").grid(row=2, column=0, columnspan=5, sticky="ew", pady=(6, 0))
     return 3
+
+
+def open_labs_selection_scanner(app, parent) -> None:
+    try:
+        from medical_mouse_scanner import capture_labs_with_mouse, capture_text_with_mouse
+    except Exception as exc:
+        record_soft_exception("dialog_fields_core.import_labs_scanner", exc)
+        messagebox.showwarning("Сканер мышкой", f"Не удалось запустить сканер:\n{exc}", parent=parent)
+        return
+    try:
+        scan = capture_labs_with_mouse(parent=parent)
+    except Exception:
+        try:
+            text = capture_text_with_mouse(parent=parent)
+            scan = SimpleNamespace(blocks=[text.strip()] if str(text or "").strip() else [])
+        except Exception as exc:
+            record_soft_exception("dialog_fields_core.scan_labs", exc)
+            messagebox.showwarning("Сканер мышкой", f"Не удалось получить текст анализов:\n{exc}", parent=parent)
+            return
+    if not scan.blocks:
+        messagebox.showwarning("Сканер мышкой", "Выделенный текст анализов не найден. Попробуйте ещё раз или вставьте текст вручную.", parent=parent)
+        return
+    win = tk.Toplevel(parent)
+    win.withdraw()
+    try:
+        text = "\n".join(str(block).strip() for block in scan.blocks if str(block).strip()).strip()
+        app.labs_text_var.set(text)
+        app.labs_source_path_var.set("mouse_scanner")
+        app.labs_without_var.set(False)
+        app.labs_date_policy_var.set("preserve_found_dates")
+    finally:
+        win.destroy()
+
+
+def _prompt_manual_labs(app, parent) -> None:
+    value = simpledialog.askstring("Анализы", "Вставьте или введите текст анализов:", parent=parent)
+    if value:
+        app.labs_text_var.set(value.strip())
+        app.labs_source_path_var.set("manual")
+        app.labs_without_var.set(False)
+        app.labs_date_policy_var.set("preserve_found_dates")
 
 
 def attach_additional_info_buttons(app, parent, body: tk.Frame, *, row: int, columnspan: int = 2) -> int:
@@ -384,7 +381,7 @@ def attach_additional_info_buttons(app, parent, body: tk.Frame, *, row: int, col
     tk.Label(frame, text="Доп. информация / рекомендации", bg=PANEL_3, fg=TEXT, font=("Segoe UI", 9, "bold")).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
 
     def paste_info() -> None:
-        value = tk.simpledialog.askstring("Доп. информация", "Введите текст:", parent=parent) if hasattr(tk, "simpledialog") else ""
+        value = simpledialog.askstring("Доп. информация", "Введите текст:", parent=parent)
         if value:
             app.additional_info_text_var.set(value.strip())
             app.additional_info_source_path_var.set("manual")
