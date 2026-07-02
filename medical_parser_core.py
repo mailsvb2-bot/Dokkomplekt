@@ -14,7 +14,12 @@ from medical_docx_reader import (
     _is_birth_or_demographic_context,
     _is_primary_title_context,
 )
-from medical_admission_resolver import extract_admission_date_from_primary_docx, extract_admission_date_from_primary_text
+from medical_admission_resolver import (
+    extract_admission_date_from_primary_docx,
+    extract_admission_date_from_primary_text,
+    extract_discharge_date_from_primary_docx,
+    extract_discharge_date_from_primary_text,
+)
 from medical_text_utils import sanitize_case_number_candidate
 from medical_models import PatientData
 from medical_text_utils import sanitize_patient_data_forbidden_phrases
@@ -50,6 +55,9 @@ class MedicalParserCoreMixin:
         admission_date = extract_admission_date_from_primary_docx(path)
         if admission_date:
             data.admission_date = admission_date
+        discharge_date = extract_discharge_date_from_primary_docx(path)
+        if discharge_date:
+            data.discharge_date = discharge_date
         self._refresh_warnings(data)
         sanitize_patient_data_forbidden_phrases(data)
         return data
@@ -105,6 +113,7 @@ class MedicalParserCoreMixin:
             data.has_treatment_section = True
 
         data.admission_date = extract_admission_date_from_primary_text(text) or self._extract_admission_date(text)
+        data.discharge_date = extract_discharge_date_from_primary_text(text)
         self._repair_compact_demographics(data, text)
         self._repair_work_details(data, text)
         if data.case_number:
