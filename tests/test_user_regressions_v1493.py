@@ -89,6 +89,39 @@ def test_visible_diary_flow_forces_text_docx_not_table_template():
     assert "self.diary_files = []" in source
 
 
+def test_text_diary_calendar_starts_plus_one_and_uses_discharge_as_final(tmp_path: Path):
+    from docx import Document
+    from diary_batch import fill_diary_batch
+
+    text_source = tmp_path / "texts.docx"
+    doc = Document()
+    doc.add_paragraph("Первый обычный дневниковый статус пациента без ухудшения.")
+    doc.add_paragraph("Второй обычный дневниковый статус пациента стабилен.")
+    doc.add_paragraph("Третий обычный дневниковый статус не должен попасть на выписку.")
+    doc.save(text_source)
+
+    result = fill_diary_batch(
+        status_files=[text_source],
+        diary_files=[],
+        output_dir=tmp_path / "out",
+        patient_name="Иванов Иван Иванович",
+        admission_value="01.06.2026",
+        discharge_value="04.06.2026",
+        diary_day_offsets=(1, 2, 3),
+        repeat_statuses=True,
+        force_final_diary=True,
+        text_output=True,
+    )
+
+    assert result.final_rows_filled == 1
+    text = "\n".join(paragraph.text for paragraph in Document(result.created_files[0]).paragraphs)
+    assert "02.06.26 Первый обычный дневниковый статус" in text
+    assert "03.06.26 Второй обычный дневниковый статус" in text
+    assert "04.06.26 Состояние улучшилось" in text
+    assert "04.06.26 Третий обычный дневниковый статус" not in text
+    assert "05.06.26" not in text
+
+
 def test_created_document_preview_popup_is_diagnostic_opt_in_only(monkeypatch, tmp_path: Path):
     from actions_creation_execution import ActionsCreationExecutionMixin
     import actions_creation_execution
