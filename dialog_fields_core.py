@@ -70,6 +70,7 @@ def prompt_fields_dialog(
     include_labs_block: bool = False,
     date_field_keys: list[str | None] | None = None,
 ) -> list[str] | None:
+    """Render and validate a modal field popup without breaking nested UI contracts."""
     win = tk.Toplevel(self.root)
     win.title(title)
     win.configure(bg=PANEL)
@@ -314,6 +315,7 @@ def _apply_labs_text(app, value: str, *, source: str) -> bool:
 
 
 def build_labs_popup_block(app, body: tk.Frame, *, row: int, columnspan: int, parent: tk.Toplevel) -> int:
+    """Build the compact analyses chooser used only by popups that request labs."""
     if not all(hasattr(app, name) for name in ("labs_text_var", "labs_without_var", "labs_date_policy_var")):
         return 0
     frame = tk.Frame(body, bg=PANEL_3, padx=10, pady=8)
@@ -351,6 +353,7 @@ def build_labs_popup_block(app, body: tk.Frame, *, row: int, columnspan: int, pa
 
 
 def _prompt_manual_labs(app, parent) -> None:
+    """Collect manually pasted analyses in a nested modal without closing the caller popup."""
     win = tk.Toplevel(parent)
     win.title("Введите текст анализов")
     win.configure(bg=PANEL)
@@ -384,6 +387,7 @@ def _prompt_manual_labs(app, parent) -> None:
 
 
 def open_external_word_selection_scanner_dialog(app, parent) -> None:
+    """Open the Word scanner modal and apply selected text directly to labs state."""
     win = tk.Toplevel(parent)
     win.title("Сканер Word")
     win.configure(bg=PANEL)
@@ -444,6 +448,7 @@ def open_external_word_selection_scanner_dialog(app, parent) -> None:
 
 
 def open_labs_selection_scanner(app, parent) -> None:
+    """Capture analyses with the mouse scanner and store normalized text in labs state."""
     try:
         from medical_mouse_scanner import capture_labs_with_mouse, capture_text_with_mouse
     except Exception as exc:
@@ -475,6 +480,7 @@ def open_labs_selection_scanner(app, parent) -> None:
 
 
 def attach_additional_info_buttons(app, parent, body: tk.Frame, *, row: int, columnspan: int = 2) -> int:
+    """Attach optional additional-information controls below the main popup fields."""
     if not hasattr(app, "additional_info_text_var"):
         return 0
     frame = tk.Frame(body, bg=PANEL_3, padx=10, pady=8)
