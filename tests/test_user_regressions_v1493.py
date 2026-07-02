@@ -122,6 +122,61 @@ def test_text_diary_calendar_starts_plus_one_and_uses_discharge_as_final(tmp_pat
     assert "05.06.26" not in text
 
 
+def test_diary_batch_ignores_legacy_table_argument_and_still_uses_single_text_calendar(tmp_path: Path):
+    from docx import Document
+    from diary_batch import fill_diary_batch
+
+    text_source = tmp_path / "texts.docx"
+    doc = Document()
+    doc.add_paragraph("Обычный дневник один.")
+    doc.add_paragraph("Обычный дневник два.")
+    doc.save(text_source)
+
+    stale_table = tmp_path / "stale_table.docx"
+    table_doc = Document()
+    table = table_doc.add_table(rows=2, cols=3)
+    table.rows[0].cells[0].text = "Число"
+    table.rows[0].cells[1].text = "Месяц/год"
+    table.rows[0].cells[2].text = "Дневник"
+    table.rows[1].cells[0].text = "31"
+    table.rows[1].cells[1].text = "12.2025"
+    table.rows[1].cells[2].text = "СТАРЫЙ ТАБЛИЧНЫЙ ПУТЬ НЕ ДОЛЖЕН ИСПОЛЬЗОВАТЬСЯ"
+    table_doc.save(stale_table)
+
+    result = fill_diary_batch(
+        status_files=[text_source],
+        diary_files=[stale_table],
+        output_dir=tmp_path / "out",
+        patient_name="Иванов Иван Иванович",
+        admission_value="01.06.2026",
+        discharge_value="03.06.2026",
+        diary_day_offsets=(1, 2),
+        force_final_diary=True,
+        text_output=False,
+    )
+
+    created_text = "\n".join(paragraph.text for paragraph in Document(result.created_files[0]).paragraphs)
+    assert result.processed_files == 1
+    assert result.final_rows_filled == 1
+    assert "02.06.26 Обычный дневник один" in created_text
+    assert "03.06.26 Состояние улучшилось" in created_text
+    assert "СТАРЫЙ ТАБЛИЧНЫЙ ПУТЬ" not in created_text
+
+
+def test_diary_public_layers_expose_only_semantic_calendar_route():
+    batch_source = Path("diary_batch.py").read_text(encoding="utf-8")
+    custom_source = Path("universal_diary_generation.py").read_text(encoding="utf-8")
+    wizard_source = Path("diary_creation_wizard.py").read_text(encoding="utf-8")
+
+    assert "fill_diary_file(" not in batch_source
+    assert "shutil.copy2" not in batch_source
+    assert "diary_files=[]" in custom_source
+    assert "text_output=True" in custom_source
+    assert "CUSTOM_DIARY_TABLE_FILLING_IS_DISABLED = True" in custom_source
+    assert "DIARY_WIZARD_HAS_NO_LEGACY_TABLE_MODE = True" in wizard_source
+    assert "таблица дневников" not in wizard_source.lower()
+
+
 def test_created_document_preview_popup_is_diagnostic_opt_in_only(monkeypatch, tmp_path: Path):
     from actions_creation_execution import ActionsCreationExecutionMixin
     import actions_creation_execution
@@ -270,10 +325,13 @@ def test_clean_profile_create_flow_has_folder_naming_guard():
     assert "doctor_confirmed" in source
 
 
-def test_diary_creation_wizard_reports_table_text_and_frequency():
-    assert "таблица дневников" in Path("diary_creation_wizard.py").read_text(encoding="utf-8")
-    assert "текстовый DOCX" in Path("diary_creation_wizard.py").read_text(encoding="utf-8")
+def test_diary_creation_wizard_reports_text_calendar_and_frequency():
+    wizard = Path("diary_creation_wizard.py").read_text(encoding="utf-8")
     actions = Path("actions_diary_flow.py").read_text(encoding="utf-8")
+
+    assert "текстовый DOCX по календарю программы" in wizard
+    assert "таблица дневников" not in wizard.lower()
+    assert "шаблоны дат" not in wizard.lower()
     assert "diary_frequency_mode_var" in actions
     assert "diary_hour_offsets" in actions
     assert "text_output=text_output" in actions
