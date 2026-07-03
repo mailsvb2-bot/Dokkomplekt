@@ -111,12 +111,16 @@ def parse_hour_offsets(text:str):
     return values
 
 def infer_diary_schedule_from_docx(paths:Sequence[str]):
-    _=paths; return DiaryScheduleSpec("daily",(),(),0.0,"table_inference_removed")
+    _=paths
+    return DiaryScheduleSpec("daily",DEFAULT_CALENDAR_DIARY_DAY_OFFSETS,(),1.0,"program_calendar_from_admission")
 
 def describe_schedule(spec):
     base=""
     if spec.day_offsets:
-        base="каждый день" if spec.source=="popup_every_day" else "1, 2, 3, 7, затем 2 раза в неделю" if spec.source=="popup_1_2_3_day" else "свой стиль: "+", ".join(f"+{v} д" for v in spec.day_offsets[:16])
+        if spec.source=="popup_every_day": base="каждый день"
+        elif spec.source=="popup_1_2_3_day": base="1, 2, 3, 7, затем 2 раза в неделю"
+        elif spec.source=="program_calendar_from_admission": base="каждый день от даты поступления"
+        else: base="свой стиль: "+", ".join(f"+{v} д" for v in spec.day_offsets[:16])
     if spec.minute_offsets:
         return (base+"; "+"ритм: "+", ".join(f"каждые {v} мин" for v in spec.minute_offsets[:8])).strip("; ")
     if spec.mode=="hourly" and spec.hour_offsets:
@@ -170,6 +174,7 @@ def assert_diary_schedule_lock():
     if diary_hourly_schedule_from_choice("2").hour_offsets[:4]!=(2,4,6,8): raise AssertionError("Hourly interval expansion is broken")
     if diary_minute_schedule_from_choice("30 минут").minute_offsets!=(30,): raise AssertionError("Minute rhythm choice is broken")
     if diary_minute_schedule_from_choice("45 минут").minute_offsets!=(45,): raise AssertionError("Custom minute rhythm parsing is broken")
+    if infer_diary_schedule_from_docx([]).day_offsets[:5]!=(1,2,3,4,5): raise AssertionError("Program calendar diary fallback is broken")
 
 def _safe_confidence(value):
     try: return max(0.0,min(1.0,float(value or 0.0)))
