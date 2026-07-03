@@ -55,6 +55,15 @@ class MedicalParserInlineMixin:
                 m = re.search(alias_re, line_norm, flags=re.IGNORECASE)
                 if not m or self._ignore_inline_alias_match(line_norm, alias, m.start(), m.end()):
                     continue
+                # Suffix-style birth labels put the value BEFORE the marker
+                # ("1985 г.р.", "05.05.1980 г. рождения"). Taking text AFTER the
+                # marker here used to swallow the next line (e.g. the admission/
+                # discharge dates line) into `birth`. Detect the preceding
+                # year/date and use it instead of looking ahead.
+                if field_name == "birth":
+                    preceding = self._birth_value_before_suffix_marker(line_norm, m.start())
+                    if preceding:
+                        return preceding
                 value = line_norm[m.end():]
                 value = re.sub(r"^\s*[:№N#.-]*\s*", "", value)
                 if not clean_value(value):
@@ -68,6 +77,21 @@ class MedicalParserInlineMixin:
                 value = clean_value(value)
                 if value and not self._value_is_only_foreign_label(alias, value):
                     return value
+        return ""
+
+    @staticmethod
+    def _birth_value_before_suffix_marker(line: str, marker_start: int) -> str:
+        """Return a birth date/year that appears right before a suffix marker.
+
+        Handles "1985 г.р.", "05.05.1980 г.р.", "05.05.1980 года рождения".
+        Returns "" when the text before the marker is not a bare date/year (so
+        prefix-style labels like "Год рождения: 1985" fall through to the normal
+        after-marker logic).
+        """
+        before = line[:marker_start].rstrip(" ,;.-")
+        match = re.search(r"(\d{2}\.\d{2}\.(?:\d{2}|\d{4})|[12]\d{3})\s*$", before)
+        if match:
+            return match.group(1)
         return ""
 
     @staticmethod

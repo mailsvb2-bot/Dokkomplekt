@@ -48,7 +48,15 @@ class ActionsNavigationMixin:
                 self.case_number_var.set("")
             if self.epi_path_var.get().strip() and Path(self.epi_path_var.get().strip()).exists():
                 data.epi_text = self.service.load_epi_text(self.epi_path_var.get().strip())
-            data.discharge_date = current_semantic_date(self, "discharge_date")
+            # Preserve the discharge date parsed from the primary document. A
+            # manually typed / popup discharge date still wins, but when the UI
+            # has none we must NOT overwrite the parsed value with an empty
+            # string — doing so blanked the discharge date on every reparse, so
+            # the diary/epicrisis flow kept asking for it and documents failed
+            # to build.
+            ui_discharge = current_semantic_date(self, "discharge_date")
+            if ui_discharge:
+                data.discharge_date = ui_discharge
             popup_diag = self._popup_diagnosis_override.strip() or self.diagnosis_var.get().strip()
             if popup_diag and (self._popup_diagnosis_override.strip() or self._manual_diagnosis):
                 data.diagnosis = normalize_diagnosis_with_icd10(popup_diag, language_id=self._diagnosis_language() if hasattr(self, "_diagnosis_language") else "ru")
@@ -70,6 +78,12 @@ class ActionsNavigationMixin:
                 self._set_ui_var(self.patient_name_var, data.fio)
             if data.admission_date and (not self._manual_admission_date or not current_semantic_date(self, "admission_date")):
                 self._set_ui_var(self.admission_date_var, data.admission_date)
+            if data.discharge_date and (not getattr(self, "_manual_discharge_date", False) or not current_semantic_date(self, "discharge_date")):
+                # Discharge was parsed from the primary document but never pushed
+                # into the UI/semantic layer, so the diary/epicrisis flow kept
+                # asking for it and could not build documents. Push it like
+                # admission, unless the doctor already typed one manually.
+                self._set_ui_var(self.discharge_date_var, data.discharge_date)
             if data.case_number and not self.case_number_var.get().strip():
                 case_value = sanitize_case_number_candidate(data.case_number, patient_name=self.patient_name_var.get().strip() or data.fio)
                 if case_value:
