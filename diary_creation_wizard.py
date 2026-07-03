@@ -46,11 +46,12 @@ class DiaryWizardReview:
 
     def as_text(self) -> str:
         lines = [
-            "МАСТЕР ДНЕВНИКОВ", "",
+            "МАСТЕР ДНЕВНИКОВ",
+            "",
             f"Пациент: {self.patient_name or 'не указан'}",
             f"Дата госпитализации: {self.admission_date or 'не найдена'}",
             f"Дата выписки: {self.discharge_date or 'не указана'}",
-            "Режим: текстовый DOCX, без таблиц",
+            "Режим: текстовый DOCX по календарю программы, без таблиц",
             "Принцип: " + (self.calendar_description or "не выбран"),
             f"Лечится по больничному листу: {'да' if self.sick_leave_dynamic_epicrisis else 'нет'}",
             "Тексты дневников:",
@@ -160,7 +161,9 @@ def current_diary_calendar_schedule(app: object, fallback: DiaryScheduleSpec | N
             return fallback.with_mode("hourly")
         if frequency == "daily" and fallback.has_daily:
             return fallback.with_mode("daily")
-    return default_calendar_diary_schedule().with_mode(frequency)
+    if frequency == "hourly":
+        return diary_hourly_schedule_from_choice("3")
+    return default_calendar_diary_schedule()
 
 
 def _normalize_rhythm_choice(text: str) -> str:
@@ -176,7 +179,12 @@ def _prompt_intraday_rhythm(app: object, day_spec: DiaryScheduleSpec, simpledial
         return None
     text = str(value or "").strip().lower().replace("ё", "е")
     if text in {"7", "свой", "свой ритм"} or "свой" in text:
-        custom = simpledialog.askstring("Свой ритм", "Введите интервал: 4 часа, 1 час, 30 минут, 15 минут, 5 минут или своё число минут", initialvalue=str(getattr(app, "_doctor_confirmed_diary_custom_rhythm", "") or "30 минут"), parent=getattr(app, "root", None))
+        custom = simpledialog.askstring(
+            "Свой ритм",
+            "Введите интервал: 4 часа, 1 час, 30 минут, 15 минут, 5 минут или своё число минут",
+            initialvalue=str(getattr(app, "_doctor_confirmed_diary_custom_rhythm", "") or "30 минут"),
+            parent=getattr(app, "root", None),
+        )
         if custom is None:
             return None
         custom_text = str(custom).strip().lower().replace("ё", "е")
@@ -197,7 +205,12 @@ def _prompt_sick_leave_epicrisis(app: object, messagebox, simpledialog) -> None:
         return
     _set_var(app, "expert_sick_leave_needed_var", "да")
     current = _get_var(app, "diary_treatment_correction_var") or "Лекарства принимает согласно назначениям."
-    correction = simpledialog.askstring("Коррекция лечения", "Введите коррекцию лечения.\nЕсли оставить пустым, будет: лекарства принимает согласно назначениям.", initialvalue=current, parent=getattr(app, "root", None))
+    correction = simpledialog.askstring(
+        "Коррекция лечения",
+        "Введите коррекцию лечения.\nЕсли оставить пустым, будет: лекарства принимает согласно назначениям.",
+        initialvalue=current,
+        parent=getattr(app, "root", None),
+    )
     if correction is not None:
         _set_var(app, "diary_treatment_correction_var", str(correction).strip())
 
@@ -213,8 +226,17 @@ def _confirm_schedule_and_sick_leave(app: object, spec: DiaryScheduleSpec, choic
 
 def prompt_diary_calendar_principle(app: object) -> bool:
     if _headless_or_ci(app):
-        if not getattr(app, "_doctor_confirmed_diary_day_offsets", ()) and not getattr(app, "_doctor_confirmed_diary_hour_offsets", ()) and not getattr(app, "_doctor_confirmed_diary_minute_offsets", ()):
-            _set_confirmed_schedule(app, default_calendar_diary_schedule(), "1", "1")
+        has_confirmed = (
+            getattr(app, "_doctor_confirmed_diary_day_offsets", ())
+            or getattr(app, "_doctor_confirmed_diary_hour_offsets", ())
+            or getattr(app, "_doctor_confirmed_diary_minute_offsets", ())
+        )
+        if not has_confirmed:
+            frequency = (_get_var(app, "diary_frequency_mode_var") or "daily").strip().lower()
+            if frequency == "hourly":
+                _set_confirmed_schedule(app, diary_hourly_schedule_from_choice("3"), "3", "3")
+            else:
+                _set_confirmed_schedule(app, default_calendar_diary_schedule(), "1", "1")
         return True
     try:
         from tkinter import messagebox, simpledialog
@@ -236,7 +258,12 @@ def prompt_diary_calendar_principle(app: object) -> bool:
                 return _confirm_schedule_and_sick_leave(app, diary_calendar_schedule_from_choice("2"), "2", "2", messagebox, simpledialog)
             if text in {"3", "по времени", "каждый день по времени"} or "времен" in text:
                 current_time = str(getattr(app, "_doctor_confirmed_diary_hourly_choice", "") or "24").strip()
-                value = simpledialog.askstring("Дневники по времени", "24 - каждый день в то же время; 2 - каждые 2 часа; 1,2,4 - свой стиль", initialvalue=current_time, parent=getattr(app, "root", None))
+                value = simpledialog.askstring(
+                    "Дневники по времени",
+                    "24 - каждый день в то же время; 2 - каждые 2 часа; 1,2,4 - свой стиль",
+                    initialvalue=current_time,
+                    parent=getattr(app, "root", None),
+                )
                 if value is None:
                     current = "3"
                     continue
@@ -245,7 +272,12 @@ def prompt_diary_calendar_principle(app: object) -> bool:
                 return _confirm_schedule_and_sick_leave(app, spec, value, "3", messagebox, simpledialog)
             if text in {"4", "свой", "свой стиль"} or "свой" in text:
                 current_custom = str(getattr(app, "_doctor_confirmed_diary_custom_choice", "") or "+1, +2, +3, +5, +7, +14").strip()
-                value = simpledialog.askstring("Свой стиль дневников", "Введите дни: +1, +2, +3, +5, +7, +14", initialvalue=current_custom, parent=getattr(app, "root", None))
+                value = simpledialog.askstring(
+                    "Свой стиль дневников",
+                    "Введите дни: +1, +2, +3, +5, +7, +14",
+                    initialvalue=current_custom,
+                    parent=getattr(app, "root", None),
+                )
                 if value is None:
                     current = "4"
                     continue
@@ -328,3 +360,5 @@ def assert_diary_creation_wizard_lock() -> None:
         raise AssertionError("Diary style choices changed")
     if "каждые 5 минут" not in DIARY_INTRADAY_RHYTHM_CHOICES:
         raise AssertionError("Minute rhythm choices changed")
+    if "текстовый DOCX по календарю программы" not in DiaryWizardReview("", "", "", ()).as_text():
+        raise AssertionError("Diary wizard text-calendar wording changed")
