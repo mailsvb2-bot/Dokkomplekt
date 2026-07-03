@@ -22,6 +22,9 @@ NEUTRAL_FINAL_DIARY_TEXT = "".join(map(chr, (
 )))
 
 
+# Preserve doctor-owned values: the legacy table filler is intentionally closed
+# so saved 01-31 table schedules cannot override the text-diary calendar route.
+
 def apply_diary_entries(
     data_entries: list[object],
     dated_entries: list[object],
