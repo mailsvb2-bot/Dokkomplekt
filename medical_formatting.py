@@ -258,6 +258,43 @@ _PL_MONTHS = {
 }
 
 
+_RU_MONTHS = {
+    "января": 1, "январь": 1, "янв": 1,
+    "февраля": 2, "февраль": 2, "фев": 2,
+    "марта": 3, "март": 3, "мар": 3,
+    "апреля": 4, "апрель": 4, "апр": 4,
+    "мая": 5, "май": 5,
+    "июня": 6, "июнь": 6, "июн": 6,
+    "июля": 7, "июль": 7, "июл": 7,
+    "августа": 8, "август": 8, "авг": 8,
+    "сентября": 9, "сентябрь": 9, "сен": 9, "сент": 9,
+    "октября": 10, "октябрь": 10, "окт": 10,
+    "ноября": 11, "ноябрь": 11, "ноя": 11,
+    "декабря": 12, "декабрь": 12, "дек": 12,
+}
+
+
+def _parse_russian_textual_date(value: str) -> Optional[datetime]:
+    """Parse Russian worded dates like "1 июня 2026" / "10 февраля 2026 г.".
+
+    Doctors frequently type dates in words. The resolver already handled Polish
+    month names but not Russian ones, so on a Russian primary document the
+    admission/discharge date silently failed to parse and the doctor had to
+    re-enter it by hand.
+    """
+    match = re.fullmatch(
+        r"(\d{1,2})\s+([А-Яа-яЁё]+)\.?\s+(\d{2}|\d{4})",
+        value.strip(),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    month = _RU_MONTHS.get(match.group(2).lower().replace("ё", "е"))
+    if not month:
+        return None
+    return _candidate_date(int(match.group(3)), month, int(match.group(1)))
+
+
 def _parse_polish_textual_date(value: str) -> Optional[datetime]:
     match = re.fullmatch(r"(\d{1,2})\s+([A-Za-zĄąĆćĘęŁłŃńÓóŚśŹźŻż]+)\s+(\d{2}|\d{4})", value.strip(), flags=re.IGNORECASE)
     if not match:
@@ -278,6 +315,10 @@ def parse_date(value: str) -> Optional[datetime]:
     textual = _parse_polish_textual_date(value)
     if textual:
         return textual
+
+    russian_textual = _parse_russian_textual_date(value)
+    if russian_textual:
+        return russian_textual
 
     match = re.fullmatch(r"(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{2}|\d{4})", value)
     if match:

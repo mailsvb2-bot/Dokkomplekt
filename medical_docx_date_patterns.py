@@ -7,12 +7,15 @@ from medical_constants import DATE_FMT
 from medical_formatting import parse_date
 
 _TITLE_DATE_RE = re.compile(
-    r"(?<!\d)(?:(\d{1,2}\s*[./-]\s*\d{1,2}\s*[./-]\s*\d{2,4})|(\d{4,8})|(\d{1,2}\s+(?:stycznia|lutego|marca|kwietnia|maja|czerwca|lipca|sierpnia|września|wrzesnia|października|pazdziernika|listopada|grudnia)\s+\d{2,4}))(?!\d)"
+    r"(?<!\d)(?:(\d{1,2}\s*[./-]\s*\d{1,2}\s*[./-]\s*\d{2,4})|(\d{4,8})|"
+    r"(\d{1,2}\s+(?:stycznia|lutego|marca|kwietnia|maja|czerwca|lipca|sierpnia|września|wrzesnia|października|pazdziernika|listopada|grudnia)\s+\d{2,4})|"
+    r"(\d{1,2}\s+(?:январ[яь]|феврал[яь]|март[а]?|апрел[яь]|ма[яй]|июн[яь]|июл[яь]|август[а]?|сентябр[яь]|октябр[яь]|ноябр[яь]|декабр[яь])\s+\d{2,4}))(?!\d)",
+    re.IGNORECASE,
 )
 
 
 def _normalize_full_date_match(match: re.Match[str]) -> str:
-    value = match.group(1) or match.group(2) or match.group(3) or ""
+    value = match.group(1) or match.group(2) or match.group(3) or match.group(4) or ""
     parsed = parse_date(value)
     return parsed.strftime(DATE_FMT) if parsed else ""
 

@@ -89,4 +89,11 @@ def sanitize_diagnosis(value: str) -> str:
         return ""
     if _looks_like_template_or_admin_noise(value):
         return ""
+    # A trailing sentence period is not part of the diagnosis, but it leaked
+    # into the ICD-10 catalog search query and made textual matching fail:
+    # "Параноидная шизофрения." found nothing while "Параноидная шизофрения"
+    # resolved to F20.0. Strip trailing punctuation so the automatic
+    # name->code lookup fires on parsed documents. A code like "F20.0" is
+    # never affected because its dot is followed by a digit, not end-of-string.
+    value = re.sub(r"\s*[.,;]+\s*$", "", value).strip()
     return value
