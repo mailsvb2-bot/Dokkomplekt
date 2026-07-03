@@ -5,9 +5,11 @@ from datetime import date
 from diary_batch import _calendar_text_diary_dates, _dynamic_epicrisis_base_date, dynamic_epicrisis_dates
 from diary_dates import parse_full_date, parse_full_datetime, parse_optional_discharge_date
 from diary_schedule import (
+    DIARY_POPUP_STYLE_CHOICES,
     DiaryScheduleSpec,
     default_calendar_diary_schedule,
     diary_calendar_schedule_from_choice,
+    diary_hourly_schedule_from_choice,
     expand_day_offsets,
     expand_hour_intervals,
 )
@@ -42,10 +44,14 @@ def test_diary_user_emulation_matrix_covers_fifty_plus_runtime_contracts():
     check(parse_optional_discharge_date("") is None, "empty discharge")
     check(parse_optional_discharge_date("10.06.2026").isoformat() == "2026-06-10", "discharge")
 
+    check(DIARY_POPUP_STYLE_CHOICES == ("каждый день", "1, 2, 3 день...", "каждый день по времени", "свой стиль"), "popup styles")
     check(default_calendar_diary_schedule().day_offsets[:4] == (1, 2, 3, 4), "default program calendar")
     check(diary_calendar_schedule_from_choice("1").day_offsets[:3] == (1, 2, 3), "choice daily")
     check(diary_calendar_schedule_from_choice("2").day_offsets[:4] == (1, 2, 3, 7), "choice clinical")
     check(diary_calendar_schedule_from_choice("+1, +2, +5").day_offsets == (1, 2, 5), "choice manual")
+    check(diary_hourly_schedule_from_choice("3").mode == "hourly", "choice timed mode")
+    check(diary_hourly_schedule_from_choice("3").hour_offsets == (24,), "choice timed daily")
+    check(diary_hourly_schedule_from_choice("2").hour_offsets == (2,), "choice every 2 hours")
     check(_calendar_text_diary_dates(date(2026, 6, 1), date(2026, 6, 4), limit=10, day_offsets=()) == (date(2026, 6, 2), date(2026, 6, 3), date(2026, 6, 4)), "calendar starts +1")
     check(_calendar_text_diary_dates(date(2026, 6, 1), date(2026, 6, 10), limit=3, day_offsets=(1, 3, 7)) == (date(2026, 6, 2), date(2026, 6, 4), date(2026, 6, 8)), "manual calendar offsets")
 
@@ -57,6 +63,7 @@ def test_diary_user_emulation_matrix_covers_fifty_plus_runtime_contracts():
     check(expand_hour_intervals((1, 3), 5) == (1, 4, 5, 8, 9), "hour schedule 2")
     check(expand_hour_intervals((4,), 3) == (4, 8, 12), "hour schedule 3")
     check(expand_hour_intervals((), 3) == (), "empty hour schedule")
+    check(expand_hour_intervals((24,), 3) == (24, 48, 72), "daily by time schedule")
 
     base_date = _dynamic_epicrisis_base_date(date(2026, 6, 1), "10.06.2026")
     check(base_date == date(2026, 6, 10), "summary start date")
@@ -84,4 +91,4 @@ def test_diary_user_emulation_matrix_covers_fifty_plus_runtime_contracts():
         value = f"{day:02d}.06.2026"
         check(parse_full_date(value).day == day, value)
 
-    check(checks >= 59, f"expected at least 59 checks, got {checks}")
+    check(checks >= 64, f"expected at least 64 checks, got {checks}")
