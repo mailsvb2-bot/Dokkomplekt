@@ -13,13 +13,12 @@ from diary_dates import parse_full_date, parse_full_datetime, parse_optional_dis
 from diary_gender import adapt_text_to_patient_gender, detect_gender_from_patient_name
 from diary_models import DiaryBatchResult
 from diary_paths import available_path, make_diary_output_name, safe_filename_part
-from diary_schedule import DEFAULT_CALENDAR_DIARY_DAY_OFFSETS, expand_day_offsets
+from diary_schedule import DEFAULT_CALENDAR_DIARY_DAY_OFFSETS, expand_day_offsets, expand_hour_intervals
 from diary_text_parser import clean_status_text, extract_statuses_from_docx, is_signature_paragraph_text, remove_examinee_words
 from diary_writer_apply import NEUTRAL_FINAL_DIARY_TEXT
+from medical_calendar import is_fixed_holiday, is_non_working_day, next_working_day
 from medical_docx_xml_fragments import ensure_docx_compatible, existing_word_file
 from medical_formatting import redact_technical_text, safe_filename, technical_ref, technical_report_path
-
-_FIXED_HOLIDAY_RANGES: tuple[tuple[int, int, int], ...] = ((1, 1, 9), (5, 1, 9))
 
 
 @dataclass(frozen=True)
@@ -33,34 +32,14 @@ class DynamicEpicrisisInput:
     treatment_correction: str = ""
 
 
-def is_fixed_holiday(day: date) -> bool:
-    return any(month == day.month and start <= day.day <= end for month, start, end in _FIXED_HOLIDAY_RANGES)
-
-
-def is_non_working_day(day: date) -> bool:
-    return day.weekday() >= 5 or is_fixed_holiday(day)
-
-
-def next_working_day(day: date, *, used: Iterable[date] = ()) -> date:
-    used_set = set(used)
-    current = day
-    for _ in range(370):
-        if not is_non_working_day(current) and current not in used_set:
-            return current
-        current += timedelta(days=1)
-    raise RuntimeError("Cannot find a working diary date within one year.")
-
-
 def default_observation_diary_dates(admission: date, *, limit: int = 20, discharge_date: date | None = None) -> tuple[date, ...]:
     if limit <= 0:
         return ()
-    offsets: list[int] = [0, 1, 2, 7]
-    next_offset = 10
-    toggle = 0
+    offsets = [0, 1, 2, 7]
+    current = 10
     while len(offsets) < max(limit * 3, 12):
-        offsets.append(next_offset)
-        next_offset += 3 if toggle % 2 == 0 else 4
-        toggle += 1
+        offsets.append(current)
+        current += 3 if len(offsets) % 2 else 4
     result: list[date] = []
     for offset in offsets:
         planned = admission + timedelta(days=max(0, int(offset)))
@@ -98,7 +77,7 @@ def build_dynamic_epicrisis_text(data: DynamicEpicrisisInput) -> str:
         f"Лечится с: {data.sick_leave_from or 'не указано'}.",
         f"Жалобы: {data.complaints or 'без существенной динамики'}.",
         f"Принимает: {data.treatment or 'согласно листу назначений'}.",
-        f"Профильный статус: {data.profile_status or 'без существенной динамики'}.",
+        f"Психический статус: {data.profile_status or 'без существенной динамики'}.",
         correction,
         "Продолжение лечения по листу нетрудоспособности.",
         "Заведующий отделением ____________________",
@@ -130,8 +109,6 @@ def _resolve_output_dir(output_dir: str | Path | None, fallback_dir: Path) -> Pa
 
 
 def _fallback_statuses_from_docx(path: str | Path) -> list[str]:
-    """Accept short doctor-owned diary text snippets when the strict parser finds none."""
-
     doc = Document(str(path))
     result: list[str] = []
     seen: set[str] = set()
@@ -167,9 +144,7 @@ def read_statuses_from_files(paths: Iterable[str | Path]) -> list[str]:
     statuses: list[str] = []
     seen: set[str] = set()
     for path in _existing_docx_files(paths, "тексты дневников"):
-        path_statuses = extract_statuses_from_docx(path)
-        if not path_statuses:
-            path_statuses = _fallback_statuses_from_docx(path)
+        path_statuses = extract_statuses_from_docx(path) or _fallback_statuses_from_docx(path)
         for status in path_statuses:
             key = " ".join(status.strip().lower().replace("ё", "е").split())
             if key not in seen:
@@ -182,9 +157,7 @@ def open_folder(path: str | Path) -> bool:
     folder = Path(path).expanduser()
     try:
         from printer_platform import open_desktop_path
-        if open_desktop_path(folder, require_dir=True):
-            return True
-        return False
+        return bool(open_desktop_path(folder, require_dir=True))
     except Exception as exc:
         record_soft_exception("diary_batch.open_folder", exc, detail=str(folder))
         return False
@@ -202,24 +175,10 @@ def _optional_full_date(value: str) -> date | None:
 
 def _dynamic_epicrisis_base_date(admission_date_value: date, sick_leave_from: str) -> date:
     sick_leave_date = _optional_full_date(sick_leave_from)
-    if sick_leave_date is None:
-        return admission_date_value
-    return max(admission_date_value, sick_leave_date)
+    return max(admission_date_value, sick_leave_date) if sick_leave_date is not None else admission_date_value
 
 
-def _calendar_text_diary_dates(
-    admission_date_value: date,
-    discharge_date_value: date | None,
-    *,
-    limit: int,
-    day_offsets: Sequence[int] = (),
-) -> tuple[date, ...]:
-    """Program-calendar diary dates for the single production diary path.
-
-    Dates are semantic hospitalization offsets: ``+1`` means the first diary is
-    the day after admission, not a row number from a legacy 01-31 table.
-    """
-
+def _calendar_text_diary_dates(admission_date_value: date, discharge_date_value: date | None, *, limit: int, day_offsets: Sequence[int] = ()) -> tuple[date, ...]:
     if limit <= 0:
         return ()
     offsets = tuple(int(item) for item in (day_offsets or DEFAULT_CALENDAR_DIARY_DAY_OFFSETS))
@@ -229,34 +188,21 @@ def _calendar_text_diary_dates(
         planned = admission_date_value + timedelta(days=max(1, int(offset)))
         if discharge_date_value is not None and planned > discharge_date_value:
             break
-        result.append(planned)
+        adjusted = next_working_day(planned, used=result)
+        if discharge_date_value is not None and adjusted > discharge_date_value:
+            break
+        result.append(adjusted)
         if len(result) >= limit:
             break
     return tuple(result)
 
 
-def _text_diary_dates(
-    admission_date_value: date,
-    discharge_date_value: date | None,
-    *,
-    limit: int,
-    day_offsets: Sequence[int] = (),
-) -> tuple[date, ...]:
+def _text_diary_dates(admission_date_value: date, discharge_date_value: date | None, *, limit: int, day_offsets: Sequence[int] = ()) -> tuple[date, ...]:
     explicit_offsets = tuple(int(item) for item in day_offsets)
-    return _calendar_text_diary_dates(
-        admission_date_value,
-        discharge_date_value,
-        limit=limit,
-        day_offsets=explicit_offsets or DEFAULT_CALENDAR_DIARY_DAY_OFFSETS,
-    )
+    return _calendar_text_diary_dates(admission_date_value, discharge_date_value, limit=limit, day_offsets=explicit_offsets or DEFAULT_CALENDAR_DIARY_DAY_OFFSETS)
 
 
-def _build_dated_entries(
-    statuses: Sequence[str],
-    dates: Sequence[date],
-    patient_gender: str | None,
-    repeat_statuses: bool,
-) -> tuple[tuple[date, str], ...]:
+def _build_dated_entries(statuses: Sequence[str], dates: Sequence[date], patient_gender: str | None, repeat_statuses: bool) -> tuple[tuple[date, str], ...]:
     entries: list[tuple[date, str]] = []
     status_index = 0
     for item_date in dates:
@@ -275,33 +221,21 @@ def _build_dated_entries(
     return tuple(entries)
 
 
-def _hourly_text_diary_datetimes(
-    admission_value: str,
-    discharge_date_value: date | None,
-    *,
-    limit: int,
-    hour_offsets: Sequence[int],
-) -> tuple[datetime, ...]:
-    """Hourly observation schedule for the text diary route.
-
-    Hourly diaries (intensive observation) start from the admission date-time
-    and advance by the doctor-confirmed hour intervals. The route was lost when
-    the legacy table path was removed; this restores it natively for the text
-    paragraphs route instead of re-adding table logic.
-    """
-
+def _hourly_text_diary_datetimes(admission_value: str, discharge_date_value: date | None, *, limit: int, hour_offsets: Sequence[int]) -> tuple[datetime, ...]:
     if limit <= 0:
         return ()
     try:
         base = parse_full_datetime(admission_value)
     except ValueError:
         return ()
-    from diary_schedule import expand_hour_intervals
-
     offsets = expand_hour_intervals(tuple(int(item) for item in hour_offsets) or (1,), limit)
     result: list[datetime] = []
+    used_dates: set[date] = set()
     for offset in offsets:
         planned = base + timedelta(hours=int(offset))
+        adjusted_date = next_working_day(planned.date(), used=used_dates) if is_non_working_day(planned.date()) or planned.date() in used_dates else planned.date()
+        used_dates.add(adjusted_date)
+        planned = datetime.combine(adjusted_date, planned.time())
         if discharge_date_value is not None and planned.date() > discharge_date_value:
             break
         result.append(planned)
@@ -310,12 +244,7 @@ def _hourly_text_diary_datetimes(
     return tuple(result)
 
 
-def _build_hourly_entries(
-    statuses: Sequence[str],
-    moments: Sequence[datetime],
-    patient_gender: str | None,
-    repeat_statuses: bool,
-) -> tuple[tuple[date, str], ...]:
+def _build_hourly_entries(statuses: Sequence[str], moments: Sequence[datetime], patient_gender: str | None, repeat_statuses: bool) -> tuple[tuple[date, str], ...]:
     entries: list[tuple[date, str]] = []
     status_index = 0
     for moment in moments:
@@ -334,19 +263,13 @@ def _build_hourly_entries(
     return tuple(entries)
 
 
-def _split_regular_and_final_text_diary_dates(
-    dates: Sequence[date],
-    *,
-    discharge_date_value: date | None,
-    force_final_diary: bool,
-) -> tuple[tuple[date, ...], date | None]:
-    """One diary meaning: ordinary texts first, final discharge entry last."""
-
+def _split_regular_and_final_text_diary_dates(dates: Sequence[date], *, discharge_date_value: date | None, force_final_diary: bool) -> tuple[tuple[date, ...], date | None]:
     normalized_dates = tuple(d for d in dates if isinstance(d, date))
     if not force_final_diary:
         return normalized_dates, None
     if discharge_date_value is not None:
-        return tuple(d for d in normalized_dates if d < discharge_date_value), discharge_date_value
+        final_date = next_working_day(discharge_date_value, used=normalized_dates) if is_non_working_day(discharge_date_value) else discharge_date_value
+        return tuple(d for d in normalized_dates if d < discharge_date_value), final_date
     if not normalized_dates:
         return normalized_dates, None
     return normalized_dates[:-1], normalized_dates[-1]
@@ -358,12 +281,7 @@ def _neutral_final_diary_entry(date_value: date, patient_gender: str | None) -> 
     return date_value, f"{date_value:%d.%m.%y} {adapted_final_text}".rstrip()
 
 
-def _create_text_diary_document(
-    output_dir: Path,
-    patient_name: str,
-    entries: Sequence[tuple[date, str]],
-    epicrisis_entries: Sequence[tuple[date, str]],
-) -> Path:
+def _create_text_diary_document(output_dir: Path, patient_name: str, entries: Sequence[tuple[date, str]], epicrisis_entries: Sequence[tuple[date, str]]) -> Path:
     target = available_path(output_dir / safe_filename(make_diary_output_name(safe_filename_part(patient_name), file_index=1, total_files=1)))
     doc = Document()
     blocks: list[tuple[date, int, tuple[str, ...]]] = []
@@ -382,101 +300,20 @@ def _create_text_diary_document(
     return target
 
 
-def _legacy_row_date_after_discharge(row, discharge_date_value: date) -> bool:
-    if len(row.cells) < 2:
-        return False
-    day_text = ""
-    for cell in row.cells[:2]:
-        match = re.search(r"\b(\d{1,2})\b", cell.text or "")
-        if match:
-            day_text = match.group(1)
-    if not day_text:
-        return False
-    month_text = row.cells[2].text if len(row.cells) >= 3 else ""
-    month_match = re.search(r"(\d{1,2})\s*[./-]\s*(\d{2,4})", month_text or "")
-    if month_match:
-        month = int(month_match.group(1))
-        year = int(month_match.group(2))
-        if year < 100:
-            year += 2000
-    else:
-        month = discharge_date_value.month
-        year = discharge_date_value.year
-    try:
-        item_date = date(year, month, int(day_text))
-    except ValueError:
-        return False
-    return item_date > discharge_date_value
-
-
-def _count_legacy_rows_after_discharge(paths: Sequence[str | Path], discharge_date_value: date | None) -> int:
-    """Compatibility metric only; it must not switch generation to the old table path."""
-
-    if discharge_date_value is None:
-        return 0
-    total = 0
-    for raw_path in paths or ():
-        try:
-            path = Path(raw_path).expanduser()
-            if not path.exists():
-                continue
-            doc = Document(str(ensure_docx_compatible(path, label="diary calendar metadata")))
-            for table in doc.tables:
-                for row in table.rows[1:]:
-                    if _legacy_row_date_after_discharge(row, discharge_date_value):
-                        total += 1
-        except Exception as exc:
-            record_soft_exception("diary_batch.legacy_after_discharge_metric", exc, detail=str(raw_path))
-    return total
-
-
-def _fill_text_diary_batch(
-    *, statuses: Sequence[str], result_dir: Path, patient_name: str, admission_value: str,
-    admission_date_value, discharge_date_value, gender_source_name: str, repeat_statuses: bool,
-    patient_gender: str | None, sick_leave_dynamic_epicrisis: bool, treatment_correction: str,
-    birth_date: str, complaints: str, treatment: str, profile_status: str, sick_leave_from: str,
-    write_report: bool, diary_day_offsets: Sequence[int], force_final_diary: bool,
-    diary_hour_offsets: Sequence[int] = (), diary_frequency_mode: str = "daily",
-    removed_after_discharge_rows: int = 0,
-) -> DiaryBatchResult:
-    """Build the text diary DOCX for one patient on the single production route.
-
-    Daily mode writes one paragraph per calendar date starting the day after
-    admission ("дд.мм.гг текст"), optionally closing with a neutral final
-    discharge entry. Hourly mode (intensive observation) writes one paragraph
-    per confirmed hour offset from the admission date-time
-    ("дд.мм.гг ЧЧ:ММ текст"). Dynamic sick-leave epicrises are appended as
-    separate dated blocks when requested.
-    """
+def _fill_text_diary_batch(*, statuses: Sequence[str], result_dir: Path, patient_name: str, admission_value: str, admission_date_value, discharge_date_value, gender_source_name: str, repeat_statuses: bool, patient_gender: str | None, sick_leave_dynamic_epicrisis: bool, treatment_correction: str, birth_date: str, complaints: str, treatment: str, profile_status: str, sick_leave_from: str, write_report: bool, diary_day_offsets: Sequence[int], force_final_diary: bool, diary_hour_offsets: Sequence[int] = (), diary_frequency_mode: str = "daily", removed_after_discharge_rows: int = 0) -> DiaryBatchResult:
     if admission_date_value is None:
         admission_date_value = parse_full_date(admission_value)
     rough_limit = max(10, min(120, (discharge_date_value - admission_date_value).days + 10)) if discharge_date_value else max(10, len(statuses) or 10)
     hourly_mode = str(diary_frequency_mode or "daily").strip().lower() == "hourly"
     if hourly_mode:
-        # Hourly observation: more entries fit into the same stay, so widen the
-        # cap; each entry carries its own date+time paragraph.
         hourly_limit = max(rough_limit, min(240, rough_limit * 12))
-        moments = _hourly_text_diary_datetimes(
-            admission_value,
-            discharge_date_value,
-            limit=hourly_limit,
-            hour_offsets=diary_hour_offsets,
-        )
+        moments = _hourly_text_diary_datetimes(admission_value, discharge_date_value, limit=hourly_limit, hour_offsets=diary_hour_offsets)
         dates = tuple(moment.date() for moment in moments)
         final_date = None
         entries = list(_build_hourly_entries(statuses, moments, patient_gender, repeat_statuses))
     else:
-        dates = _text_diary_dates(
-            admission_date_value,
-            discharge_date_value,
-            limit=rough_limit,
-            day_offsets=diary_day_offsets,
-        )
-        regular_dates, final_date = _split_regular_and_final_text_diary_dates(
-            dates,
-            discharge_date_value=discharge_date_value,
-            force_final_diary=force_final_diary,
-        )
+        dates = _text_diary_dates(admission_date_value, discharge_date_value, limit=rough_limit, day_offsets=diary_day_offsets)
+        regular_dates, final_date = _split_regular_and_final_text_diary_dates(dates, discharge_date_value=discharge_date_value, force_final_diary=force_final_diary)
         entries = list(_build_dated_entries(statuses, regular_dates, patient_gender, repeat_statuses))
     final_rows_filled = 0
     if final_date is not None:
@@ -485,20 +322,8 @@ def _fill_text_diary_batch(
     epicrisis_entries: list[tuple[date, str]] = []
     if sick_leave_dynamic_epicrisis:
         epicrisis_base_date = _dynamic_epicrisis_base_date(admission_date_value, sick_leave_from)
-        sick_leave_display = f"{epicrisis_base_date:%d.%m.%Y}"
-        data = DynamicEpicrisisInput(
-            patient_name,
-            birth_date,
-            sick_leave_display,
-            complaints,
-            treatment,
-            profile_status,
-            treatment_correction,
-        )
-        epicrisis_entries = [
-            (d, build_dynamic_epicrisis_text(data))
-            for d in dynamic_epicrisis_dates(epicrisis_base_date, discharge_date=discharge_date_value, limit=12)
-        ]
+        data = DynamicEpicrisisInput(patient_name, birth_date, f"{epicrisis_base_date:%d.%m.%Y}", complaints, treatment, profile_status, treatment_correction)
+        epicrisis_entries = [(d, build_dynamic_epicrisis_text(data)) for d in dynamic_epicrisis_dates(epicrisis_base_date, discharge_date=discharge_date_value, limit=12)]
     created = _create_text_diary_document(result_dir, patient_name, entries, epicrisis_entries)
     report_path: Path | None = None
     if write_report:
@@ -518,31 +343,11 @@ def _fill_text_diary_batch(
     return DiaryBatchResult([created], report_path, 1, len(entries), len(entries), 0, final_rows_filled, 0, 0, removed_after_discharge_rows)
 
 
-def fill_diary_batch(
-    *,
-    status_files: Sequence[str | Path], diary_files: Sequence[str | Path], output_dir: str | Path | None,
-    patient_name: str, admission_value: str, gender_source_name: str | None = None,
-    discharge_value: str = "", repeat_statuses: bool = True, reset_each_file: bool = True,
-    keep_signature: bool = True, fill_months: bool = True, force_final_diary: bool = True,
-    remove_holiday_rows: bool = True, open_result_folder: bool = False, write_report: bool = False,
-    diary_day_offsets: Sequence[int] = (), diary_hour_offsets: Sequence[int] = (),
-    diary_frequency_mode: str = "daily", allow_empty_statuses: bool = False, text_output: bool = False,
-    sick_leave_dynamic_epicrisis: bool = False, treatment_correction: str = "", birth_date: str = "",
-    complaints: str = "", treatment: str = "", profile_status: str = "", sick_leave_from: str = "",
-) -> DiaryBatchResult:
-    """Create diaries through the only production route: texts + semantic calendar.
-
-    ``diary_files`` and ``text_output`` remain in the function signature only so
-    old callers do not crash at import/call time.  They no longer select a table
-    template path.  The generated output is always a new text DOCX built from
-    doctor-owned diary texts and the confirmed day-offset schedule.
-    """
-
-    _ = (reset_each_file, keep_signature, fill_months, remove_holiday_rows, text_output)
+def fill_diary_batch(*, status_files: Sequence[str | Path], diary_files: Sequence[str | Path], output_dir: str | Path | None, patient_name: str, admission_value: str, gender_source_name: str | None = None, discharge_value: str = "", repeat_statuses: bool = True, reset_each_file: bool = True, keep_signature: bool = True, fill_months: bool = True, force_final_diary: bool = True, remove_holiday_rows: bool = True, open_result_folder: bool = False, write_report: bool = False, diary_day_offsets: Sequence[int] = (), diary_hour_offsets: Sequence[int] = (), diary_frequency_mode: str = "daily", allow_empty_statuses: bool = False, text_output: bool = False, sick_leave_dynamic_epicrisis: bool = False, treatment_correction: str = "", birth_date: str = "", complaints: str = "", treatment: str = "", profile_status: str = "", sick_leave_from: str = "") -> DiaryBatchResult:
+    _ = (diary_files, reset_each_file, keep_signature, fill_months, remove_holiday_rows, text_output)
     status_file_paths = _existing_docx_files(status_files, "тексты дневников") if status_files else []
     if not status_file_paths and not allow_empty_statuses:
-        raise ValueError("Сначала выберите тексты дневников. Даты берутся из календарного принципа программы, а не из старой таблицы дневников.")
-
+        raise ValueError("Сначала выберите тексты дневников. Даты берутся из календаря программы, а не из таблицы дневников.")
     try:
         admission_date_value = parse_full_datetime(admission_value).date()
     except ValueError:
@@ -559,22 +364,29 @@ def fill_diary_batch(
         raise ValueError("В выбранных файлах с текстами дневников не найдено подходящих текстов.")
     first_dir = status_file_paths[0].parent if status_file_paths else Path.cwd()
     result_dir = _resolve_output_dir(output_dir, first_dir)
-    legacy_removed_after_discharge_rows = _count_legacy_rows_after_discharge(diary_files, discharge_date_value)
-
     result = _fill_text_diary_batch(
-        statuses=statuses, result_dir=result_dir, patient_name=patient_name,
-        admission_value=admission_value, admission_date_value=admission_date_value,
-        discharge_date_value=discharge_date_value, gender_source_name=gender_name,
-        repeat_statuses=repeat_statuses, patient_gender=patient_gender,
+        statuses=statuses,
+        result_dir=result_dir,
+        patient_name=patient_name,
+        admission_value=admission_value,
+        admission_date_value=admission_date_value,
+        discharge_date_value=discharge_date_value,
+        gender_source_name=gender_name,
+        repeat_statuses=repeat_statuses,
+        patient_gender=patient_gender,
         sick_leave_dynamic_epicrisis=sick_leave_dynamic_epicrisis,
-        treatment_correction=treatment_correction, birth_date=birth_date,
-        complaints=complaints, treatment=treatment, profile_status=profile_status,
-        sick_leave_from=sick_leave_from, write_report=write_report,
+        treatment_correction=treatment_correction,
+        birth_date=birth_date,
+        complaints=complaints,
+        treatment=treatment,
+        profile_status=profile_status,
+        sick_leave_from=sick_leave_from,
+        write_report=write_report,
         diary_day_offsets=tuple(int(x) for x in diary_day_offsets),
         diary_hour_offsets=tuple(int(x) for x in diary_hour_offsets),
         diary_frequency_mode=str(diary_frequency_mode or "daily").strip().lower(),
         force_final_diary=force_final_diary,
-        removed_after_discharge_rows=legacy_removed_after_discharge_rows,
+        removed_after_discharge_rows=0,
     )
     if open_result_folder:
         open_folder(result_dir)
