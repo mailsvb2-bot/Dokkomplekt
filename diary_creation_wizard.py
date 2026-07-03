@@ -163,6 +163,11 @@ def current_diary_calendar_schedule(app: object, fallback: DiaryScheduleSpec | N
     return default_calendar_diary_schedule().with_mode(frequency)
 
 
+def _normalize_rhythm_choice(text: str) -> str:
+    mapping = {"2": "каждые 4 часа", "3": "каждый час", "4": "30 минут", "5": "15 минут", "6": "5 минут"}
+    return mapping.get(text, text)
+
+
 def _prompt_intraday_rhythm(app: object, day_spec: DiaryScheduleSpec, simpledialog) -> DiaryScheduleSpec | None:
     prompt = "1 - один раз в день\n2 - каждые 4 часа\n3 - каждый час\n4 - каждые 30 минут\n5 - каждые 15 минут\n6 - каждые 5 минут\n7 - свой ритм"
     current = str(getattr(app, "_doctor_confirmed_diary_rhythm_choice", "") or "1").strip() or "1"
@@ -174,10 +179,13 @@ def _prompt_intraday_rhythm(app: object, day_spec: DiaryScheduleSpec, simpledial
         custom = simpledialog.askstring("Свой ритм", "Введите интервал: 4 часа, 1 час, 30 минут, 15 минут, 5 минут или своё число минут", initialvalue=str(getattr(app, "_doctor_confirmed_diary_custom_rhythm", "") or "30 минут"), parent=getattr(app, "root", None))
         if custom is None:
             return None
-        setattr(app, "_doctor_confirmed_diary_custom_rhythm", str(custom).strip())
-        rhythm = diary_minute_schedule_from_choice(custom)
+        custom_text = str(custom).strip().lower().replace("ё", "е")
+        if custom_text.isdigit():
+            custom_text = custom_text + " минут"
+        setattr(app, "_doctor_confirmed_diary_custom_rhythm", custom_text)
+        rhythm = diary_minute_schedule_from_choice(custom_text)
     else:
-        rhythm = diary_minute_schedule_from_choice(text)
+        rhythm = diary_minute_schedule_from_choice(_normalize_rhythm_choice(text))
     setattr(app, "_doctor_confirmed_diary_rhythm_choice", str(value).strip())
     return _merge_day_and_rhythm(day_spec, rhythm)
 
