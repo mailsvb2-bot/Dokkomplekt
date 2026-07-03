@@ -24,7 +24,7 @@ def test_startup_vbs_contract_lock_knows_about_wsh_safe_encoding():
     import architecture_contracts
     import desktop_intake_agent
 
-    assert desktop_intake_agent.AGENT_VERSION == "v1.7"
+    assert desktop_intake_agent.AGENT_VERSION == "v1.8"
     assert desktop_intake_agent.DESKTOP_INTAKE_AGENT_STARTUP_SCRIPT_IS_UTF16 is True
     assert desktop_intake_agent.DESKTOP_INTAKE_AGENT_STARTUP_SCRIPT_HAS_NO_UTF8_BOM is True
     assert architecture_contracts.ARCHITECTURE_CONTRACT_LOCK_VERSION == "v2.4"

@@ -1,6 +1,6 @@
 # MedicalDiaryAutofill / Dokkomplekt
 
-Version: `v1.4.89_release_gate_runtime_isolation_SOURCE`
+Version: `v1.4.90_intake_takeover_full_icd10`
 
 ## v1.4.89 hotfix — discharge custom case propagation
 
@@ -64,6 +64,6 @@ python project_auditor.py . --ci --quiet
 ## Regression policy
 
 `v1.4.85_baseline_foundation_SOURCE` remains the behavior baseline.  Starting
-with `v1.4.89_release_gate_runtime_isolation_SOURCE`, a future version is allowed to
+with `v1.4.90_intake_takeover_full_icd10`, a future version is allowed to
 be considered better only if it preserves `USER_BEHAVIOR_CONTRACT.md` and
 passes `REGRESSION_CONTOUR.md` / `REGRESSION_MATRIX.md` checks.

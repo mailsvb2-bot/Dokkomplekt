@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-TARGET_VERSION = "1.4.89"
-TARGET_VERSION_LABEL = "v1.4.89_release_gate_runtime_isolation_SOURCE"
+TARGET_VERSION = "1.4.90"
+TARGET_VERSION_LABEL = "v1.4.90_intake_takeover_full_icd10"
 
 
 def _read(relative: str) -> str:

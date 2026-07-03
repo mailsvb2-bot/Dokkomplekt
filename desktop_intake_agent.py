@@ -37,7 +37,7 @@ from desktop_intake import (
     signature_key,
 )
 
-AGENT_VERSION = "v1.7"
+AGENT_VERSION = "v1.8"
 POLL_SECONDS = 2.5
 LAUNCH_COOLDOWN_SECONDS = 20.0
 LOCK_STALE_SECONDS = 120.0
@@ -46,6 +46,7 @@ PENDING_RETRY_SECONDS = 75.0
 MAX_LOG_BYTES = 512 * 1024
 STATE_FILE_NAME = "desktop_intake_agent_state.json"
 LOCK_FILE_NAME = "desktop_intake_agent.lock"
+HANDOFF_FILE_NAME = "desktop_intake_agent_handoff.json"
 GUI_LOCK_FILE_NAME = "medical_diary_autofill_gui.lock"
 STARTUP_AGENT_SCRIPT_NAME = "MedicalDiaryAutofill Intake Agent.vbs"
 LEGACY_STARTUP_SHORTCUT_NAME = "MedicalDiaryAutofill Intake Agent.lnk"
@@ -58,6 +59,7 @@ DESKTOP_INTAKE_AGENT_USES_PENDING_HANDSHAKE = True
 DESKTOP_INTAKE_AGENT_AUTOSTART_INSTALL_SUPPORTED = True
 DESKTOP_INTAKE_AGENT_HIDES_POWERSHELL_WINDOW = True
 DESKTOP_INTAKE_AGENT_USES_VBS_STARTUP_SCRIPT = True
+DESKTOP_INTAKE_AGENT_SUPPORTS_UPDATE_HANDOFF = True
 DESKTOP_INTAKE_AGENT_HAS_NO_POWERSHELL_CODE_PATH = True
 DESKTOP_INTAKE_AGENT_STARTUP_SCRIPT_IS_UTF16 = True
 DESKTOP_INTAKE_AGENT_STARTUP_SCRIPT_HAS_NO_UTF8_BOM = True
@@ -110,6 +112,70 @@ def _state_path() -> Path:
 
 def _lock_path() -> Path:
     return _data_root() / LOCK_FILE_NAME
+
+
+def _handoff_path() -> Path:
+    return _data_root() / HANDOFF_FILE_NAME
+
+
+def _current_agent_identity() -> str:
+    """Stable identity of THIS agent process for handoff comparison."""
+    if getattr(sys, "frozen", False):
+        return str(Path(sys.executable).resolve())
+    return str((Path(__file__).resolve()))
+
+
+def _write_agent_handoff(gui_command: list[str]) -> None:
+    """Record which agent build and GUI target are current.
+
+    Written on every install/refresh (each GUI start). A running agent from an
+    OLD exe compares itself with this file each loop and retires when a NEWER
+    install took over. Without this, updating the EXE left the stale agent
+    alive until reboot: it kept the singleton lock, the fresh agent exited with
+    "already running", and dropped documents launched the OLD exe path — either
+    nothing started (old exe deleted) or yesterday's build opened.
+    """
+
+    payload = {
+        "agent_identity": _current_agent_identity(),
+        "gui_command": [str(item) for item in gui_command],
+        "installed_at": time.time(),
+        "version": AGENT_VERSION,
+    }
+    path = _handoff_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _read_agent_handoff() -> dict:
+    data = _load_json(_handoff_path())
+    return data if isinstance(data, dict) else {}
+
+
+def _agent_is_retired() -> bool:
+    """True when a newer install owns the intake role and this agent must exit."""
+    handoff = _read_agent_handoff()
+    recorded = str(handoff.get("agent_identity", "") or "").strip()
+    if not recorded:
+        return False
+    return recorded != _current_agent_identity()
+
+
+def _handoff_gui_command() -> list[str] | None:
+    """GUI launch command recorded by the latest install, if still valid."""
+    handoff = _read_agent_handoff()
+    raw = handoff.get("gui_command")
+    if not isinstance(raw, list) or not raw:
+        return None
+    command = [str(item) for item in raw if str(item or "").strip()]
+    if not command:
+        return None
+    target = Path(command[0])
+    if not target.exists():
+        return None
+    return command
 
 
 def _log_path() -> Path:
@@ -430,6 +496,13 @@ def install_agent_autostart(*, start_now: bool = True) -> tuple[bool, str]:
         target, arguments = _shortcut_launch_target_and_args()
         appdir = str(_app_root())
         startup_script = _write_startup_vbs(target, arguments, appdir)
+        # Publish the handoff BEFORE starting the new agent: any stale agent
+        # from a previous EXE location notices it within one poll and retires,
+        # releasing the singleton lock for the agent we are about to start.
+        try:
+            _write_agent_handoff(_native_launch_command())
+        except Exception as exc:
+            record_soft_exception("desktop_intake_agent.write_handoff", exc)
         if start_now:
             try:
                 _popen_hidden(_shortcut_launch_command(), cwd=appdir)
@@ -444,7 +517,8 @@ def install_agent_autostart(*, start_now: bool = True) -> tuple[bool, str]:
         _write_log(f"autostart install exception: {exc}")
         return False, str(exc)
 
-def _launch_command() -> list[str]:
+def _native_launch_command() -> list[str]:
+    """GUI launch command derived from THIS process/location (no handoff)."""
     if getattr(sys, "frozen", False):
         return [sys.executable]
     root = _app_root()
@@ -465,6 +539,18 @@ def _launch_command() -> list[str]:
                 executable = str(pythonw)
         return [executable, str(main_py)]
     return [sys.executable]
+
+
+def _launch_command() -> list[str]:
+    """GUI launch command: prefer the target recorded by the latest install.
+
+    A still-running agent from an old EXE location must launch the CURRENT
+    build, not its own (possibly deleted) executable.
+    """
+    handoff_command = _handoff_gui_command()
+    if handoff_command:
+        return handoff_command
+    return _native_launch_command()
 
 
 def _launch_main_app(reason: str) -> bool:
@@ -641,7 +727,18 @@ def _release_agent_lock(fd: int | None, path: Path | None = None) -> None:
 
 
 def run_forever() -> None:
-    lock_fd = _acquire_agent_lock()
+    # A takeover install may have just asked the previous agent to retire; it
+    # exits within one poll. Retry the singleton lock briefly so the fresh
+    # agent started by the GUI wins the role without waiting for a reboot.
+    lock_fd = None
+    for attempt in range(6):
+        lock_fd = _acquire_agent_lock()
+        if lock_fd is not None:
+            break
+        if _agent_is_retired():
+            _write_log("agent retired before start: a newer install owns intake")
+            return
+        time.sleep(POLL_SECONDS)
     if lock_fd is None:
         return
     state = _load_json(_state_path())
@@ -651,6 +748,9 @@ def run_forever() -> None:
     _write_log("agent started")
     while True:
         try:
+            if _agent_is_retired():
+                _write_log("agent retiring: a newer install took over intake")
+                return
             _touch_agent_lock(lock_fd)
             state_changed = False
             folder = _watched_folder()
@@ -676,7 +776,7 @@ def run_forever() -> None:
 
 
 def assert_desktop_intake_agent_lock() -> None:
-    if AGENT_VERSION != "v1.7":
+    if AGENT_VERSION != "v1.8":
         raise AssertionError("Desktop intake agent lock changed unexpectedly")
     if not DESKTOP_INTAKE_AGENT_RESPECTS_ACTIVE_GUI_LOCK:
         raise AssertionError("Desktop intake agent must respect active foreground GUI lock")

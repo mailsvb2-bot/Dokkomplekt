@@ -631,7 +631,7 @@ def assert_doctor_action_journal_is_privacy_safe() -> None:
 def assert_desktop_agent_pending_state_is_pathless() -> None:
     agent = (ROOT / "desktop_intake_agent.py").read_text(encoding="utf-8", errors="replace")
     required = {
-        "agent_lock_v17": 'AGENT_VERSION = "v1.7"' in agent,
+        "agent_lock_v17": 'AGENT_VERSION = "v1.8"' in agent,
         "agent_pathless_flag": "DESKTOP_INTAKE_AGENT_STATE_IS_PATHLESS = True" in agent,
         "agent_redacted_log_flag": "DESKTOP_INTAKE_AGENT_LOGS_ARE_REDACTED = True" in agent,
         "agent_no_pending_path_write": '"path": str(candidate.path)' not in agent,
