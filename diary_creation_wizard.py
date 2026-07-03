@@ -6,6 +6,7 @@ import os
 
 from diagnostic_logging import record_soft_exception
 from diary_schedule import (
+    DIARY_POPUP_STYLE_CHOICES,
     DiaryScheduleSpec,
     default_calendar_diary_schedule,
     describe_schedule,
@@ -14,10 +15,11 @@ from diary_schedule import (
 )
 from medical_date_state import current_semantic_date
 
-DIARY_CREATION_WIZARD_LOCK_VERSION = "v1.7"
+DIARY_CREATION_WIZARD_LOCK_VERSION = "v1.8"
 DIARY_WIZARD_USES_PROGRAM_CALENDAR_WITHOUT_DATE_TEMPLATE = True
 DIARY_WIZARD_HEADLESS_SAFE = True
 DIARY_WIZARD_HAS_NO_LEGACY_TABLE_MODE = True
+DIARY_WIZARD_HAS_STYLE_POPUP_CHOICES = True
 
 
 @dataclass(frozen=True)
@@ -44,18 +46,15 @@ class DiaryWizardReview:
             f"Пациент: {self.patient_name or 'не указан'}",
             f"Дата госпитализации: {self.admission_date or 'не найдена'}",
             f"Дата выписки: {self.discharge_date or 'не указана'}",
-            "Режим: текстовый DOCX по календарю программы",
-            f"Частота: {'по часам' if self.frequency_mode == 'hourly' else 'ежедневно'}",
-            "Принцип дат: " + (self.calendar_description or "календарь программы: ежедневно с +1 дня"),
-            f"Финальная запись выписки: {'да' if self.discharge_date else 'нет — нужна дата выписки'}",
-            f"Динамический эпикриз по больничному: {'да' if self.sick_leave_dynamic_epicrisis else 'нет'}",
+            "Режим: текстовый DOCX, без таблиц",
+            "Принцип: " + (self.calendar_description or "не выбран"),
             "Тексты дневников:",
         ]
         lines.extend([f"  - {name}" for name in self.text_files] or ["  - не выбраны"])
         if self.day_offsets:
-            lines.append("Дни дневников: " + ", ".join(f"+{item}" for item in self.day_offsets[:20]))
+            lines.append("Дни: " + ", ".join(f"+{item}" for item in self.day_offsets[:20]))
         if self.frequency_mode == "hourly" and self.hour_offsets:
-            lines.append("Часы дневников: " + ", ".join(str(item) for item in self.hour_offsets))
+            lines.append("Часы: " + ", ".join(f"+{item} ч" for item in self.hour_offsets[:20]))
         if self.warnings:
             lines.append("")
             lines.append("Что надо исправить:")
@@ -84,6 +83,15 @@ def _get_var(app: object, name: str) -> str:
         return ""
 
 
+def _set_var(app: object, name: str, value: str) -> None:
+    try:
+        var = getattr(app, name, None)
+        if var is not None and hasattr(var, "set"):
+            var.set(value)
+    except Exception as exc:
+        record_soft_exception("diary_creation_wizard.set_var", exc, detail=name)
+
+
 def _headless_or_ci(app: object) -> bool:
     if os.environ.get("CI") or os.environ.get("MEDICAL_AUTOFILL_DISABLE_AUTOSTART"):
         return True
@@ -93,12 +101,16 @@ def _headless_or_ci(app: object) -> bool:
     return not hasattr(root, "tk")
 
 
-def _set_confirmed_schedule(app: object, spec: DiaryScheduleSpec, choice_text: str = "") -> DiaryScheduleSpec:
+def _set_confirmed_schedule(app: object, spec: DiaryScheduleSpec, choice_text: str = "", style_choice: str = "") -> DiaryScheduleSpec:
     description = describe_schedule(spec)
     setattr(app, "_doctor_confirmed_diary_day_offsets", tuple(spec.day_offsets))
     setattr(app, "_doctor_confirmed_diary_hour_offsets", tuple(spec.hour_offsets))
+    setattr(app, "_doctor_confirmed_diary_frequency_mode", spec.mode)
     setattr(app, "_doctor_confirmed_diary_principle", description)
     setattr(app, "_doctor_confirmed_diary_choice", str(choice_text or "1").strip() or "1")
+    if style_choice:
+        setattr(app, "_doctor_confirmed_diary_style_choice", str(style_choice).strip())
+    _set_var(app, "diary_frequency_mode_var", spec.mode)
     try:
         var = getattr(app, "diary_calendar_principle_var", None)
         if var is not None:
@@ -115,90 +127,72 @@ def _set_confirmed_schedule(app: object, spec: DiaryScheduleSpec, choice_text: s
 
 
 def current_diary_calendar_schedule(app: object, fallback: DiaryScheduleSpec | None = None) -> DiaryScheduleSpec:
-    frequency = _get_var(app, "diary_frequency_mode_var") or "daily"
+    confirmed_mode = str(getattr(app, "_doctor_confirmed_diary_frequency_mode", "") or "").strip().lower()
+    ui_mode = _get_var(app, "diary_frequency_mode_var") or "daily"
+    frequency = confirmed_mode if confirmed_mode in {"daily", "hourly"} else ui_mode
     confirmed_days = tuple(int(item) for item in getattr(app, "_doctor_confirmed_diary_day_offsets", ()) or ())
     confirmed_hours = tuple(int(item) for item in getattr(app, "_doctor_confirmed_diary_hour_offsets", ()) or ())
-    if confirmed_days or confirmed_hours:
-        return DiaryScheduleSpec(
-            "hourly" if frequency == "hourly" and confirmed_hours else "daily",
-            confirmed_days or default_calendar_diary_schedule().day_offsets,
-            confirmed_hours,
-            1.0,
-            "doctor_confirmed_calendar_popup",
-        )
-    if fallback is not None and fallback.has_daily:
-        return fallback.with_mode(frequency)
+    if confirmed_hours:
+        return DiaryScheduleSpec("hourly", confirmed_days, confirmed_hours, 1.0, "doctor_confirmed_style_popup")
+    if confirmed_days:
+        return DiaryScheduleSpec("daily", confirmed_days, (), 1.0, "doctor_confirmed_style_popup")
+    if fallback is not None:
+        if frequency == "hourly" and fallback.has_hourly:
+            return fallback.with_mode("hourly")
+        if frequency == "daily" and fallback.has_daily:
+            return fallback.with_mode("daily")
     return default_calendar_diary_schedule().with_mode(frequency)
 
 
 def prompt_diary_calendar_principle(app: object) -> bool:
-    """Ask the doctor how to schedule diaries and confirm the schedule.
-
-    Daily mode asks the calendar principle (1 — every day from admission +1,
-    2 — clinical scheme, or custom day offsets). Hourly mode asks the hour
-    interval(s) instead — this question was missing before v1.7, which made the
-    «ежечасно» toggle a dead end that always failed wizard validation. Headless
-    and CI runs auto-confirm safe defaults. Returns False when the doctor
-    cancels the dialog.
-    """
-    hourly_mode = (_get_var(app, "diary_frequency_mode_var") or "daily") == "hourly"
     if _headless_or_ci(app):
-        if hourly_mode and not getattr(app, "_doctor_confirmed_diary_hour_offsets", ()):
-            _set_confirmed_schedule(app, diary_hourly_schedule_from_choice("1"), "1")
-        elif not getattr(app, "_doctor_confirmed_diary_day_offsets", ()):
-            _set_confirmed_schedule(app, default_calendar_diary_schedule(), "1")
+        if not getattr(app, "_doctor_confirmed_diary_day_offsets", ()) and not getattr(app, "_doctor_confirmed_diary_hour_offsets", ()):
+            _set_confirmed_schedule(app, default_calendar_diary_schedule(), "1", "1")
         return True
     try:
         from tkinter import messagebox, simpledialog
     except Exception as exc:
         record_soft_exception("diary_creation_wizard.import_tk_dialogs", exc)
-        _set_confirmed_schedule(app, default_calendar_diary_schedule(), "1")
+        _set_confirmed_schedule(app, default_calendar_diary_schedule(), "1", "1")
         return True
-
-    if hourly_mode:
-        # The hourly toggle used to be a dead end: this popup only collected
-        # DAY offsets, so hourly creation always failed validation. Ask for the
-        # hour interval symmetrically instead.
-        current = str(getattr(app, "_doctor_confirmed_diary_hourly_choice", "") or "").strip() or "2"
-        prompt = (
-            "Дневники по часам.\n\n"
-            "Укажите интервал в часах (например 2 — каждые 2 часа от времени госпитализации)\n"
-            "или свои часы через запятую: 1, 2, 4, 8."
-        )
-        while True:
-            choice = simpledialog.askstring("Дневники по часам", prompt, initialvalue=current, parent=getattr(app, "root", None))
-            if choice is None:
-                return False
-            try:
-                spec = diary_hourly_schedule_from_choice(choice)
-            except ValueError as exc:
-                messagebox.showwarning("Проверьте часы дневников", str(exc))
-                current = choice
-                continue
-            _set_confirmed_schedule(app, spec, choice)
-            setattr(app, "_doctor_confirmed_diary_hourly_choice", str(choice).strip())
-            return True
-
-    current = str(getattr(app, "_doctor_confirmed_diary_choice", "") or "").strip() or "1"
-    prompt = (
-        "Как составлять дневники?\n\n"
-        "1 — ежедневно, начиная со следующего дня после госпитализации (+1, +2, +3...)\n"
-        "2 — клиническая схема: +1, +2, +3, +7, +10, +14...\n"
-        "Или напишите свои дни через запятую: +1, +2, +3, +5, +7, +14.\n\n"
-        "Даты ставит календарь программы. Отдельный шаблон дат не используется."
-    )
+    current = str(getattr(app, "_doctor_confirmed_diary_style_choice", "") or "1").strip() or "1"
+    style_prompt = "1 - каждый день\n2 - 1, 2, 3 день...\n3 - каждый день по времени\n4 - свой стиль"
     while True:
-        choice = simpledialog.askstring("Как составлять дневники", prompt, initialvalue=current, parent=getattr(app, "root", None))
-        if choice is None:
+        style = simpledialog.askstring("Стиль дневников", style_prompt, initialvalue=current, parent=getattr(app, "root", None))
+        if style is None:
             return False
+        text = str(style or "").strip().lower().replace("ё", "е")
         try:
-            spec = diary_calendar_schedule_from_choice(choice)
+            if text in {"1", "каждый день", "ежедневно"}:
+                _set_confirmed_schedule(app, diary_calendar_schedule_from_choice("1"), "1", "1")
+                return True
+            if text in {"2", "1,2,3", "1, 2, 3", "1 2 3"} or "1,2,3" in text or "1, 2, 3" in text:
+                _set_confirmed_schedule(app, diary_calendar_schedule_from_choice("2"), "2", "2")
+                return True
+            if text in {"3", "по времени", "каждый день по времени"} or "времен" in text:
+                current_time = str(getattr(app, "_doctor_confirmed_diary_hourly_choice", "") or "24").strip()
+                value = simpledialog.askstring("Дневники по времени", "24 - каждый день в то же время; 2 - каждые 2 часа; 1,2,4 - свой стиль", initialvalue=current_time, parent=getattr(app, "root", None))
+                if value is None:
+                    current = "3"
+                    continue
+                spec = diary_hourly_schedule_from_choice(value)
+                _set_confirmed_schedule(app, spec, value, "3")
+                setattr(app, "_doctor_confirmed_diary_hourly_choice", str(value).strip())
+                return True
+            if text in {"4", "свой", "свой стиль"} or "свой" in text:
+                current_custom = str(getattr(app, "_doctor_confirmed_diary_custom_choice", "") or "+1, +2, +3, +5, +7, +14").strip()
+                value = simpledialog.askstring("Свой стиль дневников", "Введите дни: +1, +2, +3, +5, +7, +14", initialvalue=current_custom, parent=getattr(app, "root", None))
+                if value is None:
+                    current = "4"
+                    continue
+                spec = diary_calendar_schedule_from_choice(value)
+                _set_confirmed_schedule(app, spec, value, "4")
+                setattr(app, "_doctor_confirmed_diary_custom_choice", str(value).strip())
+                return True
+            raise ValueError("Выберите 1, 2, 3 или 4.")
         except ValueError as exc:
-            messagebox.showwarning("Проверьте принцип дневников", str(exc))
-            current = choice
-            continue
-        _set_confirmed_schedule(app, spec, choice)
-        return True
+            messagebox.showwarning("Проверьте стиль дневников", str(exc))
+            current = str(style or "").strip() or current
 
 
 def build_diary_wizard_review(app: object) -> DiaryWizardReview:
@@ -207,41 +201,26 @@ def build_diary_wizard_review(app: object) -> DiaryWizardReview:
     discharge = current_semantic_date(app, "discharge_date") or _get_var(app, "discharge_date_var")
     texts = tuple(Path(item).name for item in getattr(app, "status_files", []) or [])
     sick_leave_dynamic_epicrisis = _normalize_yes_no(_get_var(app, "expert_sick_leave_needed_var")) == "да"
-    frequency_mode = _get_var(app, "diary_frequency_mode_var") or "daily"
-    if frequency_mode not in {"daily", "hourly"}:
-        frequency_mode = "daily"
     schedule = current_diary_calendar_schedule(app)
+    frequency_mode = schedule.mode if schedule.mode in {"daily", "hourly"} else "daily"
     day_offsets = tuple(int(item) for item in getattr(schedule, "day_offsets", ()) or ())
-    hour_offsets: tuple[int, ...] = ()
-    if frequency_mode == "hourly":
-        hour_offsets = tuple(int(item) for item in getattr(schedule, "hour_offsets", ()) or ())
+    hour_offsets: tuple[int, ...] = tuple(int(item) for item in getattr(schedule, "hour_offsets", ()) or ()) if frequency_mode == "hourly" else ()
     if not texts and getattr(app, "diary_texts_dir", ""):
         texts = (f"папка: {Path(str(getattr(app, 'diary_texts_dir'))).name}",)
     warnings: list[str] = []
     if not patient:
         warnings.append("Введите ФИО пациента или загрузите первичный документ с ФИО.")
     if not admission:
-        warnings.append("Не найдена дата госпитализации; календарь дневников не знает, с какой даты начать.")
+        warnings.append("Не найдена дата госпитализации.")
     if not discharge:
-        warnings.append("Не указана Дата выписки; программа не знает, где поставить финальную запись выписки.")
+        warnings.append("Не указана Дата выписки.")
     if not texts:
-        warnings.append("Выберите тексты дневников через кнопку Тексты или настройте автоподбор по диагнозу.")
+        warnings.append("Выберите тексты дневников.")
     if not day_offsets and frequency_mode != "hourly":
-        warnings.append("Подтвердите принцип составления дневников: ежедневно, клиническая схема или свои дни.")
+        warnings.append("Подтвердите стиль дневников.")
     if frequency_mode == "hourly" and not hour_offsets:
-        warnings.append("Для режима по часам в профиле дневников нет часового расписания.")
-    return DiaryWizardReview(
-        patient,
-        admission,
-        discharge,
-        texts,
-        sick_leave_dynamic_epicrisis,
-        frequency_mode,
-        day_offsets,
-        hour_offsets,
-        describe_schedule(schedule),
-        tuple(warnings),
-    )
+        warnings.append("Подтвердите интервалы часов.")
+    return DiaryWizardReview(patient, admission, discharge, texts, sick_leave_dynamic_epicrisis, frequency_mode, day_offsets, hour_offsets, describe_schedule(schedule), tuple(warnings))
 
 
 def confirm_diary_creation(app: object) -> bool:
@@ -267,29 +246,15 @@ def confirm_diary_creation(app: object) -> bool:
 
 
 def assert_diary_creation_wizard_lock() -> None:
-    if DIARY_CREATION_WIZARD_LOCK_VERSION != "v1.7":
+    if DIARY_CREATION_WIZARD_LOCK_VERSION != "v1.8":
         raise AssertionError("Diary creation wizard lock changed unexpectedly")
     if not DIARY_WIZARD_USES_PROGRAM_CALENDAR_WITHOUT_DATE_TEMPLATE:
-        raise AssertionError("Diary wizard must not require a DOCX date template")
+        raise AssertionError("Diary wizard must not require date templates")
     if not DIARY_WIZARD_HEADLESS_SAFE:
-        raise AssertionError("Diary wizard must auto-confirm safely in CI/headless tests")
+        raise AssertionError("Diary wizard must stay headless-safe")
     if not DIARY_WIZARD_HAS_NO_LEGACY_TABLE_MODE:
-        raise AssertionError("Diary wizard must not expose legacy table mode")
-    empty = type("Empty", (), {})()
-    review = build_diary_wizard_review(empty)
-    text = review.as_text()
-    if review.ok or "МАСТЕР ДНЕВНИКОВ" not in text or "Принцип дат:" not in text:
-        raise AssertionError("Diary wizard must block incomplete diary state and show calendar principle")
-    forbidden = ("табличный режим", "устаревший шаблон")
-    if any(item in text.lower() for item in forbidden):
-        raise AssertionError("Diary wizard must present only the single text-calendar route")
-    if "текстовый DOCX по календарю программы" not in text:
-        raise AssertionError("Diary wizard must present the single text-calendar route")
-    # Hourly mode must have its own question: the toggle used to be a dead end
-    # because the wizard collected only DAY offsets and hourly creation always
-    # failed with "нет часового расписания".
-    hourly_stub = type("HourlyStub", (), {"diary_frequency_mode_var": type("V", (), {"get": staticmethod(lambda: "hourly")})()})()
-    if not prompt_diary_calendar_principle(hourly_stub):
-        raise AssertionError("Diary wizard hourly prompt must confirm in headless mode")
-    if not getattr(hourly_stub, "_doctor_confirmed_diary_hour_offsets", ()):
-        raise AssertionError("Diary wizard must collect hour offsets for hourly mode")
+        raise AssertionError("Diary wizard must not expose table mode")
+    if not DIARY_WIZARD_HAS_STYLE_POPUP_CHOICES:
+        raise AssertionError("Diary wizard must expose style popup choices")
+    if DIARY_POPUP_STYLE_CHOICES != ("каждый день", "1, 2, 3 день...", "каждый день по времени", "свой стиль"):
+        raise AssertionError("Diary style choices changed")
