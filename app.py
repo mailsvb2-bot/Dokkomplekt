@@ -33,38 +33,50 @@ def _not_working_value(value: str) -> bool:
 
 class RegressionStateOverlayMixin:
     def _auto_select_numbered_diary_template(self, *, ask_folder: bool = False) -> bool:
-        """Delegate numbered diary template selection to the real diary-template layer.
-
-        This overlay used to disable the 01–31 template route and silently forced
-        diaries into the text-only calendar fallback.  That made the UI look
-        green while the doctor's selected Dates template was ignored.  The
-        overlay still exists for other regression locks, but the Dates button and
-        automatic 01–31 selection must stay owned by FilesMixin /
-        DiaryTemplateSelectionMixin.
-        """
-        return super()._auto_select_numbered_diary_template(ask_folder=ask_folder)  # type: ignore[misc]
+        """Legacy numbered diary date templates are not part of the visible flow."""
+        return False
 
     def choose_diary_files(self) -> None:
-        """Keep the visible Dates button wired to real DOCX/folder selection."""
-        return super().choose_diary_files()  # type: ignore[misc]
-
-    def _estimate_selected_document_count(self, selected_medical: list[str], selected_diaries: bool, selected_custom: list[str]) -> int:
-        """Estimate planned outputs, not just selected UI groups.
-
-        ProductAccessMixin calls this through ``self`` before generation.  The
-        old estimate counted diaries as one item even when the doctor had chosen
-        one or more real Dates templates.  That made trial/per-run/month limits
-        green while runtime could create more files than preflight allowed.
-        """
-        diary_count = 0
-        if selected_diaries:
+        """The Dates button confirms the program calendar principle only."""
+        try:
+            from diary_constants import DIARY_KIND
+            from diary_creation_wizard import prompt_diary_calendar_principle
+            if not prompt_diary_calendar_principle(self):
+                return None
+            self.diary_files = []
+            self.diary_template_dir = ""
+            self._diary_files_auto_selected = False
             try:
-                diary_count = len(tuple(getattr(self, "diary_files", ()) or ()))
+                self.output_vars[DIARY_KIND].set(True)
             except Exception as exc:
-                record_soft_exception("app.estimate_diary_document_count", exc)
-                diary_count = 0
-            diary_count = max(1, diary_count)
-        return max(1, len(selected_medical or []) + len(selected_custom or []) + diary_count)
+                record_soft_exception("app.diary_calendar_select_output", exc)
+            try:
+                self._update_diary_template_label(success=True)
+                self._redraw_selection_controls()
+            except Exception as exc:
+                record_soft_exception("app.diary_calendar_refresh_ui", exc)
+            try:
+                if hasattr(self, "_update_selected_outputs_status"):
+                    self._update_selected_outputs_status()
+            except Exception as exc:
+                record_soft_exception("app.diary_calendar_status", exc)
+            try:
+                self._log("\n✅ Принцип дат дневников подтверждён: календарь программы (+1/+2/...), без шаблона дат.\n")
+            except Exception as exc:
+                record_soft_exception("app.diary_calendar_log", exc)
+            return None
+        except Exception as exc:
+            record_soft_exception("app.choose_diary_calendar_principle", exc)
+            return None
+
+    def _diary_template_label_text(self) -> str:
+        principle = str(getattr(self, "_doctor_confirmed_diary_principle", "") or "календарь программы: +1 день")
+        text = "Даты: " + principle
+        try:
+            return self._truncate_label_text(text, max_chars=42 if getattr(self, "_compact_ui", False) else 78)
+        except Exception as exc:
+            record_soft_exception("app.diary_calendar_label", exc)
+            return text
 
     def _vk_mse_work_position_value(self) -> str:
         if hasattr(self, "vk_mse_work_position_var"):
