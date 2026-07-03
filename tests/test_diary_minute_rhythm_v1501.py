@@ -5,6 +5,7 @@ from pathlib import Path
 from docx import Document
 
 from diary_batch import fill_diary_batch
+from diary_creation_wizard import _normalize_rhythm_choice
 from diary_schedule import diary_calendar_schedule_from_choice, diary_minute_schedule_from_choice, expand_minute_intervals
 
 
@@ -13,11 +14,16 @@ def _paragraph_text(path: Path) -> str:
 
 
 def test_minute_rhythm_choices_are_parsed() -> None:
-    assert diary_minute_schedule_from_choice("каждые 4 часа").minute_offsets == (240,)
-    assert diary_minute_schedule_from_choice("каждый час").minute_offsets == (60,)
-    assert diary_minute_schedule_from_choice("30 минут").minute_offsets == (30,)
-    assert diary_minute_schedule_from_choice("15 минут").minute_offsets == (15,)
-    assert diary_minute_schedule_from_choice("5 минут").minute_offsets == (5,)
+    assert _normalize_rhythm_choice("2") == "каждые 4 часа"
+    assert _normalize_rhythm_choice("3") == "каждый час"
+    assert _normalize_rhythm_choice("4") == "30 минут"
+    assert _normalize_rhythm_choice("5") == "15 минут"
+    assert _normalize_rhythm_choice("6") == "5 минут"
+    assert diary_minute_schedule_from_choice(_normalize_rhythm_choice("2")).minute_offsets == (240,)
+    assert diary_minute_schedule_from_choice(_normalize_rhythm_choice("3")).minute_offsets == (60,)
+    assert diary_minute_schedule_from_choice(_normalize_rhythm_choice("4")).minute_offsets == (30,)
+    assert diary_minute_schedule_from_choice(_normalize_rhythm_choice("5")).minute_offsets == (15,)
+    assert diary_minute_schedule_from_choice(_normalize_rhythm_choice("6")).minute_offsets == (5,)
     assert diary_minute_schedule_from_choice("45 минут").minute_offsets == (45,)
     assert expand_minute_intervals((30,), 4) == (30, 60, 90, 120)
 
