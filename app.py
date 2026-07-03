@@ -48,6 +48,24 @@ class RegressionStateOverlayMixin:
         """Keep the visible Dates button wired to real DOCX/folder selection."""
         return super().choose_diary_files()  # type: ignore[misc]
 
+    def _estimate_selected_document_count(self, selected_medical: list[str], selected_diaries: bool, selected_custom: list[str]) -> int:
+        """Estimate planned outputs, not just selected UI groups.
+
+        ProductAccessMixin calls this through ``self`` before generation.  The
+        old estimate counted diaries as one item even when the doctor had chosen
+        one or more real Dates templates.  That made trial/per-run/month limits
+        green while runtime could create more files than preflight allowed.
+        """
+        diary_count = 0
+        if selected_diaries:
+            try:
+                diary_count = len(tuple(getattr(self, "diary_files", ()) or ()))
+            except Exception as exc:
+                record_soft_exception("app.estimate_diary_document_count", exc)
+                diary_count = 0
+            diary_count = max(1, diary_count)
+        return max(1, len(selected_medical or []) + len(selected_custom or []) + diary_count)
+
     def _vk_mse_work_position_value(self) -> str:
         if hasattr(self, "vk_mse_work_position_var"):
             return self.vk_mse_work_position_var.get().strip()
