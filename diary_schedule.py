@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta
 import re
 from typing import Iterable, Mapping, Sequence
 
-DIARY_SCHEDULE_LOCK_VERSION = "v1.4"
+DIARY_SCHEDULE_LOCK_VERSION = "v1.5"
 DIARY_SCHEDULE_DOCTOR_CONFIRMATION_REQUIRED = True
 DIARY_MANUAL_DAY_INPUT_MIN_COUNT = 10
 DIARY_HOURLY_MODE_IS_PATIENT_LEVEL_CHOICE = True
@@ -18,7 +18,9 @@ DIARY_CALENDAR_NO_TEMPLATE_REQUIRED = True
 DIARY_CALENDAR_STARTS_AFTER_ADMISSION = True
 DIARY_SCHEDULE_HAS_NO_TABLE_INFERENCE = True
 DIARY_CLINICAL_AFTER_DAY7_IS_TWICE_WEEKLY = True
+DIARY_INTRADAY_MINUTE_RHYTHM_ENABLED = True
 DIARY_POPUP_STYLE_CHOICES = ("каждый день", "1, 2, 3 день...", "каждый день по времени", "свой стиль")
+DIARY_INTRADAY_RHYTHM_CHOICES = ("один раз в день", "каждые 4 часа", "каждый час", "каждые 30 минут", "каждые 15 минут", "каждые 5 минут", "свой ритм")
 DEFAULT_CALENDAR_DIARY_DAY_OFFSETS: tuple[int, ...] = tuple(range(1, 181))
 DEFAULT_TIMED_DIARY_HOUR_INTERVAL = 24
 _SIGNED_INT_RE = re.compile(r"[-+]?\d+")
@@ -44,6 +46,7 @@ class DiaryScheduleSpec:
     hour_offsets: tuple[int, ...] = ()
     confidence: float = 0.0
     source: str = "manual"
+    minute_offsets: tuple[int, ...] = ()
 
     @property
     def has_daily(self) -> bool:
@@ -51,10 +54,17 @@ class DiaryScheduleSpec:
 
     @property
     def has_hourly(self) -> bool:
-        return bool(self.hour_offsets)
+        return bool(self.hour_offsets or self.minute_offsets)
 
     def to_dict(self) -> dict:
-        return {"mode": self.mode, "day_offsets": list(self.day_offsets), "hour_offsets": list(self.hour_offsets), "confidence": self.confidence, "source": self.source}
+        return {
+            "mode": self.mode,
+            "day_offsets": list(self.day_offsets),
+            "hour_offsets": list(self.hour_offsets),
+            "minute_offsets": list(self.minute_offsets),
+            "confidence": self.confidence,
+            "source": self.source,
+        }
 
     @classmethod
     def from_dict(cls, data: Mapping[str, object] | None) -> "DiaryScheduleSpec":
@@ -63,11 +73,18 @@ class DiaryScheduleSpec:
         mode = str(data.get("mode", "daily") or "daily").strip().lower()
         if mode not in {"daily", "hourly"}:
             mode = "daily"
-        return cls(mode, tuple(_positive_unique_ints(data.get("day_offsets", ()), allow_zero=True)), tuple(_positive_unique_ints(data.get("hour_offsets", ()), allow_zero=False)), _safe_confidence(data.get("confidence", 0.0)), str(data.get("source", "manual") or "manual").strip() or "manual")
+        return cls(
+            mode,
+            tuple(_positive_unique_ints(data.get("day_offsets", ()), allow_zero=True)),
+            tuple(_positive_unique_ints(data.get("hour_offsets", ()), allow_zero=False)),
+            _safe_confidence(data.get("confidence", 0.0)),
+            str(data.get("source", "manual") or "manual").strip() or "manual",
+            tuple(_positive_unique_ints(data.get("minute_offsets", ()), allow_zero=False)),
+        )
 
     def with_mode(self, mode: str) -> "DiaryScheduleSpec":
         mode = "hourly" if str(mode).strip().lower() == "hourly" else "daily"
-        return DiaryScheduleSpec(mode, self.day_offsets, self.hour_offsets, self.confidence, self.source)
+        return DiaryScheduleSpec(mode, self.day_offsets, self.hour_offsets, self.confidence, self.source, self.minute_offsets)
 
 
 def default_calendar_diary_schedule() -> DiaryScheduleSpec:
@@ -80,6 +97,10 @@ def clinical_calendar_diary_schedule() -> DiaryScheduleSpec:
 
 def timed_daily_diary_schedule(interval_hours: int = DEFAULT_TIMED_DIARY_HOUR_INTERVAL) -> DiaryScheduleSpec:
     return DiaryScheduleSpec("hourly", (), (max(1, int(interval_hours or DEFAULT_TIMED_DIARY_HOUR_INTERVAL)),), 1.0, "popup_every_day_by_time")
+
+
+def timed_minute_diary_schedule(interval_minutes: int) -> DiaryScheduleSpec:
+    return DiaryScheduleSpec("hourly", (), (), 1.0, "popup_intraday_minute_rhythm", (max(1, int(interval_minutes)),))
 
 
 def diary_calendar_schedule_from_choice(choice: str) -> DiaryScheduleSpec:
@@ -104,6 +125,29 @@ def diary_hourly_schedule_from_choice(choice: str) -> DiaryScheduleSpec:
     return DiaryScheduleSpec("hourly", (), values, 1.0, "popup_custom_time_style")
 
 
+def diary_minute_schedule_from_choice(choice: str) -> DiaryScheduleSpec:
+    text = str(choice or "").strip().lower().replace("ё", "е")
+    compact = text.replace(" ", "")
+    if not text or text in {"0", "1", "один раз в день", "без", "нет"}:
+        return DiaryScheduleSpec("daily", (), (), 1.0, "popup_one_per_day")
+    if text in {"2", "4", "4 часа", "каждые 4 часа"} or "4час" in compact:
+        return timed_minute_diary_schedule(240)
+    if text in {"3", "1 час", "каждый час"} or "каждыйчас" in compact or "1час" in compact:
+        return timed_minute_diary_schedule(60)
+    if text in {"4", "30", "30 минут", "каждые 30 минут"} or "30мин" in compact:
+        return timed_minute_diary_schedule(30)
+    if text in {"5", "15", "15 минут", "каждые 15 минут"} or "15мин" in compact:
+        return timed_minute_diary_schedule(15)
+    if text in {"6", "5", "5 минут", "каждые 5 минут"} or "5мин" in compact:
+        return timed_minute_diary_schedule(5)
+    values = _parse_positive_sequence(text, allow_zero=False, value_name="минуты")
+    if not values:
+        raise ValueError("Укажите ритм: 4 часа, 1 час, 30 минут, 15 минут, 5 минут или своё число минут.")
+    unit_is_hour = "час" in text and "мин" not in text
+    minutes = tuple(value * 60 for value in values) if unit_is_hour else tuple(values)
+    return DiaryScheduleSpec("hourly", (), (), 1.0, "popup_custom_minute_rhythm", minutes)
+
+
 def parse_day_offsets(text: str, *, require_minimum: bool = False) -> tuple[int, ...]:
     values = tuple(_parse_positive_sequence(text, allow_zero=False, value_name="дни"))
     if require_minimum and len(values) < DIARY_MANUAL_DAY_INPUT_MIN_COUNT:
@@ -124,15 +168,21 @@ def infer_diary_schedule_from_docx(paths: Sequence[str]) -> DiaryScheduleSpec:
 
 
 def describe_schedule(spec: DiaryScheduleSpec) -> str:
-    if spec.mode == "hourly" and spec.hour_offsets:
-        return "каждый день по времени: +24 ч" if spec.hour_offsets == (24,) else "по времени: " + ", ".join(f"+{value} ч" for value in spec.hour_offsets[:16])
+    base = ""
     if spec.day_offsets:
         if spec.source == "popup_every_day":
-            return "каждый день"
-        if spec.source == "popup_1_2_3_day":
-            return "1, 2, 3, 7, затем 2 раза в неделю"
-        return "свой стиль: " + ", ".join(f"+{value} д" for value in spec.day_offsets[:16])
-    return "принцип дневников не выбран"
+            base = "каждый день"
+        elif spec.source == "popup_1_2_3_day":
+            base = "1, 2, 3, 7, затем 2 раза в неделю"
+        else:
+            base = "свой стиль: " + ", ".join(f"+{value} д" for value in spec.day_offsets[:16])
+    if spec.minute_offsets:
+        rhythm = "ритм: " + ", ".join(f"каждые {value} мин" for value in spec.minute_offsets[:8])
+        return (base + "; " + rhythm).strip("; ")
+    if spec.mode == "hourly" and spec.hour_offsets:
+        rhythm = "каждый день по времени: +24 ч" if spec.hour_offsets == (24,) else "по времени: " + ", ".join(f"+{value} ч" for value in spec.hour_offsets[:16])
+        return (base + "; " + rhythm).strip("; ")
+    return base or "принцип дневников не выбран"
 
 
 def expand_day_offsets(offsets: Sequence[int], limit: int) -> tuple[int, ...]:
@@ -152,6 +202,10 @@ def expand_day_offsets(offsets: Sequence[int], limit: int) -> tuple[int, ...]:
 
 
 def expand_hour_intervals(intervals: Sequence[int], limit: int) -> tuple[int, ...]:
+    return tuple(value // 60 for value in expand_minute_intervals([int(x) * 60 for x in intervals], limit))
+
+
+def expand_minute_intervals(intervals: Sequence[int], limit: int) -> tuple[int, ...]:
     if limit <= 0:
         return ()
     values = _positive_unique_ints(intervals, allow_zero=False)
@@ -170,6 +224,8 @@ def expand_hour_intervals(intervals: Sequence[int], limit: int) -> tuple[int, ..
 def planned_diary_datetimes(admission: datetime, spec: DiaryScheduleSpec, *, limit: int) -> tuple[datetime, ...]:
     if limit <= 0:
         return ()
+    if spec.mode == "hourly" and spec.minute_offsets:
+        return tuple(admission + timedelta(minutes=value) for value in expand_minute_intervals(spec.minute_offsets, limit))
     if spec.mode == "hourly" and spec.hour_offsets:
         return tuple(admission + timedelta(hours=hour) for hour in expand_hour_intervals(spec.hour_offsets, limit))
     return tuple(datetime.combine(admission.date() + timedelta(days=offset), admission.time()) for offset in expand_day_offsets(spec.day_offsets, limit))
@@ -180,21 +236,29 @@ def planned_diary_dates(admission: date, spec: DiaryScheduleSpec, *, limit: int)
 
 
 def planned_diary_time_labels(spec: DiaryScheduleSpec, *, limit: int, admission_time: time | None = None) -> tuple[str, ...]:
-    if spec.mode != "hourly" or not spec.hour_offsets or limit <= 0:
+    if spec.mode != "hourly" or limit <= 0:
         return tuple("" for _ in range(max(0, limit)))
     base = datetime.combine(date(2000, 1, 1), admission_time or time(hour=0, minute=0))
-    return tuple((base + timedelta(hours=hour)).strftime("%H:%M") for hour in expand_hour_intervals(spec.hour_offsets, limit))
+    if spec.minute_offsets:
+        return tuple((base + timedelta(minutes=value)).strftime("%H:%M") for value in expand_minute_intervals(spec.minute_offsets, limit))
+    if spec.hour_offsets:
+        return tuple((base + timedelta(hours=hour)).strftime("%H:%M") for hour in expand_hour_intervals(spec.hour_offsets, limit))
+    return tuple("" for _ in range(max(0, limit)))
 
 
 def assert_diary_schedule_lock() -> None:
-    if DIARY_SCHEDULE_LOCK_VERSION != "v1.4":
+    if DIARY_SCHEDULE_LOCK_VERSION != "v1.5":
         raise AssertionError("Diary schedule lock changed unexpectedly")
     if not DIARY_CLINICAL_AFTER_DAY7_IS_TWICE_WEEKLY:
         raise AssertionError("Clinical diary schedule contract is broken")
+    if not DIARY_INTRADAY_MINUTE_RHYTHM_ENABLED:
+        raise AssertionError("Minute rhythm contract is broken")
     if diary_calendar_schedule_from_choice("2").day_offsets[:8] != (1, 2, 3, 7, 10, 14, 17, 21):
         raise AssertionError("Clinical offsets are broken")
     if diary_hourly_schedule_from_choice("3").hour_offsets != (24,):
         raise AssertionError("Timed daily choice is broken")
+    if diary_minute_schedule_from_choice("30 минут").minute_offsets != (30,):
+        raise AssertionError("Minute rhythm choice is broken")
 
 
 def _safe_confidence(value: object) -> float:
