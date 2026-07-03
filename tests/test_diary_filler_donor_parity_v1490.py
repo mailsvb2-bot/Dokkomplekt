@@ -50,7 +50,7 @@ def test_diary_single_route_ignores_calendar_table_file(tmp_path: Path) -> None:
 
     assert result.processed_files == 1
     assert result.final_rows_filled == 1
-    assert result.removed_after_discharge_rows == 3
+    assert result.removed_after_discharge_rows == 0
     assert result.month_cells_filled == 0
     text = _paragraph_text(Path(result.created_files[0]))
     assert "11.06.26 First diary text" in text

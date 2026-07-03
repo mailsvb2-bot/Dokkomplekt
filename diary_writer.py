@@ -1,4 +1,10 @@
-"""Public facade for diary DOCX filling."""
+"""Removed legacy diary table writer facade.
+
+The production diary workflow is text-based: doctor-owned diary texts are
+combined with the calendar/popup schedule and written to a new DOCX document by
+``diary_batch.fill_diary_batch``.  Filling diary templates as DOCX tables is not
+part of the supported product contract.
+"""
 
 from __future__ import annotations
 
@@ -6,15 +12,12 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Sequence
 
-from docx import Document
-
 from diary_models import FillResult
-from diary_writer_apply import apply_diary_entries
-from diary_writer_entries import (
-    build_dated_entries,
-    collect_data_entries,
-    find_final_entry_index,
-    mark_skip_flags,
+
+
+_DISABLED_MESSAGE = (
+    "Заполнение дневников через DOCX-таблицы удалено из проекта. "
+    "Используйте текстовый маршрут дневников через diary_batch.fill_diary_batch()."
 )
 
 
@@ -38,48 +41,24 @@ def fill_diary_file(
     diary_hour_offsets: tuple[int, ...] = (),
     diary_frequency_mode: str = "daily",
 ) -> FillResult:
-    """Fill diary tables in one DOCX template and return a stable summary."""
-    doc = Document(str(path))
-    data_entries = collect_data_entries(doc)
-    if not data_entries:
-        raise ValueError(
-            "В шаблоне дневников не найдены строки для заполнения. "
-            "Проверьте, что таблица содержит колонку «Дневник»/«Наблюдения» и строки ниже заголовка."
-        )
-    dated_entries = build_dated_entries(
-        data_entries,
-        start_month=start_month,
-        start_year=start_year,
-        admission_date_value=admission_date_value,
-        admission_datetime_value=admission_datetime_value,
-        diary_day_offsets=diary_day_offsets,
-        diary_hour_offsets=diary_hour_offsets,
-        diary_frequency_mode=diary_frequency_mode,
-    )
-    final_entry_index = find_final_entry_index(
-        data_entries,
-        dated_entries,
-        discharge_date=discharge_date,
-        remove_holiday_rows=remove_holiday_rows,
-    )
-    mark_skip_flags(
-        dated_entries,
-        final_entry_index=final_entry_index,
-        discharge_date=discharge_date,
-        remove_holiday_rows=remove_holiday_rows,
-    )
-    stats = apply_diary_entries(
-        data_entries,
-        dated_entries,
+    """Fail closed: diary table filling is intentionally unsupported."""
+    _ = (
+        path,
         statuses,
-        start_idx=start_idx,
-        repeat_statuses=repeat_statuses,
-        keep_signature=keep_signature,
-        fill_months=fill_months,
-        discharge_date=discharge_date,
-        force_final_diary=force_final_diary,
-        final_entry_index=final_entry_index,
-        patient_gender=patient_gender,
+        start_idx,
+        repeat_statuses,
+        keep_signature,
+        fill_months,
+        start_month,
+        start_year,
+        admission_date_value,
+        admission_datetime_value,
+        discharge_date,
+        force_final_diary,
+        remove_holiday_rows,
+        patient_gender,
+        diary_day_offsets,
+        diary_hour_offsets,
+        diary_frequency_mode,
     )
-    doc.save(str(path))
-    return FillResult(**stats)
+    raise NotImplementedError(_DISABLED_MESSAGE)

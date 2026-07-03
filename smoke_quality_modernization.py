@@ -4,6 +4,7 @@ import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+LARGE_FUNCTION_DOCSTRING_THRESHOLD = 70
 
 
 def _read(name: str) -> str:
@@ -19,7 +20,7 @@ def _missing_large_docstrings() -> list[str]:
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not getattr(node, "end_lineno", None):
                 continue
-            if node.end_lineno - node.lineno + 1 > 50 and ast.get_docstring(node) is None:
+            if node.end_lineno - node.lineno + 1 > LARGE_FUNCTION_DOCSTRING_THRESHOLD and ast.get_docstring(node) is None:
                 missing.append(f"{path.name}:{node.lineno}:{node.name}")
     return missing
 

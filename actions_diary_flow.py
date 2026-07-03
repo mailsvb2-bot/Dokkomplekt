@@ -9,7 +9,7 @@ from medical_primary_document_state import selected_primary_document_path
 
 class ActionsDiaryFlowMixin:
     def _create_diaries_impl(self):
-        """Create the doctor-selected diary output for the current patient case."""
+        """Create text-route diaries from doctor-selected status texts and calendar choices."""
         primary_path = selected_primary_document_path(self)
         title_admission_value = self._sync_admission_date_from_title(force=False)
         diary_admission_value = current_semantic_date(self, "admission_date") or title_admission_value
@@ -20,10 +20,6 @@ class ActionsDiaryFlowMixin:
         if not self.status_files:
             raise ValueError("Выберите файл(ы) с текстами дневников. Тексты можно выбирать из DOCX/DOCM/DOC.")
 
-        # Единственный видимый production-путь дневников: тексты врача +
-        # календарный принцип программы (+1/+2/...) + финальная запись выписки.
-        # Случайно сохранённые файлы дат не имеют права переключать генерацию
-        # обратно в табличный сценарий.
         self.diary_files = []
         self.diary_template_dir = ""
         self._diary_files_auto_selected = False
@@ -65,6 +61,7 @@ class ActionsDiaryFlowMixin:
         from diary_batch import fill_diary_batch
         from diary_creation_wizard import current_diary_calendar_schedule
         diary_schedule = current_diary_calendar_schedule(self, fallback=self._selected_profile_diary_schedule())
+        diary_mode = getattr(diary_schedule, "mode", "daily") if diary_schedule else "daily"
         sick_leave_yes = self._normalize_yes_no(getattr(self, "expert_sick_leave_needed_var", None).get() if getattr(self, "expert_sick_leave_needed_var", None) else "") == "да"
         treatment_correction = str(getattr(getattr(self, "diary_treatment_correction_var", None), "get", lambda: "")() or "").strip()
         result = fill_diary_batch(
@@ -84,8 +81,9 @@ class ActionsDiaryFlowMixin:
             open_result_folder=False,
             write_report=self._diagnostic_reports_enabled(),
             diary_day_offsets=diary_schedule.day_offsets if diary_schedule else (),
-            diary_hour_offsets=diary_schedule.hour_offsets if diary_schedule and getattr(self, "diary_frequency_mode_var", None) and self.diary_frequency_mode_var.get() == "hourly" else (),
-            diary_frequency_mode=getattr(self, "diary_frequency_mode_var", None).get() if getattr(self, "diary_frequency_mode_var", None) else "daily",
+            diary_hour_offsets=diary_schedule.hour_offsets if diary_schedule and diary_mode == "hourly" else (),
+            diary_minute_offsets=getattr(diary_schedule, "minute_offsets", ()) if diary_schedule and diary_mode == "hourly" else (),
+            diary_frequency_mode=diary_mode,
             text_output=text_output,
             sick_leave_dynamic_epicrisis=sick_leave_yes,
             treatment_correction=treatment_correction,
@@ -122,9 +120,3 @@ class ActionsDiaryFlowMixin:
             record_soft_exception("actions_diary_flow:selected_profile_diary_schedule", exc)
             return None
         return None
-
-    def create_diaries(self) -> None:
-        self.output_vars[DIARY_KIND].set(True)
-        for kind in DOCUMENT_ORDER:
-            self.output_vars[kind].set(False)
-        self.create_selected_outputs()

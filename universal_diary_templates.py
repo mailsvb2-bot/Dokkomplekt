@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Sequence
 
 from diary_schedule import DiaryScheduleSpec, infer_diary_schedule_from_docx
-from diary_table import detect_first_month_year_from_docx, find_diary_column, find_hospitalization_day_column
 from diary_text_parser import extract_statuses_from_docx
 from universal_profiles import DocumentPack, DocumentTemplateSpec
 from universal_template_engine import attach_template_to_pack, extract_template_placeholders
@@ -24,34 +23,47 @@ DIARY_TEMPLATES_CAN_BE_TABLE_BASED_WITHOUT_PLACEHOLDERS = True
 DIARY_TEMPLATE_ERRORS_ARE_DIAGNOSTICALLY_LOGGED = True
 
 
+def _normalized_cell_text(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().replace("ё", "е").split())
+
+
+def _table_looks_like_diary(table) -> bool:
+    headers: list[str] = []
+    rows = getattr(table, "rows", ()) or ()
+    if not rows:
+        return False
+    for cell in rows[0].cells:
+        headers.append(_normalized_cell_text(getattr(cell, "text", "")))
+    joined = " ".join(headers)
+    has_diary_column = any("дневник" in item or "наблюден" in item or "состояни" in item for item in headers) or "дневник" in joined
+    has_hospital_day = any(("день" in item and "госпитал" in item) or "день госпитализации" in item for item in headers)
+    has_date_columns = any("число" in item or "дата" in item for item in headers) or any("месяц" in item for item in headers)
+    return bool(has_diary_column and (has_hospital_day or has_date_columns))
+
+
 def looks_like_diary_template(path: str | Path) -> bool:
     candidate = Path(path).expanduser()
     if not candidate.exists() or candidate.suffix.lower() not in {".docx", ".docm"}:
         return False
     try:
-        if detect_first_month_year_from_docx(candidate) is not None:
-            return True
-    except Exception as exc:
-        record_soft_exception("universal_diary_templates:31", exc)
-    try:
         doc = Document(str(candidate))
         for table in doc.tables:
-            if find_diary_column(table) is not None and find_hospitalization_day_column(table) is not None:
+            if _table_looks_like_diary(table):
                 return True
     except Exception as exc:
-        record_soft_exception("universal_diary_templates:38", exc)
+        record_soft_exception("universal_diary_templates.table_detection", exc)
     try:
         statuses = extract_statuses_from_docx(candidate)
         if statuses and "днев" in candidate.stem.lower():
             return True
     except Exception as exc:
-        record_soft_exception("universal_diary_templates:31", exc)
+        record_soft_exception("universal_diary_templates.status_detection", exc)
     try:
         placeholders = extract_template_placeholders(candidate)
         fields = {item.field_id for item in placeholders}
         return bool(fields & {"diary.entries", "diary.dates", "diary.schedule"})
     except Exception as exc:
-        record_soft_exception("universal_diary_templates:52", exc)
+        record_soft_exception("universal_diary_templates.placeholder_detection", exc)
         return False
 
 
