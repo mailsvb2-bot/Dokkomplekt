@@ -5,15 +5,25 @@ from pathlib import Path
 import os
 
 from diagnostic_logging import record_soft_exception
-from diary_schedule import DIARY_POPUP_STYLE_CHOICES, DiaryScheduleSpec, default_calendar_diary_schedule, describe_schedule, diary_calendar_schedule_from_choice, diary_hourly_schedule_from_choice
+from diary_schedule import (
+    DIARY_INTRADAY_RHYTHM_CHOICES,
+    DIARY_POPUP_STYLE_CHOICES,
+    DiaryScheduleSpec,
+    default_calendar_diary_schedule,
+    describe_schedule,
+    diary_calendar_schedule_from_choice,
+    diary_hourly_schedule_from_choice,
+    diary_minute_schedule_from_choice,
+)
 from medical_date_state import current_semantic_date
 
-DIARY_CREATION_WIZARD_LOCK_VERSION = "v1.9"
+DIARY_CREATION_WIZARD_LOCK_VERSION = "v2.0"
 DIARY_WIZARD_USES_PROGRAM_CALENDAR_WITHOUT_DATE_TEMPLATE = True
 DIARY_WIZARD_HEADLESS_SAFE = True
 DIARY_WIZARD_HAS_NO_LEGACY_TABLE_MODE = True
 DIARY_WIZARD_HAS_STYLE_POPUP_CHOICES = True
 DIARY_WIZARD_HAS_SICK_LEAVE_EPICRISIS_POPUP = True
+DIARY_WIZARD_HAS_INTRADAY_RHYTHM_POPUP = True
 
 
 @dataclass(frozen=True)
@@ -26,6 +36,7 @@ class DiaryWizardReview:
     frequency_mode: str = "daily"
     day_offsets: tuple[int, ...] = ()
     hour_offsets: tuple[int, ...] = ()
+    minute_offsets: tuple[int, ...] = ()
     calendar_description: str = ""
     warnings: tuple[str, ...] = ()
 
@@ -47,8 +58,10 @@ class DiaryWizardReview:
         lines.extend([f"  - {name}" for name in self.text_files] or ["  - не выбраны"])
         if self.day_offsets:
             lines.append("Дни: " + ", ".join(f"+{item}" for item in self.day_offsets[:20]))
-        if self.frequency_mode == "hourly" and self.hour_offsets:
+        if self.hour_offsets:
             lines.append("Часы: " + ", ".join(f"+{item} ч" for item in self.hour_offsets[:20]))
+        if self.minute_offsets:
+            lines.append("Минутный ритм: " + ", ".join(f"{item} мин" for item in self.minute_offsets[:20]))
         if self.warnings:
             lines.append("")
             lines.append("Что надо исправить:")
@@ -99,6 +112,7 @@ def _set_confirmed_schedule(app: object, spec: DiaryScheduleSpec, choice_text: s
     description = describe_schedule(spec)
     setattr(app, "_doctor_confirmed_diary_day_offsets", tuple(spec.day_offsets))
     setattr(app, "_doctor_confirmed_diary_hour_offsets", tuple(spec.hour_offsets))
+    setattr(app, "_doctor_confirmed_diary_minute_offsets", tuple(getattr(spec, "minute_offsets", ()) or ()))
     setattr(app, "_doctor_confirmed_diary_frequency_mode", spec.mode)
     setattr(app, "_doctor_confirmed_diary_principle", description)
     setattr(app, "_doctor_confirmed_diary_choice", str(choice_text or "1").strip() or "1")
@@ -120,14 +134,25 @@ def _set_confirmed_schedule(app: object, spec: DiaryScheduleSpec, choice_text: s
     return spec
 
 
+def _merge_day_and_rhythm(day_spec: DiaryScheduleSpec, rhythm_spec: DiaryScheduleSpec) -> DiaryScheduleSpec:
+    if rhythm_spec.minute_offsets:
+        return DiaryScheduleSpec("hourly", day_spec.day_offsets, (), 1.0, "doctor_day_plus_minute_rhythm", rhythm_spec.minute_offsets)
+    if rhythm_spec.hour_offsets:
+        return DiaryScheduleSpec("hourly", day_spec.day_offsets, rhythm_spec.hour_offsets, 1.0, "doctor_day_plus_hour_rhythm")
+    return day_spec
+
+
 def current_diary_calendar_schedule(app: object, fallback: DiaryScheduleSpec | None = None) -> DiaryScheduleSpec:
     confirmed_mode = str(getattr(app, "_doctor_confirmed_diary_frequency_mode", "") or "").strip().lower()
     ui_mode = _get_var(app, "diary_frequency_mode_var") or "daily"
     frequency = confirmed_mode if confirmed_mode in {"daily", "hourly"} else ui_mode
     confirmed_days = tuple(int(item) for item in getattr(app, "_doctor_confirmed_diary_day_offsets", ()) or ())
     confirmed_hours = tuple(int(item) for item in getattr(app, "_doctor_confirmed_diary_hour_offsets", ()) or ())
+    confirmed_minutes = tuple(int(item) for item in getattr(app, "_doctor_confirmed_diary_minute_offsets", ()) or ())
+    if confirmed_minutes:
+        return DiaryScheduleSpec("hourly", confirmed_days, (), 1.0, "doctor_confirmed_minute_popup", confirmed_minutes)
     if confirmed_hours:
-        return DiaryScheduleSpec("hourly", confirmed_days, confirmed_hours, 1.0, "doctor_confirmed_style_popup")
+        return DiaryScheduleSpec("hourly", confirmed_days, confirmed_hours, 1.0, "doctor_confirmed_hour_popup")
     if confirmed_days:
         return DiaryScheduleSpec("daily", confirmed_days, (), 1.0, "doctor_confirmed_style_popup")
     if fallback is not None:
@@ -136,6 +161,25 @@ def current_diary_calendar_schedule(app: object, fallback: DiaryScheduleSpec | N
         if frequency == "daily" and fallback.has_daily:
             return fallback.with_mode("daily")
     return default_calendar_diary_schedule().with_mode(frequency)
+
+
+def _prompt_intraday_rhythm(app: object, day_spec: DiaryScheduleSpec, simpledialog) -> DiaryScheduleSpec | None:
+    prompt = "1 - один раз в день\n2 - каждые 4 часа\n3 - каждый час\n4 - каждые 30 минут\n5 - каждые 15 минут\n6 - каждые 5 минут\n7 - свой ритм"
+    current = str(getattr(app, "_doctor_confirmed_diary_rhythm_choice", "") or "1").strip() or "1"
+    value = simpledialog.askstring("Ритм заполнения дневников", prompt, initialvalue=current, parent=getattr(app, "root", None))
+    if value is None:
+        return None
+    text = str(value or "").strip().lower().replace("ё", "е")
+    if text in {"7", "свой", "свой ритм"} or "свой" in text:
+        custom = simpledialog.askstring("Свой ритм", "Введите интервал: 4 часа, 1 час, 30 минут, 15 минут, 5 минут или своё число минут", initialvalue=str(getattr(app, "_doctor_confirmed_diary_custom_rhythm", "") or "30 минут"), parent=getattr(app, "root", None))
+        if custom is None:
+            return None
+        setattr(app, "_doctor_confirmed_diary_custom_rhythm", str(custom).strip())
+        rhythm = diary_minute_schedule_from_choice(custom)
+    else:
+        rhythm = diary_minute_schedule_from_choice(text)
+    setattr(app, "_doctor_confirmed_diary_rhythm_choice", str(value).strip())
+    return _merge_day_and_rhythm(day_spec, rhythm)
 
 
 def _prompt_sick_leave_epicrisis(app: object, messagebox, simpledialog) -> None:
@@ -151,14 +195,17 @@ def _prompt_sick_leave_epicrisis(app: object, messagebox, simpledialog) -> None:
 
 
 def _confirm_schedule_and_sick_leave(app: object, spec: DiaryScheduleSpec, choice_text: str, style_choice: str, messagebox, simpledialog) -> bool:
-    _set_confirmed_schedule(app, spec, choice_text, style_choice)
+    rhythm_spec = _prompt_intraday_rhythm(app, spec, simpledialog)
+    if rhythm_spec is None:
+        return False
+    _set_confirmed_schedule(app, rhythm_spec, choice_text, style_choice)
     _prompt_sick_leave_epicrisis(app, messagebox, simpledialog)
     return True
 
 
 def prompt_diary_calendar_principle(app: object) -> bool:
     if _headless_or_ci(app):
-        if not getattr(app, "_doctor_confirmed_diary_day_offsets", ()) and not getattr(app, "_doctor_confirmed_diary_hour_offsets", ()):
+        if not getattr(app, "_doctor_confirmed_diary_day_offsets", ()) and not getattr(app, "_doctor_confirmed_diary_hour_offsets", ()) and not getattr(app, "_doctor_confirmed_diary_minute_offsets", ()):
             _set_confirmed_schedule(app, default_calendar_diary_schedule(), "1", "1")
         return True
     try:
@@ -199,7 +246,7 @@ def prompt_diary_calendar_principle(app: object) -> bool:
                 return _confirm_schedule_and_sick_leave(app, spec, value, "4", messagebox, simpledialog)
             raise ValueError("Выберите 1, 2, 3 или 4.")
         except ValueError as exc:
-            messagebox.showwarning("Проверьте стиль дневников", str(exc))
+            messagebox.showwarning("Проверьте стиль/ритм дневников", str(exc))
             current = str(style or "").strip() or current
 
 
@@ -213,6 +260,7 @@ def build_diary_wizard_review(app: object) -> DiaryWizardReview:
     frequency_mode = schedule.mode if schedule.mode in {"daily", "hourly"} else "daily"
     day_offsets = tuple(int(item) for item in getattr(schedule, "day_offsets", ()) or ())
     hour_offsets: tuple[int, ...] = tuple(int(item) for item in getattr(schedule, "hour_offsets", ()) or ()) if frequency_mode == "hourly" else ()
+    minute_offsets: tuple[int, ...] = tuple(int(item) for item in getattr(schedule, "minute_offsets", ()) or ()) if frequency_mode == "hourly" else ()
     if not texts and getattr(app, "diary_texts_dir", ""):
         texts = (f"папка: {Path(str(getattr(app, 'diary_texts_dir'))).name}",)
     warnings: list[str] = []
@@ -226,9 +274,9 @@ def build_diary_wizard_review(app: object) -> DiaryWizardReview:
         warnings.append("Выберите тексты дневников.")
     if not day_offsets and frequency_mode != "hourly":
         warnings.append("Подтвердите стиль дневников.")
-    if frequency_mode == "hourly" and not hour_offsets:
-        warnings.append("Подтвердите интервалы часов.")
-    return DiaryWizardReview(patient, admission, discharge, texts, sick_leave_dynamic_epicrisis, frequency_mode, day_offsets, hour_offsets, describe_schedule(schedule), tuple(warnings))
+    if frequency_mode == "hourly" and not (hour_offsets or minute_offsets):
+        warnings.append("Подтвердите ритм заполнения по времени.")
+    return DiaryWizardReview(patient, admission, discharge, texts, sick_leave_dynamic_epicrisis, frequency_mode, day_offsets, hour_offsets, minute_offsets, describe_schedule(schedule), tuple(warnings))
 
 
 def confirm_diary_creation(app: object) -> bool:
@@ -254,7 +302,7 @@ def confirm_diary_creation(app: object) -> bool:
 
 
 def assert_diary_creation_wizard_lock() -> None:
-    if DIARY_CREATION_WIZARD_LOCK_VERSION != "v1.9":
+    if DIARY_CREATION_WIZARD_LOCK_VERSION != "v2.0":
         raise AssertionError("Diary creation wizard lock changed unexpectedly")
     if not DIARY_WIZARD_USES_PROGRAM_CALENDAR_WITHOUT_DATE_TEMPLATE:
         raise AssertionError("Diary wizard must not require date templates")
@@ -266,5 +314,9 @@ def assert_diary_creation_wizard_lock() -> None:
         raise AssertionError("Diary wizard must expose style popup choices")
     if not DIARY_WIZARD_HAS_SICK_LEAVE_EPICRISIS_POPUP:
         raise AssertionError("Diary wizard must expose sick leave epicrisis branch")
+    if not DIARY_WIZARD_HAS_INTRADAY_RHYTHM_POPUP:
+        raise AssertionError("Diary wizard must expose intraday rhythm popup")
     if DIARY_POPUP_STYLE_CHOICES != ("каждый день", "1, 2, 3 день...", "каждый день по времени", "свой стиль"):
         raise AssertionError("Diary style choices changed")
+    if "каждые 5 минут" not in DIARY_INTRADAY_RHYTHM_CHOICES:
+        raise AssertionError("Minute rhythm choices changed")
