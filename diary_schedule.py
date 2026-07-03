@@ -110,6 +110,29 @@ def diary_calendar_schedule_from_choice(choice: str) -> DiaryScheduleSpec:
     return DiaryScheduleSpec("daily", values, (), 1.0, "doctor_manual_calendar_popup")
 
 
+def diary_hourly_schedule_from_choice(choice: str) -> DiaryScheduleSpec:
+    """Turn the doctor's popup choice into an hourly observation schedule.
+
+    Accepted choices: a single interval ("2" = every 2 hours) or a
+    comma/space separated list of hour offsets from the admission time
+    ("1, 2, 4, 8"). The hourly UI toggle used to be a dead end: no popup
+    ever collected hour offsets, so the wizard always aborted with
+    "нет часового расписания". This parser gives the wizard an hourly
+    question symmetric to the daily one.
+    """
+
+    text = str(choice or "").strip().lower().replace("ё", "е")
+    values = tuple(_parse_positive_sequence(text, allow_zero=False, value_name="часы"))
+    if not values:
+        raise ValueError(
+            "Укажите интервал в часах (например 2 — каждые 2 часа) или свои часы через запятую: 1, 2, 4, 8."
+        )
+    if len(values) == 1:
+        step = values[0]
+        values = tuple(step * n for n in range(1, 13))
+    return DiaryScheduleSpec("hourly", (), values, 1.0, "doctor_hourly_calendar_popup")
+
+
 def parse_day_offsets(text: str, *, require_minimum: bool = False) -> tuple[int, ...]:
     """Parse doctor's input like '+1, 2, 3, 5, 7, 14'."""
 

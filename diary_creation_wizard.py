@@ -10,10 +10,11 @@ from diary_schedule import (
     default_calendar_diary_schedule,
     describe_schedule,
     diary_calendar_schedule_from_choice,
+    diary_hourly_schedule_from_choice,
 )
 from medical_date_state import current_semantic_date
 
-DIARY_CREATION_WIZARD_LOCK_VERSION = "v1.6"
+DIARY_CREATION_WIZARD_LOCK_VERSION = "v1.7"
 DIARY_WIZARD_USES_PROGRAM_CALENDAR_WITHOUT_DATE_TEMPLATE = True
 DIARY_WIZARD_HEADLESS_SAFE = True
 DIARY_WIZARD_HAS_NO_LEGACY_TABLE_MODE = True
@@ -131,8 +132,20 @@ def current_diary_calendar_schedule(app: object, fallback: DiaryScheduleSpec | N
 
 
 def prompt_diary_calendar_principle(app: object) -> bool:
+    """Ask the doctor how to schedule diaries and confirm the schedule.
+
+    Daily mode asks the calendar principle (1 — every day from admission +1,
+    2 — clinical scheme, or custom day offsets). Hourly mode asks the hour
+    interval(s) instead — this question was missing before v1.7, which made the
+    «ежечасно» toggle a dead end that always failed wizard validation. Headless
+    and CI runs auto-confirm safe defaults. Returns False when the doctor
+    cancels the dialog.
+    """
+    hourly_mode = (_get_var(app, "diary_frequency_mode_var") or "daily") == "hourly"
     if _headless_or_ci(app):
-        if not getattr(app, "_doctor_confirmed_diary_day_offsets", ()):
+        if hourly_mode and not getattr(app, "_doctor_confirmed_diary_hour_offsets", ()):
+            _set_confirmed_schedule(app, diary_hourly_schedule_from_choice("1"), "1")
+        elif not getattr(app, "_doctor_confirmed_diary_day_offsets", ()):
             _set_confirmed_schedule(app, default_calendar_diary_schedule(), "1")
         return True
     try:
@@ -141,6 +154,30 @@ def prompt_diary_calendar_principle(app: object) -> bool:
         record_soft_exception("diary_creation_wizard.import_tk_dialogs", exc)
         _set_confirmed_schedule(app, default_calendar_diary_schedule(), "1")
         return True
+
+    if hourly_mode:
+        # The hourly toggle used to be a dead end: this popup only collected
+        # DAY offsets, so hourly creation always failed validation. Ask for the
+        # hour interval symmetrically instead.
+        current = str(getattr(app, "_doctor_confirmed_diary_hourly_choice", "") or "").strip() or "2"
+        prompt = (
+            "Дневники по часам.\n\n"
+            "Укажите интервал в часах (например 2 — каждые 2 часа от времени госпитализации)\n"
+            "или свои часы через запятую: 1, 2, 4, 8."
+        )
+        while True:
+            choice = simpledialog.askstring("Дневники по часам", prompt, initialvalue=current, parent=getattr(app, "root", None))
+            if choice is None:
+                return False
+            try:
+                spec = diary_hourly_schedule_from_choice(choice)
+            except ValueError as exc:
+                messagebox.showwarning("Проверьте часы дневников", str(exc))
+                current = choice
+                continue
+            _set_confirmed_schedule(app, spec, choice)
+            setattr(app, "_doctor_confirmed_diary_hourly_choice", str(choice).strip())
+            return True
 
     current = str(getattr(app, "_doctor_confirmed_diary_choice", "") or "").strip() or "1"
     prompt = (
@@ -230,7 +267,7 @@ def confirm_diary_creation(app: object) -> bool:
 
 
 def assert_diary_creation_wizard_lock() -> None:
-    if DIARY_CREATION_WIZARD_LOCK_VERSION != "v1.6":
+    if DIARY_CREATION_WIZARD_LOCK_VERSION != "v1.7":
         raise AssertionError("Diary creation wizard lock changed unexpectedly")
     if not DIARY_WIZARD_USES_PROGRAM_CALENDAR_WITHOUT_DATE_TEMPLATE:
         raise AssertionError("Diary wizard must not require a DOCX date template")
@@ -248,3 +285,11 @@ def assert_diary_creation_wizard_lock() -> None:
         raise AssertionError("Diary wizard must present only the single text-calendar route")
     if "текстовый DOCX по календарю программы" not in text:
         raise AssertionError("Diary wizard must present the single text-calendar route")
+    # Hourly mode must have its own question: the toggle used to be a dead end
+    # because the wizard collected only DAY offsets and hourly creation always
+    # failed with "нет часового расписания".
+    hourly_stub = type("HourlyStub", (), {"diary_frequency_mode_var": type("V", (), {"get": staticmethod(lambda: "hourly")})()})()
+    if not prompt_diary_calendar_principle(hourly_stub):
+        raise AssertionError("Diary wizard hourly prompt must confirm in headless mode")
+    if not getattr(hourly_stub, "_doctor_confirmed_diary_hour_offsets", ()):
+        raise AssertionError("Diary wizard must collect hour offsets for hourly mode")
