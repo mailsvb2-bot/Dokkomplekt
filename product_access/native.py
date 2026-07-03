@@ -14,6 +14,7 @@ except Exception:
 
 PUBLIC_KEY_ENV = "DOKKOMPLEKT_LICENSE_PUBLIC_KEY_B64"
 RUST_LICENSE_SCHEMA = "dokkomplekt.license.v1"
+RUST_NATIVE_VERIFIED_FEATURE = "native:verified"
 
 
 class NativeLicenseError(ValueError):
@@ -49,6 +50,9 @@ def _entitlement_payload(text: str) -> dict[str, Any]:
     _verify_text(text)
     license_block = document["license"]
     payload = license_block["payload"]
+    features = tuple(str(item) for item in payload.get("features", ()) if str(item).strip())
+    if RUST_NATIVE_VERIFIED_FEATURE not in features:
+        features = (*features, RUST_NATIVE_VERIFIED_FEATURE)
     return {
         "license_id": str(payload.get("license_id") or ""),
         "plan": str(payload.get("plan") or "").lower(),
@@ -63,7 +67,7 @@ def _entitlement_payload(text: str) -> dict[str, Any]:
         "profile_limit": payload.get("profile_limit"),
         "watermark_mode": payload.get("watermark_mode"),
         "offline_grace_days": payload.get("grace_days"),
-        "features": tuple(str(item) for item in payload.get("features", ()) if str(item).strip()),
+        "features": features,
         "signature": str(license_block.get("signature") or "rust-ed25519"),
     }
 
@@ -76,7 +80,10 @@ class NativeProductAccessManager(ProductAccessManager):
         payload: Any = json.loads(text or "{}")
         if isinstance(payload, dict) and is_rust_license_document(payload):
             return LicenseEntitlement.from_mapping(_entitlement_payload(text))
-        return LicenseEntitlement.from_mapping(payload) if isinstance(payload, dict) else None
+        entitlement = LicenseEntitlement.from_mapping(payload) if isinstance(payload, dict) else None
+        if entitlement and entitlement.signature == "rust-ed25519":
+            raise NativeLicenseError("Flat JSON license cannot use the Rust native signature marker.")
+        return entitlement
 
     def install_license_text(self, text: str):
         payload: Any = json.loads(text or "{}")
@@ -87,10 +94,15 @@ class NativeProductAccessManager(ProductAccessManager):
             tmp_path.write_text(text, "utf-8")
             os.replace(tmp_path, self.license_path)
             return self.current_state()
+        entitlement = LicenseEntitlement.from_mapping(payload) if isinstance(payload, dict) else None
+        if entitlement and entitlement.signature == "rust-ed25519":
+            raise NativeLicenseError("Flat JSON license cannot use the Rust native signature marker.")
         return super().install_license_text(text)
 
     def _validate_license(self, entitlement: LicenseEntitlement, *, require_not_expired: bool = True) -> None:
         if entitlement.signature == "rust-ed25519":
+            if RUST_NATIVE_VERIFIED_FEATURE not in entitlement.features:
+                raise ValueError("Rust license marker is accepted only after native proof verification.")
             from product_access import PLAN_LIMITS, machine_fingerprint
             if not entitlement.license_id:
                 raise ValueError("В лицензии нет license_id.")
