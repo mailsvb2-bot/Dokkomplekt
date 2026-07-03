@@ -392,6 +392,7 @@ def _fill_text_diary_batch(
     diary_frequency_mode: str = "daily",
     removed_after_discharge_rows: int = 0,
 ) -> DiaryBatchResult:
+    """Build a text diary document and optional dynamic epicrisis entries."""
     if admission_date_value is None:
         admission_date_value = parse_full_date(admission_value)
     rough_limit = max(10, min(370, (discharge_date_value - admission_date_value).days + 10)) if discharge_date_value else max(10, len(statuses) or 10)
@@ -468,6 +469,7 @@ def fill_diary_batch(
     profile_status: str = "",
     sick_leave_from: str = "",
 ) -> DiaryBatchResult:
+    """Validate diary inputs and create text-route diary output for one patient."""
     _ = (diary_files, reset_each_file, keep_signature, fill_months, remove_holiday_rows, text_output)
     status_file_paths = _existing_docx_files(status_files, "тексты дневников") if status_files else []
     if not status_file_paths and not allow_empty_statuses:
