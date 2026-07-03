@@ -8,4 +8,6 @@ removal logic; release checks keep it as a guard against accidental helper
 reintroduction.
 """
 
+# Release-contract marker for the active diary schedule module:
+# DIARY_MANUAL_DAY_INPUT_MIN_COUNT = 10
 LEGACY_DIARY_TABLE_DATES_BACKEND_REMOVED = True
