@@ -13,12 +13,14 @@ from diary_dates import parse_full_date, parse_full_datetime, parse_optional_dis
 from diary_gender import adapt_text_to_patient_gender, detect_gender_from_patient_name
 from diary_models import DiaryBatchResult
 from diary_paths import available_path, make_diary_output_name, safe_filename_part
-from diary_schedule import DEFAULT_CALENDAR_DIARY_DAY_OFFSETS, expand_day_offsets, expand_hour_intervals
+from diary_schedule import DEFAULT_CALENDAR_DIARY_DAY_OFFSETS, expand_day_offsets, expand_hour_intervals, expand_minute_intervals
 from diary_text_parser import clean_status_text, extract_statuses_from_docx, is_signature_paragraph_text, remove_examinee_words
 from diary_writer_apply import NEUTRAL_FINAL_DIARY_TEXT
-from medical_calendar import is_fixed_holiday, is_non_working_day, next_working_day
+from medical_calendar import is_non_working_day, next_working_day
 from medical_docx_xml_fragments import ensure_docx_compatible, existing_word_file
 from medical_formatting import redact_technical_text, safe_filename, technical_ref, technical_report_path
+
+MAX_INTRADAY_TEXT_DIARY_ENTRIES = 20000
 
 
 @dataclass(frozen=True)
@@ -221,6 +223,60 @@ def _build_dated_entries(statuses: Sequence[str], dates: Sequence[date], patient
     return tuple(entries)
 
 
+def _intraday_minutes_for_one_day(intervals: Sequence[int]) -> tuple[int, ...]:
+    values = tuple(max(1, int(item)) for item in intervals if int(item) > 0)
+    if not values:
+        return ()
+    result = [0]
+    for offset in expand_minute_intervals(values, 1440):
+        if offset >= 1440:
+            break
+        result.append(offset)
+    return tuple(dict.fromkeys(result))
+
+
+def _intraday_text_diary_datetimes(admission_value: str, admission_date_value: date, discharge_date_value: date | None, *, day_offsets: Sequence[int], minute_offsets: Sequence[int], limit: int) -> tuple[datetime, ...]:
+    if limit <= 0:
+        return ()
+    try:
+        base = parse_full_datetime(admission_value)
+    except ValueError:
+        base = datetime.combine(admission_date_value, datetime.min.time())
+    minutes = _intraday_minutes_for_one_day(minute_offsets)
+    if not minutes:
+        return ()
+    if day_offsets:
+        day_count = max(1, min(370, limit))
+        days = _text_diary_dates(admission_date_value, discharge_date_value, limit=day_count, day_offsets=day_offsets)
+        result: list[datetime] = []
+        for item_date in days:
+            start = datetime.combine(item_date, base.time())
+            for minute in minutes:
+                moment = start + timedelta(minutes=minute)
+                if moment.date() != item_date:
+                    break
+                if discharge_date_value is not None and moment.date() > discharge_date_value:
+                    break
+                result.append(moment)
+                if len(result) >= MAX_INTRADAY_TEXT_DIARY_ENTRIES:
+                    return tuple(result)
+        return tuple(result)
+    result: list[datetime] = []
+    current = base
+    step_values = tuple(max(1, int(item)) for item in minute_offsets)
+    expanded = expand_minute_intervals(step_values, MAX_INTRADAY_TEXT_DIARY_ENTRIES)
+    for minute in expanded:
+        moment = base + timedelta(minutes=minute)
+        if discharge_date_value is not None and moment.date() > discharge_date_value:
+            break
+        if is_non_working_day(moment.date()):
+            continue
+        result.append(moment)
+        if len(result) >= MAX_INTRADAY_TEXT_DIARY_ENTRIES:
+            break
+    return tuple(result)
+
+
 def _hourly_text_diary_datetimes(admission_value: str, discharge_date_value: date | None, *, limit: int, hour_offsets: Sequence[int]) -> tuple[datetime, ...]:
     if limit <= 0:
         return ()
@@ -300,14 +356,17 @@ def _create_text_diary_document(output_dir: Path, patient_name: str, entries: Se
     return target
 
 
-def _fill_text_diary_batch(*, statuses: Sequence[str], result_dir: Path, patient_name: str, admission_value: str, admission_date_value, discharge_date_value, gender_source_name: str, repeat_statuses: bool, patient_gender: str | None, sick_leave_dynamic_epicrisis: bool, treatment_correction: str, birth_date: str, complaints: str, treatment: str, profile_status: str, sick_leave_from: str, write_report: bool, diary_day_offsets: Sequence[int], force_final_diary: bool, diary_hour_offsets: Sequence[int] = (), diary_frequency_mode: str = "daily", removed_after_discharge_rows: int = 0) -> DiaryBatchResult:
+def _fill_text_diary_batch(*, statuses: Sequence[str], result_dir: Path, patient_name: str, admission_value: str, admission_date_value, discharge_date_value, gender_source_name: str, repeat_statuses: bool, patient_gender: str | None, sick_leave_dynamic_epicrisis: bool, treatment_correction: str, birth_date: str, complaints: str, treatment: str, profile_status: str, sick_leave_from: str, write_report: bool, diary_day_offsets: Sequence[int], force_final_diary: bool, diary_hour_offsets: Sequence[int] = (), diary_minute_offsets: Sequence[int] = (), diary_frequency_mode: str = "daily", removed_after_discharge_rows: int = 0) -> DiaryBatchResult:
     if admission_date_value is None:
         admission_date_value = parse_full_date(admission_value)
-    rough_limit = max(10, min(120, (discharge_date_value - admission_date_value).days + 10)) if discharge_date_value else max(10, len(statuses) or 10)
+    rough_limit = max(10, min(370, (discharge_date_value - admission_date_value).days + 10)) if discharge_date_value else max(10, len(statuses) or 10)
     hourly_mode = str(diary_frequency_mode or "daily").strip().lower() == "hourly"
     if hourly_mode:
-        hourly_limit = max(rough_limit, min(240, rough_limit * 12))
-        moments = _hourly_text_diary_datetimes(admission_value, discharge_date_value, limit=hourly_limit, hour_offsets=diary_hour_offsets)
+        if diary_minute_offsets:
+            moments = _intraday_text_diary_datetimes(admission_value, admission_date_value, discharge_date_value, day_offsets=diary_day_offsets, minute_offsets=diary_minute_offsets, limit=rough_limit)
+        else:
+            hourly_limit = max(rough_limit, min(240, rough_limit * 12))
+            moments = _hourly_text_diary_datetimes(admission_value, discharge_date_value, limit=hourly_limit, hour_offsets=diary_hour_offsets)
         dates = tuple(moment.date() for moment in moments)
         final_date = None
         entries = list(_build_hourly_entries(statuses, moments, patient_gender, repeat_statuses))
@@ -343,7 +402,7 @@ def _fill_text_diary_batch(*, statuses: Sequence[str], result_dir: Path, patient
     return DiaryBatchResult([created], report_path, 1, len(entries), len(entries), 0, final_rows_filled, 0, 0, removed_after_discharge_rows)
 
 
-def fill_diary_batch(*, status_files: Sequence[str | Path], diary_files: Sequence[str | Path], output_dir: str | Path | None, patient_name: str, admission_value: str, gender_source_name: str | None = None, discharge_value: str = "", repeat_statuses: bool = True, reset_each_file: bool = True, keep_signature: bool = True, fill_months: bool = True, force_final_diary: bool = True, remove_holiday_rows: bool = True, open_result_folder: bool = False, write_report: bool = False, diary_day_offsets: Sequence[int] = (), diary_hour_offsets: Sequence[int] = (), diary_frequency_mode: str = "daily", allow_empty_statuses: bool = False, text_output: bool = False, sick_leave_dynamic_epicrisis: bool = False, treatment_correction: str = "", birth_date: str = "", complaints: str = "", treatment: str = "", profile_status: str = "", sick_leave_from: str = "") -> DiaryBatchResult:
+def fill_diary_batch(*, status_files: Sequence[str | Path], diary_files: Sequence[str | Path], output_dir: str | Path | None, patient_name: str, admission_value: str, gender_source_name: str | None = None, discharge_value: str = "", repeat_statuses: bool = True, reset_each_file: bool = True, keep_signature: bool = True, fill_months: bool = True, force_final_diary: bool = True, remove_holiday_rows: bool = True, open_result_folder: bool = False, write_report: bool = False, diary_day_offsets: Sequence[int] = (), diary_hour_offsets: Sequence[int] = (), diary_minute_offsets: Sequence[int] = (), diary_frequency_mode: str = "daily", allow_empty_statuses: bool = False, text_output: bool = False, sick_leave_dynamic_epicrisis: bool = False, treatment_correction: str = "", birth_date: str = "", complaints: str = "", treatment: str = "", profile_status: str = "", sick_leave_from: str = "") -> DiaryBatchResult:
     _ = (diary_files, reset_each_file, keep_signature, fill_months, remove_holiday_rows, text_output)
     status_file_paths = _existing_docx_files(status_files, "тексты дневников") if status_files else []
     if not status_file_paths and not allow_empty_statuses:
@@ -384,6 +443,7 @@ def fill_diary_batch(*, status_files: Sequence[str | Path], diary_files: Sequenc
         write_report=write_report,
         diary_day_offsets=tuple(int(x) for x in diary_day_offsets),
         diary_hour_offsets=tuple(int(x) for x in diary_hour_offsets),
+        diary_minute_offsets=tuple(int(x) for x in diary_minute_offsets),
         diary_frequency_mode=str(diary_frequency_mode or "daily").strip().lower(),
         force_final_diary=force_final_diary,
         removed_after_discharge_rows=0,
