@@ -100,6 +100,7 @@ python -m PyInstaller ^
   --version-file version_info.txt ^
   --noupx ^
   %ADD_TEMPLATES% ^
+  --add-data "resources;resources" ^
   --collect-all docx ^
   --collect-all lxml ^
   --collect-all tkinterdnd2 ^

@@ -30,3 +30,4 @@ Thumbs.db
 .idea/
 release/
 .ruff_cache/
+.medical_diary_autofill_data/

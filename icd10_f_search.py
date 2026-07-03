@@ -286,7 +286,7 @@ def assert_icd10_diagnosis_normalizer_lock() -> None:
         (normalize_diagnosis_with_icd10("Острый аппендицит").startswith("K35"), "appendicitis must map to K35"),
         (normalize_diagnosis_with_icd10("I10").startswith("I10"), "explicit I10 code must stay I10"),
         (normalize_diagnosis_with_icd10("К35").startswith("K35"), "Cyrillic keyboard ICD-10 K35 must normalize to Latin K35"),
-        (normalize_diagnosis_with_icd10("К35.8") == "K35.8", "unknown Cyrillic-layout ICD-10 subcode must still become canonical Latin code"),
+        (normalize_diagnosis_with_icd10("К35.8").startswith("K35.8"), "Cyrillic-layout ICD-10 subcode must become canonical Latin code (now enriched with the official title from the full catalog)"),
         (normalize_diagnosis_with_icd10("Артериальная гипертензия").startswith("I10"), "hypertension alias must map to I10"),
         (normalize_diagnosis_with_icd10("какая-то техническая инструкция") == "какая-то техническая инструкция", "unknown free text must not be invented"),
         (normalize_required_diagnosis_with_icd10("какая-то техническая инструкция") == "", "required popup diagnosis must reject unresolved free text"),

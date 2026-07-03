@@ -19,6 +19,7 @@ import re
 
 from medical_language_catalog import SUPPORTED_LANGUAGE_IDS, normalize_language_id
 from icd10_models import ICD10Diagnosis
+from icd10_full_data import FULL_ICD10_NON_F_ROWS
 
 
 _SECTION_KIND = "section"
@@ -1041,6 +1042,12 @@ def _build_rows() -> list[ICD10Diagnosis]:
             break
     combined[insert_at:insert_at] = [_row(code, title) for code, title in _substance_rows()]
 
+    # Append the full non-F ICD-10 detail layer LAST so it only fills classes
+    # that were previously chapter/block-only (A, K, I, C, ...). Curated F rows,
+    # localized sections/blocks and hand-tuned common rubrics keep priority
+    # because de-duplication below preserves the first occurrence of each code.
+    combined += [_row(code, title) for code, title in FULL_ICD10_NON_F_ROWS]
+
     seen: set[str] = set()
     diagnoses: list[ICD10Diagnosis] = []
     for item in combined:
@@ -1078,6 +1085,34 @@ def assert_icd10_full_catalog_lock() -> None:
         raise AssertionError("ICD-10 catalog lost F-class rows")
     if not any(item.code.startswith("K") for item in ICD10_DIAGNOSES):
         raise AssertionError("ICD-10 catalog is still F-class-only: K-class missing")
+    # Full ICD-10 (not just chapter/block headers): every somatic class must now
+    # carry detailed rubrics/subrubrics so the diagnosis selector and template
+    # matching work outside psychiatry too. Probe representative real codes.
+    required_detail_codes = {
+        "A00.0",   # холера
+        "C50.9",   # рак молочной железы
+        "E11.9",   # сахарный диабет 2 типа
+        "I21.0",   # инфаркт миокарда
+        "J18.9",   # пневмония
+        "K35.8",   # острый аппендицит
+        "N23",     # почечная колика
+        "S72.0",   # перелом шейки бедра
+    }
+    catalog_codes = {item.code for item in ICD10_DIAGNOSES}
+    missing_detail = sorted(required_detail_codes - catalog_codes)
+    if missing_detail:
+        raise AssertionError(
+            "ICD-10 catalog is missing required detailed codes (full catalog "
+            "regression): " + ", ".join(missing_detail)
+        )
+    detailed_non_f = sum(
+        1 for item in ICD10_DIAGNOSES if "." in item.code and not item.code.startswith("F")
+    )
+    if detailed_non_f < 5000:
+        raise AssertionError(
+            f"ICD-10 catalog lost the full non-F detail layer: only {detailed_non_f} "
+            "four-digit non-F subrubrics present"
+        )
     section_rows = [item for item in ICD10_DIAGNOSES if item.kind == _SECTION_KIND]
     for lang in _LANGS:
         if not all(item.title_for_language(lang) for item in section_rows):
