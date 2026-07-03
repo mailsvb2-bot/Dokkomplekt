@@ -9,7 +9,6 @@ from medical_primary_document_state import selected_primary_document_path
 
 class ActionsDiaryFlowMixin:
     def _create_diaries_impl(self):
-        """Create the doctor-selected diary output for the current patient case."""
         primary_path = selected_primary_document_path(self)
         title_admission_value = self._sync_admission_date_from_title(force=False)
         diary_admission_value = current_semantic_date(self, "admission_date") or title_admission_value
@@ -82,6 +81,7 @@ class ActionsDiaryFlowMixin:
             write_report=self._diagnostic_reports_enabled(),
             diary_day_offsets=diary_schedule.day_offsets if diary_schedule else (),
             diary_hour_offsets=diary_schedule.hour_offsets if diary_schedule and diary_mode == "hourly" else (),
+            diary_minute_offsets=getattr(diary_schedule, "minute_offsets", ()) if diary_schedule and diary_mode == "hourly" else (),
             diary_frequency_mode=diary_mode,
             text_output=text_output,
             sick_leave_dynamic_epicrisis=sick_leave_yes,
