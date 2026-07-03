@@ -20,9 +20,18 @@ DIARY_SCHEDULE_HAS_NO_TABLE_INFERENCE = True
 DIARY_CLINICAL_AFTER_DAY7_IS_TWICE_WEEKLY = True
 DIARY_INTRADAY_MINUTE_RHYTHM_ENABLED = True
 DIARY_POPUP_STYLE_CHOICES = ("каждый день", "1, 2, 3 день...", "каждый день по времени", "свой стиль")
-DIARY_INTRADAY_RHYTHM_CHOICES = ("один раз в день", "каждые 4 часа", "каждый час", "каждые 30 минут", "каждые 15 минут", "каждые 5 минут", "свой ритм")
+DIARY_INTRADAY_RHYTHM_CHOICES = (
+    "один раз в день",
+    "каждые 4 часа",
+    "каждый час",
+    "каждые 30 минут",
+    "каждые 15 минут",
+    "каждые 5 минут",
+    "свой ритм",
+)
 DEFAULT_CALENDAR_DIARY_DAY_OFFSETS: tuple[int, ...] = tuple(range(1, 181))
 DEFAULT_TIMED_DIARY_HOUR_INTERVAL = 24
+DEFAULT_HOURLY_EXPANSION_LIMIT = 180
 _SIGNED_INT_RE = re.compile(r"[-+]?\d+")
 
 
@@ -122,6 +131,11 @@ def diary_hourly_schedule_from_choice(choice: str) -> DiaryScheduleSpec:
     values = tuple(_parse_positive_sequence(text, allow_zero=False, value_name="часы"))
     if not values:
         raise ValueError("Укажите часы цифрами.")
+    # A single value in the doctor's popup means an interval: "2" => every 2
+    # hours. Store the expanded offsets so review/UI can show the real schedule
+    # and the generator does not collapse the hourly route back to one entry.
+    if len(values) == 1:
+        values = expand_hour_intervals(values, DEFAULT_HOURLY_EXPANSION_LIMIT)
     return DiaryScheduleSpec("hourly", (), values, 1.0, "popup_custom_time_style")
 
 
@@ -130,15 +144,15 @@ def diary_minute_schedule_from_choice(choice: str) -> DiaryScheduleSpec:
     compact = text.replace(" ", "")
     if not text or text in {"0", "1", "один раз в день", "без", "нет"}:
         return DiaryScheduleSpec("daily", (), (), 1.0, "popup_one_per_day")
-    if text in {"2", "4", "4 часа", "каждые 4 часа"} or "4час" in compact:
+    if text in {"2", "4", "4 часа", "каждые 4 часа"} or compact in {"4часа", "каждые4часа"}:
         return timed_minute_diary_schedule(240)
-    if text in {"3", "1 час", "каждый час"} or "каждыйчас" in compact or "1час" in compact:
+    if text in {"3", "1 час", "каждый час"} or compact in {"1час", "каждыйчас"}:
         return timed_minute_diary_schedule(60)
-    if text in {"4", "30", "30 минут", "каждые 30 минут"} or "30мин" in compact:
+    if text in {"4", "30", "30 минут", "каждые 30 минут"} or compact in {"30мин", "30минут", "каждые30минут"}:
         return timed_minute_diary_schedule(30)
-    if text in {"5", "15", "15 минут", "каждые 15 минут"} or "15мин" in compact:
+    if text in {"5", "15", "15 минут", "каждые 15 минут"} or compact in {"15мин", "15минут", "каждые15минут"}:
         return timed_minute_diary_schedule(15)
-    if text in {"6", "5", "5 минут", "каждые 5 минут"} or "5мин" in compact:
+    if text in {"6", "5", "5 минут", "каждые 5 минут"} or compact in {"5мин", "5минут", "каждые5минут"}:
         return timed_minute_diary_schedule(5)
     values = _parse_positive_sequence(text, allow_zero=False, value_name="минуты")
     if not values:
@@ -202,7 +216,15 @@ def expand_day_offsets(offsets: Sequence[int], limit: int) -> tuple[int, ...]:
 
 
 def expand_hour_intervals(intervals: Sequence[int], limit: int) -> tuple[int, ...]:
-    return tuple(value // 60 for value in expand_minute_intervals([int(x) * 60 for x in intervals], limit))
+    if limit <= 0:
+        return ()
+    values = _positive_unique_ints(intervals, allow_zero=False)
+    if not values:
+        return ()
+    if len(values) == 1:
+        step = max(1, int(values[0]))
+        return tuple(step * index for index in range(1, limit + 1))
+    return tuple(values[:limit])
 
 
 def expand_minute_intervals(intervals: Sequence[int], limit: int) -> tuple[int, ...]:
@@ -257,8 +279,12 @@ def assert_diary_schedule_lock() -> None:
         raise AssertionError("Clinical offsets are broken")
     if diary_hourly_schedule_from_choice("3").hour_offsets != (24,):
         raise AssertionError("Timed daily choice is broken")
+    if diary_hourly_schedule_from_choice("2").hour_offsets[:4] != (2, 4, 6, 8):
+        raise AssertionError("Hourly interval expansion is broken")
     if diary_minute_schedule_from_choice("30 минут").minute_offsets != (30,):
         raise AssertionError("Minute rhythm choice is broken")
+    if diary_minute_schedule_from_choice("45 минут").minute_offsets != (45,):
+        raise AssertionError("Custom minute rhythm parsing is broken")
 
 
 def _safe_confidence(value: object) -> float:
@@ -269,6 +295,7 @@ def _safe_confidence(value: object) -> float:
 
 
 def _parse_positive_sequence(text: str, *, allow_zero: bool, value_name: str) -> list[int]:
+    _ = value_name
     values: list[int] = []
     seen: set[int] = set()
     negatives: list[int] = []
