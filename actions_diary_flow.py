@@ -20,23 +20,21 @@ class ActionsDiaryFlowMixin:
         if not self.status_files:
             raise ValueError("Выберите файл(ы) с текстами дневников. Тексты можно выбирать из DOCX/DOCM/DOC.")
 
-        # Единственный видимый production-путь дневников: тексты врача +
-        # календарный принцип программы (+1/+2/...) + финальная запись выписки.
-        # Случайно сохранённые файлы дат не имеют права переключать генерацию
-        # обратно в табличный сценарий.
-        self.diary_files = []
-        self.diary_template_dir = ""
-        self._diary_files_auto_selected = False
+        if not self.diary_files:
+            try:
+                self._auto_select_numbered_diary_template(ask_folder=False)
+            except Exception as exc:
+                record_soft_exception("actions_diary_flow.auto_select_dates_template", exc)
+        text_output = not bool(self.diary_files)
+        self._diary_text_output_enabled = text_output
         try:
-            self._update_diary_template_label(success=True)
+            self._update_diary_template_label(success=bool(self.diary_files) or text_output)
         except Exception as exc:
-            record_soft_exception("actions_diary_flow.force_text_output_label", exc)
-        text_output = True
-        self._diary_text_output_enabled = True
+            record_soft_exception("actions_diary_flow.diary_template_label", exc)
         try:
             from diary_creation_wizard import confirm_diary_creation
             if not confirm_diary_creation(self):
-                raise ValueError("Создание дневников остановлено мастером дневников: проверьте дату госпитализации, дату выписки, тексты и принцип дневников.")
+                raise ValueError("Создание дневников остановлено мастером дневников: проверьте дату госпитализации, дату выписки, тексты и даты дневников.")
         except ValueError:
             raise
         except Exception as exc:
@@ -69,7 +67,7 @@ class ActionsDiaryFlowMixin:
         treatment_correction = str(getattr(getattr(self, "diary_treatment_correction_var", None), "get", lambda: "")() or "").strip()
         result = fill_diary_batch(
             status_files=self.status_files,
-            diary_files=[],
+            diary_files=list(self.diary_files or ()),
             output_dir=str(self._result_output_dir()),
             patient_name=diary_patient_name,
             admission_value=diary_admission_value,
