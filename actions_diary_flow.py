@@ -9,6 +9,7 @@ from medical_primary_document_state import selected_primary_document_path
 
 class ActionsDiaryFlowMixin:
     def _create_diaries_impl(self):
+        """Create text-route diaries from doctor-selected status texts and calendar choices."""
         primary_path = selected_primary_document_path(self)
         title_admission_value = self._sync_admission_date_from_title(force=False)
         diary_admission_value = current_semantic_date(self, "admission_date") or title_admission_value
@@ -119,9 +120,3 @@ class ActionsDiaryFlowMixin:
             record_soft_exception("actions_diary_flow:selected_profile_diary_schedule", exc)
             return None
         return None
-
-    def create_diaries(self) -> None:
-        self.output_vars[DIARY_KIND].set(True)
-        for kind in DOCUMENT_ORDER:
-            self.output_vars[kind].set(False)
-        self.create_selected_outputs()
