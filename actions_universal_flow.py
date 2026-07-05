@@ -46,23 +46,11 @@ class ActionsUniversalFlowMixin:
             self._log(f"\n⚠ Не удалось применить правила профиля к исходному документу: {exc}\n")
         confirmed_values = self._confirmed_universal_overlay_values()
         if confirmed_values:
-            # The profile scanner is helpful, but it must never win over the
-            # current UI/popup state.  Some regex matches intentionally carry
-            # high confidence (for example a case number found in the source
-            # DOCX), and without this final overlay a doctor-corrected value in
-            # the UI could be overwritten only for custom medpack documents.
             case = merge_case_values(case, confirmed_values, source_document="doctor_confirmed_ui_state")
         return case
 
     def _confirmed_universal_overlay_values(self) -> dict[str, str]:
-        """Return current UI/popup values that must outrank source scanning.
-
-        Fixed-document generation already renders from ``_medical_override_data``.
-        Dynamic doctor-owned templates additionally rescan the source document
-        with profile rules; this helper reapplies the values visible in the UI
-        afterwards so custom documents preserve the same doctor-approved state.
-        """
-
+        """Return current UI/popup values that must outrank source scanning."""
         values: dict[str, str] = {}
 
         def var_text(name: str) -> str:
@@ -112,6 +100,7 @@ class ActionsUniversalFlowMixin:
         add("labs.date_policy", var_text("labs_date_policy_var"))
 
         yes_no = getattr(self, "_normalize_yes_no", None)
+
         def normalized_yes_no(value: str) -> str:
             try:
                 return str(yes_no(value) if callable(yes_no) else value).strip()
@@ -151,12 +140,7 @@ class ActionsUniversalFlowMixin:
         return values
 
     def _custom_requirement_flags(self, selected_custom_ids: List[str]) -> dict[str, bool]:
-        """Infer preflight/popup requirements for selected doctor-owned buttons.
-
-        This method is intentionally in the base universal flow, not only in the
-        UI overlay, so block-03 custom buttons keep working if mixin order changes
-        or a future refactor removes an overlay-specific super target.
-        """
+        """Infer preflight/popup requirements for selected doctor-owned buttons."""
         from universal_main_documents import custom_requirement_flags_for_documents, empty_custom_requirement_flags
 
         try:
@@ -225,10 +209,10 @@ class ActionsUniversalFlowMixin:
         case = self._offer_custom_completion_values(current_pack, case, selected_custom_ids)
         diary_ids, regular_ids = self._split_custom_diary_document_ids(current_pack, selected_custom_ids)
         created_paths: list[Path] = []
-        if regular_ids:
-            created_paths.extend(self._create_regular_custom_documents(current_pack, case, regular_ids, out_dir))
         if diary_ids:
             created_paths.extend(self._create_custom_diary_documents_impl(current_pack, case, diary_ids, out_dir))
+        if regular_ids:
+            created_paths.extend(self._create_regular_custom_documents(current_pack, case, regular_ids, out_dir))
         self._set_status("Custom-документы профиля обработаны")
         return created_paths
 
@@ -279,9 +263,14 @@ class ActionsUniversalFlowMixin:
     def _create_custom_diary_documents_impl(self, current_pack, case, diary_ids: List[str], out_dir) -> List[Path]:
         if not self.status_files:
             self._auto_select_diary_text_by_diagnosis(ask_folder=False)
-        # Custom diary templates may contain the observation texts themselves.
-        # The generation layer will use the template as a fallback status source
-        # when no separate diary-text file is selected.
+
+        from diary_creation_wizard import confirm_diary_creation, current_diary_calendar_schedule
+
+        if not confirm_diary_creation(self):
+            raise ValueError("Создание custom-дневников остановлено мастером дневников: проверьте дату госпитализации, дату выписки, тексты и принцип дневников.")
+        diary_schedule = current_diary_calendar_schedule(self, fallback=self._selected_profile_diary_schedule())
+        diary_mode = getattr(diary_schedule, "mode", "daily") if diary_schedule else "daily"
+
         patient_name = self.patient_name_var.get().strip() or case.get("patient.fio")
         admission_value = current_semantic_date(self, "admission_date") or case.get("admission.date")
         if not patient_name:
@@ -290,7 +279,10 @@ class ActionsUniversalFlowMixin:
             raise ValueError("Не указана дата поступления для дневников.")
         discharge_value = current_semantic_date(self, "discharge_date") or case.get("discharge.date")
         if not discharge_value:
-            raise ValueError("Не указана дата выписки для дневников. Она нужна, чтобы правильно закончить таблицу.")
+            raise ValueError("Не указана дата выписки для дневников. Она нужна, чтобы правильно завершить дневники.")
+        data = getattr(self, "data", None)
+        sick_leave_yes = self._normalize_yes_no(getattr(self, "expert_sick_leave_needed_var", None).get() if getattr(self, "expert_sick_leave_needed_var", None) else "") == "да"
+        treatment_correction = str(getattr(getattr(self, "diary_treatment_correction_var", None), "get", lambda: "")() or "").strip()
         from universal_diary_generation import render_diary_documents_from_pack
 
         result = render_diary_documents_from_pack(
@@ -304,7 +296,10 @@ class ActionsUniversalFlowMixin:
             admission_value=admission_value,
             discharge_value=discharge_value,
             gender_source_name=case.get("patient.fio") or patient_name,
-            frequency_mode=getattr(self, "diary_frequency_mode_var", None).get() if getattr(self, "diary_frequency_mode_var", None) else "daily",
+            frequency_mode=diary_mode,
+            diary_day_offsets=getattr(diary_schedule, "day_offsets", ()) if diary_schedule else (),
+            diary_hour_offsets=getattr(diary_schedule, "hour_offsets", ()) if diary_schedule and diary_mode == "hourly" else (),
+            diary_minute_offsets=getattr(diary_schedule, "minute_offsets", ()) if diary_schedule and diary_mode == "hourly" else (),
             repeat_statuses=self.repeat_statuses_var.get(),
             reset_each_file=self.reset_each_file_var.get(),
             keep_signature=self.keep_signature_var.get(),
@@ -312,6 +307,13 @@ class ActionsUniversalFlowMixin:
             force_final_diary=self.force_final_diary_var.get(),
             remove_holiday_rows=self.remove_holiday_rows_var.get(),
             write_report=self._diagnostic_reports_enabled(),
+            sick_leave_dynamic_epicrisis=sick_leave_yes,
+            treatment_correction=treatment_correction,
+            birth_date=str(getattr(data, "birth", "") or case.get("patient.birth_date") or ""),
+            complaints=str(getattr(data, "complaints", "") or case.get("complaints") or ""),
+            treatment=str(getattr(data, "treatment_plan", "") or case.get("treatment.plan") or ""),
+            profile_status=str(getattr(data, "mental_status", "") or case.get("mental_status") or ""),
+            sick_leave_from=current_semantic_date(self, "expert_sick_leave_from") or case.get("expert.sick_leave_from"),
         )
         if result.skipped:
             self._log("\n⚠ Custom-дневники профиля пропущены:\n")
