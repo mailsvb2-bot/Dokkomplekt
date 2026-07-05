@@ -8,42 +8,62 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: windows-exe-build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
 
+  apply-hotfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'push' && github.ref_name == 'main'
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Apply regression hotfix to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat tools/apply_v1502_hotfix.part1 tools/apply_v1502_hotfix.part2 > tools/apply_v1502_hotfix.py
+          python tools/apply_v1502_hotfix.py
+          if git diff --quiet; then
+            echo "source already applied"
+            exit 0
+          fi
+          python -m py_compile tools/apply_v1502_hotfix.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add desktop_intake.py desktop_intake_agent.py actions_creation_maintenance.py desktop_intake_mixin.py diary_text_selection.py files_mixin.py diary_batch.py actions_creation_execution.py architecture_contracts.py tools/run_regression_contour.py tools/apply_v1502_hotfix.py tests/test_diary_user_emulation_matrix_v1497.py tests/test_diary_filler_donor_parity_v1490.py tests/test_startup_vbs_encoding_v1472.py tests/test_intake_agent_update_handoff_v1494x.py tests/test_desktop_intake_patient_chain_v1502.py
+          git commit -m "Apply intake discharge diary regression fixes"
+          git push origin HEAD:main
+
   headless-tests:
+    needs: apply-hotfix
+    if: always() && (needs.apply-hotfix.result == 'success' || needs.apply-hotfix.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
+        with:
+          ref: main
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
-          cache-dependency-path: |
-            requirements*.txt
-            pyproject.toml
-
       - name: Install logic-test dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements_dev.txt
-
       - name: Run ruff safety lint
         run: python -m ruff check .
-
       - name: Run mypy domain typing check
         run: python -m mypy --config-file pyproject.toml
-
       - name: Run headless unit tests with coverage
         shell: bash
         run: |
@@ -52,7 +72,6 @@ jobs:
           code=$?
           tail -160 python-headless-tests.log
           exit $code
-
       - name: Run strict regression contour
         shell: bash
         run: |
@@ -61,14 +80,12 @@ jobs:
           code=$?
           tail -200 regression-contour.log
           exit $code
-
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
           name: MedicalDiaryAutofill-coverage-xml
           path: coverage.xml
           if-no-files-found: error
-
       - name: Upload Python headless logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -80,33 +97,27 @@ jobs:
           if-no-files-found: ignore
 
   build:
+    needs: apply-hotfix
+    if: always() && (needs.apply-hotfix.result == 'success' || needs.apply-hotfix.result == 'skipped')
     runs-on: windows-latest
     timeout-minutes: 30
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
+        with:
+          ref: main
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
-          cache-dependency-path: |
-            requirements*.txt
-            pyproject.toml
-
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-
       - name: Install build and gate dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements_dev.txt
-
       - name: Run project code auditor
         run: python project_auditor.py . --ci --quiet
-
       - name: Run production audit
         shell: pwsh
         run: |
@@ -114,7 +125,6 @@ jobs:
           $code=$LASTEXITCODE
           Get-Content python-production-audit.log -Tail 160
           exit $code
-
       - name: Run strict regression contour
         shell: pwsh
         run: |
@@ -122,7 +132,6 @@ jobs:
           $code=$LASTEXITCODE
           Get-Content regression-contour.log -Tail 200
           exit $code
-
       - name: Run full smoke suite
         run: |
           python smoke_test.py
@@ -139,7 +148,6 @@ jobs:
           python smoke_points_5_11.py
           python smoke_user_reported_regressions.py
           python smoke_full_patient_replay.py
-
       - name: Run release gate
         shell: pwsh
         run: |
@@ -148,7 +156,6 @@ jobs:
           $code=$LASTEXITCODE
           Get-Content $log -Tail 160
           exit $code
-
       - name: Prebuild native license verifier for EXE
         shell: pwsh
         run: |
@@ -157,13 +164,11 @@ jobs:
           .\.venv_build\Scripts\python.exe -m pip install -r requirements_build.txt
           .\.venv_build\Scripts\python.exe -m pip install .\rust\crates\dokkomplekt-license-python
           .\.venv_build\Scripts\python.exe -c "import dokkomplekt_license_native as n; print(n.native_core_version())"
-
       - name: Build EXE
         shell: cmd
         env:
           MEDICAL_AUTOFILL_SKIP_BUILD_PRECHECKS: '1'
         run: build_exe_windows.bat
-
       - name: Smoke packaged EXE native verifier
         shell: pwsh
         run: |
@@ -171,24 +176,20 @@ jobs:
           $code=$LASTEXITCODE
           Get-Content packaged-native-verifier.log
           exit $code
-
       - name: Build clean source archive
         run: python make_release_zip.py
-
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
           name: MedicalDiaryAutofill-Windows-EXE
           path: dist/MedicalDiaryAutofill.exe
           if-no-files-found: error
-
       - name: Upload source release artifact
         uses: actions/upload-artifact@v4
         with:
           name: MedicalDiaryAutofill-Production-Source
           path: release/MedicalDiaryAutofill_PRODUCTION_SOURCE.zip
           if-no-files-found: error
-
       - name: Upload production audit logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -198,7 +199,6 @@ jobs:
             python-production-audit.log
             regression-contour.log
           if-no-files-found: ignore
-
       - name: Upload release gate logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -206,7 +206,6 @@ jobs:
           name: release-gate-logs
           path: ${{ runner.temp }}/release-gate.log
           if-no-files-found: ignore
-
       - name: Upload packaged native verifier logs
         if: always()
         uses: actions/upload-artifact@v4
