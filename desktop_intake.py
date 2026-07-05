@@ -20,8 +20,8 @@ from diagnostic_logging import record_soft_exception
 from medical_docx_reader import extract_docx_text
 from medical_formatting import available_path, safe_filename
 
-DESKTOP_INTAKE_LOCK_VERSION = "v1.12"
-DESKTOP_INTAKE_SETUP_PROMPT_VERSION = "v3-first-launch-required"
+DESKTOP_INTAKE_LOCK_VERSION = "v1.13"
+DESKTOP_INTAKE_SETUP_PROMPT_VERSION = "v4-intake-patient-folder-confirm"
 DESKTOP_INTAKE_FOLDER_NAME = "Выписанные пациенты"
 DESKTOP_INTAKE_REQUIRES_RUNNING_APP = False
 DESKTOP_INTAKE_BACKGROUND_AGENT_SUPPORTED = True
@@ -49,6 +49,7 @@ DESKTOP_INTAKE_COPY_FALLBACK_TRIES_TO_UNLINK_SOURCE = True
 DESKTOP_INTAKE_RELAXED_PRIMARY_THRESHOLD_FOR_DOCTOR_FOLDER = True
 DESKTOP_INTAKE_TOP_LEVEL_DOCX_DROP_STARTS_APP = True
 DESKTOP_INTAKE_REJECTS_UNREADABLE_DOCX_FALLBACKS = True
+DESKTOP_INTAKE_REASKS_AFTER_FOLDER_NAMING_REGRESSION = True
 
 _ALLOWED_PRIMARY_SUFFIXES = {".docx", ".docm"}
 _PRIMARY_MARKERS = (
@@ -446,7 +447,7 @@ def mark_seen(seen_signatures: set[str], candidate: DesktopCandidate) -> None:
 def assert_desktop_intake_lock() -> None:
     """Lock the desktop-intake production behavior."""
 
-    if DESKTOP_INTAKE_LOCK_VERSION != "v1.12":
+    if DESKTOP_INTAKE_LOCK_VERSION != "v1.13":
         raise AssertionError("Desktop intake lock changed unexpectedly")
     if DESKTOP_INTAKE_REQUIRES_RUNNING_APP:
         raise AssertionError("Desktop intake must support activation through the optional background agent")
@@ -498,6 +499,8 @@ def assert_desktop_intake_lock() -> None:
         raise AssertionError("Desktop intake copy fallback must try to remove the top-level source")
     if not DESKTOP_INTAKE_REJECTS_UNREADABLE_DOCX_FALLBACKS:
         raise AssertionError("Desktop intake must not launch on unreadable/corrupt DOCX files")
+    if not DESKTOP_INTAKE_REASKS_AFTER_FOLDER_NAMING_REGRESSION:
+        raise AssertionError("Desktop intake must re-ask after folder-naming regression builds")
     if not _is_ignored_candidate_name(Path(".hidden.docx")) or not _is_ignored_candidate_name(Path("~$temp.docx")):
         raise AssertionError("Desktop intake ignored-file predicate is broken")
     if not _is_supported_intake_document_name(Path("Первичный осмотр.docx")):

@@ -447,7 +447,7 @@ class DesktopIntakeMixin:
                 if not selected_kinds:
                     messagebox.showwarning("Ничего не выбрано", "Отметьте хотя бы одну кнопку из блока 03.", parent=popup)
                     return
-                if not self._ensure_patient_folder_naming_configured():
+                if not self._ensure_patient_folder_naming_configured(force=True):
                     return
                 try:
                     self._prepare_desktop_intake_patient_folder(primary)

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from docx import Document
 
-from diary_batch import default_observation_diary_dates, fill_diary_batch, is_non_working_day
+from diary_batch import default_observation_diary_dates, fill_diary_batch
 from diary_text_parser import extract_statuses_from_docx
 from medical_docx_xml_fragments import SUPPORTED_WORD_SUFFIXES, is_supported_word_file
 
@@ -77,9 +77,8 @@ def test_word_format_contract_accepts_doc_docx_docm() -> None:
     assert not is_supported_word_file("source.pdf")
 
 
-def test_default_diary_calendar_skips_weekends_and_fixed_holidays() -> None:
+def test_default_diary_calendar_preserves_program_offsets_without_workday_shift() -> None:
     dates = default_observation_diary_dates(date(2026, 1, 1), limit=8)
     assert len(dates) == 8
     assert dates == tuple(dict.fromkeys(dates))
-    assert all(not is_non_working_day(item) for item in dates)
-    assert dates[0] >= date(2026, 1, 12)
+    assert dates[:4] == (date(2026, 1, 1), date(2026, 1, 2), date(2026, 1, 3), date(2026, 1, 8))

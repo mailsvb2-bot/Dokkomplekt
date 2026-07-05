@@ -25,6 +25,7 @@ def _is_docx_file(path: str | Path) -> bool:
 
 _ICD_PREFIX_RE = re.compile(r"^\s*[A-ZА-Я]\s*\d{1,3}\s*(?:[.,]\s*\d+)?\s*[-—–.:;)]*\s*", re.IGNORECASE)
 _ICD_CODE_RE = re.compile(r"(?<![A-Za-zА-Яа-я0-9])([A-ZА-Я])\s*(\d{1,3})(?:[.,]\s*(\d+))?(?![A-Za-zА-Яа-я0-9])", re.IGNORECASE)
+MIN_AUTO_DIARY_MATCH_SCORE = 70
 _COMMON_DIARY_NAME_WORDS = {
     "дневник",
     "дневники",
@@ -301,7 +302,7 @@ def find_diary_text_file_for_diagnosis(folder: str | Path, diagnosis: str) -> Pa
     candidates: list[tuple[int, int, int, str, Path]] = []
     for path in iter_diary_text_docx_files(folder):
         score = diary_diagnosis_match_score(diagnosis, path.stem)
-        if score <= 0:
+        if score < MIN_AUTO_DIARY_MATCH_SCORE:
             continue
         name_norm = normalize_diary_diagnosis_name(path.stem)
         name_keys = _semantic_keys(path.stem)

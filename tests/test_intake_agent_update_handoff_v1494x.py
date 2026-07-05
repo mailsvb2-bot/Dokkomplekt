@@ -5,7 +5,7 @@ reboot: it held the singleton lock, the freshly installed agent exited with
 "already running", and a dropped primary document launched the OLD executable
 path — either nothing started (old exe deleted) or yesterday's build opened.
 
-The v1.8 handoff fixes this: every install records the current agent identity
+The v1.9 handoff fixes this: every install records the current agent identity
 and GUI launch command; a running agent retires when a newer install takes
 over, and any surviving agent launches the GUI recorded by the latest install.
 """

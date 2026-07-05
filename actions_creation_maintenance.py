@@ -125,12 +125,12 @@ class ActionsCreationMaintenanceMixin:
             messagebox.showerror("Папка пациента", f"Не удалось открыть настройку папки:\n{exc}")
             return False
 
-    def _ensure_patient_folder_naming_configured(self) -> bool:
+    def _ensure_patient_folder_naming_configured(self, *, force: bool = False) -> bool:
         """Ask once how patient subfolders should be named before generation."""
         from desktop_patient_folder import FOLDER_NAMING_SCHEMA_VERSION, normalize_folder_naming_settings
 
         current = normalize_folder_naming_settings(self._settings.get("folder_naming", {}))
-        if current.get("doctor_confirmed") and current.get("schema_version") == FOLDER_NAMING_SCHEMA_VERSION:
+        if not force and current.get("doctor_confirmed") and current.get("schema_version") == FOLDER_NAMING_SCHEMA_VERSION:
             return True
         if os.environ.get("CI"):
             current["doctor_confirmed"] = True

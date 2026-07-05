@@ -37,7 +37,7 @@ from desktop_intake import (
     signature_key,
 )
 
-AGENT_VERSION = "v1.8"
+AGENT_VERSION = "v1.9"
 POLL_SECONDS = 2.5
 LAUNCH_COOLDOWN_SECONDS = 20.0
 LOCK_STALE_SECONDS = 120.0
@@ -68,6 +68,7 @@ DESKTOP_INTAKE_AGENT_LOGS_ARE_REDACTED = True
 DESKTOP_INTAKE_AGENT_AUTOSTART_IS_DISABLED_IN_CI = True
 DESKTOP_INTAKE_AGENT_LOGGING_IS_DISABLED_IN_CI = True
 DESKTOP_INTAKE_AGENT_RESPECTS_ACTIVE_GUI_LOCK = True
+DESKTOP_INTAKE_AGENT_REASKS_OLD_DISABLED_SETTINGS = True
 
 
 def _truthy_env(value: object) -> bool:
@@ -776,10 +777,12 @@ def run_forever() -> None:
 
 
 def assert_desktop_intake_agent_lock() -> None:
-    if AGENT_VERSION != "v1.8":
+    if AGENT_VERSION != "v1.9":
         raise AssertionError("Desktop intake agent lock changed unexpectedly")
     if not DESKTOP_INTAKE_AGENT_RESPECTS_ACTIVE_GUI_LOCK:
         raise AssertionError("Desktop intake agent must respect active foreground GUI lock")
+    if not DESKTOP_INTAKE_AGENT_REASKS_OLD_DISABLED_SETTINGS:
+        raise AssertionError("Desktop intake agent must allow upgraded setup prompts after old disabled settings")
     if not DESKTOP_INTAKE_AGENT_HAS_SINGLETON_LOCK:
         raise AssertionError("Desktop intake agent must have a singleton lock")
     if not DESKTOP_INTAKE_AGENT_RESPECTS_EXPLICIT_DISABLED_SETTINGS:

@@ -361,24 +361,17 @@ class FilesMixin:
             found = find_diary_text_file_for_diagnosis(folder, diagnosis)
             fallback_reason = "по диагнозу"
             if not found:
-                # Doctor-owned deployments often keep exactly one neutral DOCX
-                # with daily text in a folder named «Тексты дневников».  When no
-                # filename matches the diagnosis, selecting that single file is
-                # safer than silently leaving diaries empty and failing later.
+                # Do not silently take the only/nearest DOCX: diary texts are diagnosis-specific.
                 try:
                     candidates = iter_diary_text_docx_files(folder, max_depth=1)
-                    if len(candidates) == 1:
-                        found = candidates[0]
-                        fallback_reason = "как единственный файл в папке текстов"
-                    else:
-                        scored = [
-                            (diary_diagnosis_match_score(diagnosis, path.stem), path.name.lower(), path)
-                            for path in candidates
-                        ]
-                        scored = [item for item in scored if item[0] >= 55]
-                        if scored:
-                            found = sorted(scored, key=lambda item: (-item[0], item[1]))[0][2]
-                            fallback_reason = "по близкому названию"
+                    scored = [
+                        (diary_diagnosis_match_score(diagnosis, path.stem), path.name.lower(), path)
+                        for path in candidates
+                    ]
+                    scored = [item for item in scored if item[0] >= 70]
+                    if scored:
+                        found = sorted(scored, key=lambda item: (-item[0], item[1]))[0][2]
+                        fallback_reason = "по строгому совпадению диагноза"
                 except Exception as exc:
                     record_soft_exception("files_mixin.diary_text_fallback", exc, detail=str(folder))
             if not found:

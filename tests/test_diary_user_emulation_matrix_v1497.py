@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from diary_batch import _calendar_text_diary_dates, _dynamic_epicrisis_base_date, dynamic_epicrisis_dates, is_non_working_day
+from diary_batch import _calendar_text_diary_dates, _dynamic_epicrisis_base_date, dynamic_epicrisis_dates
 from diary_dates import parse_full_date, parse_full_datetime, parse_optional_discharge_date
 from diary_schedule import (
     DIARY_POPUP_STYLE_CHOICES,
@@ -48,8 +48,7 @@ def test_diary_user_emulation_matrix_covers_fifty_plus_runtime_contracts():
     check(diary_hourly_schedule_from_choice("2").hour_offsets == (2,), "choice every 2 hours")
     check(_calendar_text_diary_dates(date(2026, 6, 1), date(2026, 6, 4), limit=10, day_offsets=()) == (date(2026, 6, 2), date(2026, 6, 3), date(2026, 6, 4)), "calendar starts +1")
     clinical_dates = _calendar_text_diary_dates(date(2026, 6, 4), date(2026, 7, 10), limit=10, day_offsets=diary_calendar_schedule_from_choice("2").day_offsets)
-    check(all(not is_non_working_day(item) for item in clinical_dates), "clinical skips weekends and holidays")
-    check(clinical_dates[:4] == (date(2026, 6, 5), date(2026, 6, 8), date(2026, 6, 9), date(2026, 6, 11)), "clinical working dates")
+    check(clinical_dates[:4] == (date(2026, 6, 5), date(2026, 6, 6), date(2026, 6, 7), date(2026, 6, 11)), "clinical exact program dates")
 
     check(expand_day_offsets((0, 1, 2, 7), 7) == (0, 1, 2, 7, 12, 17, 22), "day schedule 1")
     check(expand_day_offsets((1, 2, 5), 6) == (1, 2, 5, 8, 11, 14), "day schedule 2")

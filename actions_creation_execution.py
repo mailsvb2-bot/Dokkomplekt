@@ -64,12 +64,67 @@ class ActionsCreationExecutionMixin:
         )
         return bool((legacy_needs or custom_needs) and self._normalize_yes_no(self.expert_sick_leave_needed_var.get()) == "да")
 
+
+    def _profile_document_matches_builtin_kind(self, document: object, kind: str) -> bool:
+        """Return True when a doctor-owned profile doc replaces a legacy button."""
+        try:
+            from universal_main_documents import custom_requirement_flags_for_documents
+            flags = custom_requirement_flags_for_documents((document,))
+        except Exception as exc:
+            record_soft_exception("actions_creation_execution.profile_doc_flags", exc, detail=str(kind))
+            flags = {}
+        signature = " ".join(
+            str(getattr(document, attr, "") or "")
+            for attr in ("id", "role_id", "category", "button_label", "template", "description")
+        ).lower().replace("ё", "е").replace("_", " ")
+        if kind == "discharge":
+            return bool(flags.get("discharge")) or ("выпис" in signature and "эпикриз" in signature)
+        if kind == "rvk":
+            return bool(flags.get("rvk")) or "рвк" in signature or "военком" in signature
+        if kind == "commission":
+            return bool(flags.get("commission")) or "комис" in signature or "совмест" in signature
+        if kind == "vk_mse":
+            return bool(flags.get("vk_mse")) or "мсэ" in signature or "мсек" in signature
+        if kind == "sick_leave_vk":
+            return bool(flags.get("sick_leave_vk")) or ("больнич" in signature and ("вк" in signature or "комис" in signature))
+        if kind == "admission_doctor_referral":
+            return "приемн" in signature or "приёмн" in signature or "госпитализац" in signature
+        if kind == "primary":
+            return "первич" in signature and "осмотр" in signature
+        return False
+
+    def _route_legacy_medical_selection_to_profile_docs(self, selected_medical: list[str], selected_custom: list[str]) -> tuple[list[str], list[str]]:
+        """Prefer doctor-owned templates over the disabled legacy fixed backend."""
+        if not selected_medical:
+            return selected_medical, selected_custom
+        try:
+            pack = self._load_or_create_universal_pack()
+        except Exception as exc:
+            record_soft_exception("actions_creation_execution.load_profile_for_medical_route", exc)
+            return selected_medical, selected_custom
+        routed: list[str] = []
+        remaining: list[str] = []
+        for kind in selected_medical:
+            matched = [
+                str(getattr(document, "id", "") or "").strip()
+                for document in tuple(getattr(pack, "documents", ()) or ())
+                if self._profile_document_matches_builtin_kind(document, kind)
+            ]
+            matched = [item for item in matched if item]
+            if matched:
+                routed.extend(matched)
+                self._log(f"\nℹ Кнопка «{kind}» создана через doctor-owned шаблон профиля, не через старый fixed-template backend.\n")
+            else:
+                remaining.append(kind)
+        return remaining, list(dict.fromkeys([*selected_custom, *routed]))
+
     def _run_creation_jobs(self, selected_medical: list[str], selected_diaries: bool, selected_custom: list[str]) -> tuple[list[Path], list[Path], object | None, list[str]]:
         created_medical: list[Path] = []
         created_custom: list[Path] = []
         diary_result = None
         errors: list[str] = []
         try:
+            selected_medical, selected_custom = self._route_legacy_medical_selection_to_profile_docs(selected_medical, selected_custom)
             if selected_medical:
                 created_medical = self._create_medical_documents_with_stop(selected_medical, selected_diaries, created_custom, errors)
                 if errors:

@@ -16,7 +16,7 @@ from diary_paths import available_path, make_diary_output_name, safe_filename_pa
 from diary_schedule import DEFAULT_CALENDAR_DIARY_DAY_OFFSETS, expand_day_offsets, expand_hour_intervals, expand_minute_intervals
 from diary_text_parser import clean_status_text, extract_statuses_from_docx, is_signature_paragraph_text, remove_examinee_words
 from diary_writer_apply import NEUTRAL_FINAL_DIARY_TEXT
-from medical_calendar import is_non_working_day, next_working_day
+from medical_calendar import next_working_day
 from medical_docx_xml_fragments import ensure_docx_compatible, existing_word_file
 from medical_formatting import redact_technical_text, safe_filename, technical_ref, technical_report_path
 
@@ -47,10 +47,7 @@ def default_observation_diary_dates(admission: date, *, limit: int = 20, dischar
         planned = admission + timedelta(days=max(0, int(offset)))
         if discharge_date is not None and planned > discharge_date:
             break
-        adjusted = next_working_day(planned, used=result)
-        if discharge_date is not None and adjusted > discharge_date:
-            break
-        result.append(adjusted)
+        result.append(planned)
         if len(result) >= limit:
             break
     return tuple(result)
@@ -79,7 +76,7 @@ def build_dynamic_epicrisis_text(data: DynamicEpicrisisInput) -> str:
         f"Лечится с: {data.sick_leave_from or 'не указано'}.",
         f"Жалобы: {data.complaints or 'без существенной динамики'}.",
         f"Принимает: {data.treatment or 'согласно листу назначений'}.",
-        f"Психический статус: {data.profile_status or 'без существенной динамики'}.",
+        f"Профильный статус: {data.profile_status or 'без существенной динамики'}.",
         correction,
         "Продолжение лечения по листу нетрудоспособности.",
         "Заведующий отделением ____________________",
@@ -190,10 +187,7 @@ def _calendar_text_diary_dates(admission_date_value: date, discharge_date_value:
         planned = admission_date_value + timedelta(days=max(1, int(offset)))
         if discharge_date_value is not None and planned > discharge_date_value:
             break
-        adjusted = next_working_day(planned, used=result)
-        if discharge_date_value is not None and adjusted > discharge_date_value:
-            break
-        result.append(adjusted)
+        result.append(planned)
         if len(result) >= limit:
             break
     return tuple(result)
@@ -276,8 +270,6 @@ def _intraday_text_diary_datetimes(
         moment = base + timedelta(minutes=minute)
         if discharge_date_value is not None and moment.date() > discharge_date_value:
             break
-        if is_non_working_day(moment.date()):
-            continue
         result.append(moment)
         if len(result) >= MAX_INTRADAY_TEXT_DIARY_ENTRIES:
             break
@@ -334,7 +326,7 @@ def _split_regular_and_final_text_diary_dates(dates: Sequence[date], *, discharg
     if not force_final_diary:
         return normalized_dates, None
     if discharge_date_value is not None:
-        final_date = next_working_day(discharge_date_value, used=normalized_dates) if is_non_working_day(discharge_date_value) else discharge_date_value
+        final_date = discharge_date_value
         return tuple(d for d in normalized_dates if d < discharge_date_value), final_date
     if not normalized_dates:
         return normalized_dates, None
