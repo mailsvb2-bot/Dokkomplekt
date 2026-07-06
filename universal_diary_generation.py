@@ -60,6 +60,7 @@ def render_diary_documents_from_pack(
     profile_status: str = "",
     sick_leave_from: str = "",
 ) -> CustomDiaryGenerationResult:
+    """Render selected custom diary buttons through the text-calendar diary engine."""
     selected = {str(item).strip() for item in document_ids if str(item).strip()}
     created: list[Path] = []
     skipped: list[str] = []
