@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import List
 
 
@@ -45,3 +46,19 @@ class ActionsDocumentIntelligenceFlowMixin:
         for item in inputs:
             dedup.setdefault(item.field_id, item)
         return tuple(dedup.values())
+
+    def _create_regular_custom_documents(self, current_pack, case, regular_ids: List[str], out_dir) -> List[Path]:
+        created = super()._create_regular_custom_documents(current_pack, case, regular_ids, out_dir)
+        if not created:
+            return created
+        try:
+            from document_intelligence.form_fill import fill_docx_visible_fields
+
+            values = {field_id: value.value for field_id, value in case.values.items()}
+            for path in created:
+                fill_docx_visible_fields(path, values)
+        except Exception as exc:
+            from diagnostic_logging import record_soft_exception
+
+            record_soft_exception("actions_document_intelligence.post_render_fill", exc)
+        return created
