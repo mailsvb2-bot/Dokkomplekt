@@ -21,6 +21,11 @@ from medical_docx_xml_fragments import ensure_docx_compatible, existing_word_fil
 from medical_formatting import redact_technical_text, safe_filename, technical_ref, technical_report_path
 
 MAX_INTRADAY_TEXT_DIARY_ENTRIES = 20000
+TEXT_DIARY_SIGNATURE_LOCK_VERSION = "v1.0"
+TEXT_DIARY_SIGNATURE_LINES = (
+    "Лечащий врач ____________________",
+    "Зав. отделением ____________________",
+)
 
 
 @dataclass(frozen=True)
@@ -339,6 +344,12 @@ def _neutral_final_diary_entry(date_value: date, patient_gender: str | None) -> 
     return date_value, f"{date_value:%d.%m.%y} {adapted_final_text}".rstrip()
 
 
+def _add_text_diary_signature_block(doc: Document) -> None:
+    """Append the legacy doctor/head signature block after one diary entry."""
+    for line in TEXT_DIARY_SIGNATURE_LINES:
+        doc.add_paragraph(line)
+
+
 def _create_text_diary_document(output_dir: Path, patient_name: str, entries: Sequence[tuple[date, str]], epicrisis_entries: Sequence[tuple[date, str]]) -> Path:
     target = available_path(output_dir / safe_filename(make_diary_output_name(safe_filename_part(patient_name), file_index=1, total_files=1)))
     doc = Document()
@@ -350,10 +361,12 @@ def _create_text_diary_document(output_dir: Path, patient_name: str, entries: Se
         first_line = f"{item_date:%d.%m.%y} {lines[0] if lines else ''}".rstrip()
         blocks.append((item_date, 1, tuple([first_line, *lines[1:]])))
     for _item_date, block_kind, lines in sorted(blocks, key=lambda block: (block[0], block[1])):
-        if block_kind == 1 and doc.paragraphs:
+        if doc.paragraphs:
             doc.add_paragraph("")
         for line in lines:
             doc.add_paragraph(line)
+        if block_kind == 0:
+            _add_text_diary_signature_block(doc)
     doc.save(str(target))
     return target
 
