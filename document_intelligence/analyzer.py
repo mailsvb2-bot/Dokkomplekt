@@ -10,6 +10,7 @@ from diagnostic_logging import record_soft_exception
 from medical_docx_xml_fragments import ensure_docx_compatible
 
 from .models import DocumentBlueprint, DocumentSource, FieldSpec, PopupField, SectionSpec, SignatureSpec
+from .pdf_reader import read_pdf_text
 from .text_utils import custom_field_id, field_id_from_placeholder, normalize, value_kind
 
 PLACEHOLDER_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
@@ -49,6 +50,22 @@ def _read_docx(source: DocumentSource) -> tuple[tuple[str, ...], tuple[tuple[str
             if any(cells):
                 rows.append(tuple(cells))
     return tuple(lines), tuple(rows)
+
+
+def _read_pdf(source: DocumentSource) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]:
+    result = read_pdf_text(source.path)
+    if not result.has_text:
+        warnings = "; ".join(result.warnings) or "PDF has no extractable text"
+        raise ValueError(warnings)
+    lines = tuple(normalize(line) for line in result.text.splitlines() if normalize(line))
+    return lines, ()
+
+
+def _read_source(source: DocumentSource) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...]]:
+    suffix = Path(source.path).suffix.lower()
+    if suffix == ".pdf":
+        return _read_pdf(source)
+    return _read_docx(source)
 
 
 def _signature_role(label: str) -> str:
@@ -146,7 +163,7 @@ class DocumentIntelligenceCore:
         if not isinstance(source, DocumentSource):
             source = DocumentSource(str(source))
         try:
-            lines, rows = _read_docx(source)
+            lines, rows = _read_source(source)
         except Exception as exc:
             record_soft_exception("document_intelligence_core.read", exc, detail=str(source.path))
             return DocumentBlueprint(source.user_label or Path(source.path).stem, "custom", "letter", str(source.path), confidence=0.0)
