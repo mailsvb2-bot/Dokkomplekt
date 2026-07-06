@@ -5,12 +5,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_no_built_in_user_docx_templates_are_shipped():
+def test_no_built_in_user_templates_are_shipped():
     forbidden = []
     for path in ROOT.rglob("*"):
         if not path.is_file():
             continue
-        if path.suffix.lower() in {".docx", ".docm", ".dotx", ".dotm"}:
+        if path.suffix.lower() in {".docx", ".docm", ".dotx", ".dotm", ".pdf"}:
             forbidden.append(path.relative_to(ROOT).as_posix())
     assert forbidden == []
 
