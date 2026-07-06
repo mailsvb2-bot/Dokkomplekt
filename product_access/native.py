@@ -5,7 +5,7 @@ import json
 import os
 from typing import Any, Mapping
 
-from product_access import LicenseEntitlement, ProductAccessManager
+from product_access import AccessDecision, LicenseEntitlement, ProductAccessManager
 
 try:
     import dokkomplekt_license_native as _native_license_core
@@ -125,6 +125,30 @@ class NativeProductAccessManager(ProductAccessManager):
             used = int(usage.get(month_key(self._now()), 0) or 0)
             trial_total = int(payload.get("trial_created_total", 0) or 0)
             return self._blocked_state(str(exc), used, trial_total)
+
+    def check_document_creation(self, requested_count: int, *, template_count: int | None = None, profile_count: int | None = None):
+        state = self.current_state()
+        if _is_owner_unlimited_state(state):
+            return AccessDecision(
+                True,
+                "ok_owner_unlimited",
+                "Доступ разрешён",
+                "Owner-лицензия: безлимитное создание документов разрешено.",
+                state,
+                state.warning,
+            )
+        return super().check_document_creation(requested_count, template_count=template_count, profile_count=profile_count)
+
+
+def _is_owner_unlimited_state(state) -> bool:
+    return (
+        state.plan == "enterprise"
+        and state.active
+        and state.documents_limit_month >= 2_000_000_000
+        and state.template_limit >= 999_999
+        and state.profile_limit >= 999_999
+        and state.watermark_mode == "none"
+    )
 
 
 class NativeProductAccessMixin:
