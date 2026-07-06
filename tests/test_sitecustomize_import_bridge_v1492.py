@@ -4,9 +4,12 @@ import builtins
 import importlib
 
 
-def test_sitecustomize_exports_non_working_day_helper() -> None:
-    import sitecustomize
+def test_medical_calendar_exports_non_working_day_helper_for_legacy_diary_batch() -> None:
+    import medical_calendar
 
-    importlib.reload(sitecustomize)
+    if hasattr(builtins, "is_non_working_day"):
+        delattr(builtins, "is_non_working_day")
 
-    assert callable(getattr(builtins, "is_non_working_day", None))
+    importlib.reload(medical_calendar)
+
+    assert getattr(builtins, "is_non_working_day") is medical_calendar.is_non_working_day
