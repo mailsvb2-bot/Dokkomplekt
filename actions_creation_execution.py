@@ -78,7 +78,7 @@ class ActionsCreationExecutionMixin:
             for attr in ("id", "role_id", "category", "button_label", "template", "description")
         ).lower().replace("ё", "е").replace("_", " ")
         if kind == "discharge":
-            return bool(flags.get("discharge")) or ("выпис" in signature and "эпикриз" in signature)
+            return bool(flags.get("discharge")) or any(token in signature for token in ("выписной", "выписка", "выпис", "эпикриз", "discharge", "epicrisis"))
         if kind == "rvk":
             return bool(flags.get("rvk")) or "рвк" in signature or "военком" in signature
         if kind == "commission":
