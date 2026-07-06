@@ -36,6 +36,10 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
     objective_status = _first_text(data.somatic_status, data.profile_status)
     discharge_condition = _first_text(data.epi_text, data.additional_info_text, data.somatic_status, data.profile_status)
     treatment_result = _first_text(data.epi_text, data.additional_info_text, data.somatic_status, data.profile_status)
+    vk_mse_work_position = _first_text(
+        data.vk_mse_work_position,
+        ", ".join(part for part in (data.vk_mse_work_org, data.vk_mse_position) if part),
+    )
     pairs = {
         "patient.fio": data.output_fio or data.fio,
         "patient.birth_date": data.birth,
@@ -80,7 +84,7 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
         "vk_mse.protocol_date": data.vk_protocol_date,
         "vk_mse.work": data.vk_mse_work_org,
         "vk_mse.position": data.vk_mse_position,
-        "vk_mse.work_position": ", ".join(part for part in (data.vk_mse_work_org, data.vk_mse_position) if part),
+        "vk_mse.work_position": vk_mse_work_position,
         "sick_leave_vk.date": data.sick_leave_vk_date,
         "sick_leave_vk.protocol_number": data.sick_leave_vk_protocol_number,
         "sick_leave_vk.protocol_date": data.sick_leave_vk_protocol_date,
