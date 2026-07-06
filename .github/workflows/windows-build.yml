@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: windows-exe-build-${{ github.ref }}
@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: github.event_name == 'push' && github.ref_name == 'main'
+    permissions:
+      contents: write
     steps:
       - name: Checkout main
         uses: actions/checkout@v4
