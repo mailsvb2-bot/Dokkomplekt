@@ -70,15 +70,15 @@ def _read_source(source: DocumentSource) -> tuple[tuple[str, ...], tuple[tuple[s
 
 def _signature_role(label: str) -> str:
     low = normalize(label).lower().replace("ё", "е")
-    if "бухгалтер" in low:
+    if "бухгалтер" in low or "accountant" in low:
         return "accountant"
-    if "директор" in low or "руковод" in low:
+    if "директор" in low or "руковод" in low or "director" in low:
         return "director"
     if "зав" in low and "отдел" in low:
         return "head"
-    if "врач" in low:
+    if "врач" in low or "doctor" in low:
         return "author"
-    if "исполн" in low or "состав" in low:
+    if "исполн" in low or "состав" in low or "prepared" in low:
         return "executor"
     return "custom"
 
