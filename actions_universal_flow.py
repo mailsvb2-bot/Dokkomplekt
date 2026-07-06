@@ -277,6 +277,7 @@ class ActionsUniversalFlowMixin:
             )
 
     def _create_custom_diary_documents_impl(self, current_pack, case, diary_ids: List[str], out_dir) -> List[Path]:
+        """Create doctor-owned custom diary documents with confirmed text files and calendar settings."""
         self._ensure_diary_text_files_for_creation()
 
         from diary_creation_wizard import confirm_diary_creation, current_diary_calendar_schedule
