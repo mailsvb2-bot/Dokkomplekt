@@ -1,0 +1,52 @@
+name: Export Playwright Chromium
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/export-playwright-chromium.yml'
+      - 'ci_payload/playwright_chromium_trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Install exact Playwright Chromium
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="$RUNNER_TEMP/playwright-browser"
+          mkdir -p "$W" payload evidence
+          cd "$W"
+          npm init -y >/dev/null
+          npm install --ignore-scripts --no-audit --no-fund @playwright/test@1.61.1
+          PLAYWRIGHT_BROWSERS_PATH="$GITHUB_WORKSPACE/payload/ms-playwright" npx playwright install chromium
+          BROWSER="$(find "$GITHUB_WORKSPACE/payload/ms-playwright" -type f -path '*/chrome-linux*/chrome' -perm -111 | head -1)"
+          test -x "$BROWSER"
+          "$BROWSER" --version > "$GITHUB_WORKSPACE/evidence/chromium-version.log"
+          printf '%s\n' "${BROWSER#$GITHUB_WORKSPACE/payload/}" > "$GITHUB_WORKSPACE/evidence/executable-relative-path.txt"
+          find "$GITHUB_WORKSPACE/payload/ms-playwright" -type f -print0 | sort -z | xargs -0 sha256sum > "$GITHUB_WORKSPACE/evidence/browser-files.sha256"
+          tar --sort=name --mtime='UTC 2026-07-23' --owner=0 --group=0 --numeric-owner \
+            -C "$GITHUB_WORKSPACE/payload" --zstd -cf "$GITHUB_WORKSPACE/payload/playwright-chromium.tar.zst" ms-playwright
+          rm -rf "$GITHUB_WORKSPACE/payload/ms-playwright"
+          sha256sum "$GITHUB_WORKSPACE/payload/playwright-chromium.tar.zst" > "$GITHUB_WORKSPACE/evidence/browser-archive.sha256"
+          stat -c '%s' "$GITHUB_WORKSPACE/payload/playwright-chromium.tar.zst" > "$GITHUB_WORKSPACE/evidence/browser-archive.size"
+      - name: Upload browser
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-chromium-1.61.1
+          path: |
+            payload/playwright-chromium.tar.zst
+            evidence
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
