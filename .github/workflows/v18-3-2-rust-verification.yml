@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - ci/v18-3-2-rust-verification
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/v18-3-2-rust-verification.yml'
+      - 'ci_payload/v18_3_2_core/**'
   workflow_dispatch:
 
 permissions:
