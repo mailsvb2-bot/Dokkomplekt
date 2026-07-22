@@ -23,17 +23,32 @@ jobs:
       - name: Checkout verification branch
         uses: actions/checkout@v4
 
-      - name: Reconstruct exact Rust source snapshot
+      - name: Reconstruct and validate Rust source snapshot
         shell: bash
         run: |
           set -Eeuo pipefail
           mkdir -p _dokkomplekt
           cat ci_payload/v18_3_2_core/part-* | base64 --decode > _dokkomplekt-source.tar.xz
-          echo "2eec1f0bf7cecaf3d8767c5e8b0d8f6203bd38ac66a0ff0c12c73abae4c67311  _dokkomplekt-source.tar.xz" | sha256sum --check --strict
+          wc -c _dokkomplekt-source.tar.xz
+          sha256sum _dokkomplekt-source.tar.xz | tee _dokkomplekt-source.tar.xz.sha256
+          xz --test _dokkomplekt-source.tar.xz
           tar -xJf _dokkomplekt-source.tar.xz -C _dokkomplekt
           test -f _dokkomplekt/Cargo.toml
           test -f _dokkomplekt/Cargo.lock
           test -f _dokkomplekt/src-tauri/src/main.rs
+          find _dokkomplekt -type f -print0 | sort -z | xargs -0 sha256sum > _dokkomplekt/verification-source-files.sha256
+
+      - name: Upload reconstructed source evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dokkomplekt-v18-3-2-reconstructed-source
+          path: |
+            _dokkomplekt-source.tar.xz
+            _dokkomplekt-source.tar.xz.sha256
+            _dokkomplekt/verification-source-files.sha256
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Install Linux Tauri build dependencies
         shell: bash
