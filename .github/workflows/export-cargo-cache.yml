@@ -1,0 +1,98 @@
+name: Export Dokkomplekt Cargo cache
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/export-cargo-cache.yml'
+      - 'ci_payload/cargo_cache_trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-cache:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.0
+      - name: Build dependency-equivalent synthetic workspace
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="$RUNNER_TEMP/dok-fetch"
+          mkdir -p "$W/src"
+          cat > "$W/Cargo.toml" <<'EOF'
+          [package]
+          name = "dok-dependency-fetch"
+          version = "18.3.2"
+          edition = "2021"
+          rust-version = "1.97"
+
+          [dependencies]
+          serde = { version = "1", features = ["derive"] }
+          serde_json = "1"
+          thiserror = "1"
+          uuid = { version = "1", features = ["v4", "serde"] }
+          chrono = { version = "0.4", features = ["serde"] }
+          rusqlite = { version = "0.32", features = ["bundled"] }
+          tauri = { version = "2", features = [] }
+          anyhow = "1"
+          axum = "0.7"
+          base64 = "0.22"
+          ed25519-dalek = { version = "2", features = ["rand_core"] }
+          hex = "0.4"
+          postgres = { version = "0.19", features = ["with-time-0_3", "with-uuid-1"] }
+          pyo3 = { version = "0.24.2", features = ["extension-module"] }
+          rand_core = "0.6"
+          sha2 = "0.10"
+          semver = "1"
+          time = { version = ">=0.3.47, <0.4", features = ["formatting", "macros", "parsing", "serde", "serde-well-known"] }
+          tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+          tower = "0.5"
+          tower-http = { version = "0.6", features = ["trace"] }
+          tracing = "0.1"
+          tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+          reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls-no-provider"] }
+          rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+          aes = "0.8"
+          cipher = "0.4"
+          hmac = "0.12"
+          getrandom = "0.2"
+          notify = "8.2"
+          deflate64 = "=0.1.10"
+          zip = "2"
+          quick-xml = "0.41.0"
+          windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+          [build-dependencies]
+          tauri-build = "2"
+          EOF
+          printf 'fn main() {}\n' > "$W/src/main.rs"
+          printf 'fn main() {}\n' > "$W/build.rs"
+          cd "$W"
+          cargo generate-lockfile
+          cargo fetch --locked
+          mkdir -p "$GITHUB_WORKSPACE/evidence" "$GITHUB_WORKSPACE/payload"
+          cp Cargo.lock "$GITHUB_WORKSPACE/evidence/synthetic-Cargo.lock"
+          cargo metadata --locked --format-version 1 --no-deps > "$GITHUB_WORKSPACE/evidence/metadata.json"
+          rustc -Vv > "$GITHUB_WORKSPACE/evidence/rustc-version.log"
+          cargo -V > "$GITHUB_WORKSPACE/evidence/cargo-version.log"
+          tar --zstd -cf "$GITHUB_WORKSPACE/payload/cargo-home.tar.zst" -C "$CARGO_HOME" registry git 2>/dev/null || \
+            tar --zstd -cf "$GITHUB_WORKSPACE/payload/cargo-home.tar.zst" -C "$CARGO_HOME" registry
+          sha256sum "$GITHUB_WORKSPACE/payload/cargo-home.tar.zst" > "$GITHUB_WORKSPACE/evidence/cargo-home.sha256"
+          stat -c '%s' "$GITHUB_WORKSPACE/payload/cargo-home.tar.zst" > "$GITHUB_WORKSPACE/evidence/cargo-home.size"
+      - name: Upload Cargo cache
+        uses: actions/upload-artifact@v4
+        with:
+          name: dokkomplekt-cargo-cache-rust-1.97.0
+          path: |
+            payload/cargo-home.tar.zst
+            evidence
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
