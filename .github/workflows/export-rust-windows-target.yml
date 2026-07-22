@@ -1,0 +1,48 @@
+name: Export Rust 1.97 Windows target
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/export-rust-windows-target.yml'
+      - 'ci_payload/windows_target_trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-target:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install exact target standard library
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.0
+          targets: x86_64-pc-windows-msvc
+      - name: Package target
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          SYSROOT="$(rustc --print sysroot)"
+          TARGET_DIR="$SYSROOT/lib/rustlib/x86_64-pc-windows-msvc"
+          test -d "$TARGET_DIR/lib"
+          mkdir -p payload evidence
+          tar --sort=name --mtime='UTC 2026-07-23' --owner=0 --group=0 --numeric-owner \
+            -C "$SYSROOT" --zstd -cf payload/rust-windows-target.tar.zst \
+            lib/rustlib/x86_64-pc-windows-msvc
+          sha256sum payload/rust-windows-target.tar.zst > evidence/target.sha256
+          stat -c '%s' payload/rust-windows-target.tar.zst > evidence/target.size
+          rustc -Vv > evidence/rustc-version.log
+      - name: Upload Windows target
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-1.97.0-windows-msvc-target
+          path: |
+            payload/rust-windows-target.tar.zst
+            evidence
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
