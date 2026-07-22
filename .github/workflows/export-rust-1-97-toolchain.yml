@@ -1,0 +1,55 @@
+name: Export Rust 1.97.0 toolchain
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/export-rust-1-97-toolchain.yml'
+      - 'ci_payload/rust_toolchain_trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-toolchain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install exact Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.0
+          components: rustfmt, clippy
+
+      - name: Verify and package self-contained toolchain
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          TOOLCHAIN="$(rustc --print sysroot)"
+          test -x "$TOOLCHAIN/bin/rustc"
+          test -x "$TOOLCHAIN/bin/cargo"
+          test -x "$TOOLCHAIN/bin/clippy-driver"
+          test -x "$TOOLCHAIN/bin/rustfmt"
+          mkdir -p evidence payload
+          rustc -Vv | tee evidence/rustc-version.log
+          cargo -V | tee evidence/cargo-version.log
+          cargo clippy -V | tee evidence/clippy-version.log
+          rustfmt -V | tee evidence/rustfmt-version.log
+          printf '%s\n' "$TOOLCHAIN" > evidence/source-sysroot.txt
+          tar --sort=name --mtime='UTC 2026-07-22' --owner=0 --group=0 --numeric-owner \
+            -C "$(dirname "$TOOLCHAIN")" -cJf payload/rust-1.97.0-x86_64-unknown-linux-gnu.tar.xz "$(basename "$TOOLCHAIN")"
+          sha256sum payload/rust-1.97.0-x86_64-unknown-linux-gnu.tar.xz | tee evidence/toolchain.sha256
+          stat -c '%s' payload/rust-1.97.0-x86_64-unknown-linux-gnu.tar.xz | tee evidence/toolchain.size
+
+      - name: Upload exact toolchain
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-1.97.0-x86_64-unknown-linux-gnu
+          path: |
+            payload/rust-1.97.0-x86_64-unknown-linux-gnu.tar.xz
+            evidence
+          if-no-files-found: error
+          retention-days: 14
