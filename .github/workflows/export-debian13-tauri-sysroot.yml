@@ -1,0 +1,63 @@
+name: Export Debian 13 Tauri sysroot
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/export-debian13-tauri-sysroot.yml'
+      - 'ci_payload/debian13_sysroot_trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-sysroot:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install exact Debian 13 Tauri development closure
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          REQUESTED='build-essential pkg-config libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libdbus-1-dev patchelf'
+          apt-get -s install -y --no-install-recommends $REQUESTED \
+            | awk '/^Inst / {print $2}' | sed 's/:.*//' | sort -u > /tmp/new-packages.txt
+          apt-get install -y --no-install-recommends $REQUESTED zstd
+          printf '%s\n' $REQUESTED | tr ' ' '\n' >> /tmp/new-packages.txt
+          sort -u /tmp/new-packages.txt -o /tmp/new-packages.txt
+          mkdir -p /payload/root /payload/evidence
+          while IFS= read -r package; do
+            dpkg-query -L "$package" 2>/dev/null || true
+          done < /tmp/new-packages.txt \
+            | awk 'NF && $0 ~ /^\// {print}' | sort -u > /tmp/paths.txt
+          while IFS= read -r path; do
+            [ -e "$path" ] || [ -L "$path" ] || continue
+            if [ -d "$path" ]; then
+              mkdir -p "/payload/root$path"
+            else
+              cp -a --parents "$path" /payload/root
+            fi
+          done < /tmp/paths.txt
+          cp /tmp/new-packages.txt /payload/evidence/packages.txt
+          dpkg-query -W -f='${binary:Package}\t${Version}\n' \
+            | sort > /payload/evidence/all-installed-packages.tsv
+          find /payload/root -type f -o -type l | sort > /payload/evidence/files.txt
+          tar --sort=name --mtime='UTC 2026-07-23' --owner=0 --group=0 --numeric-owner \
+            -C /payload/root --zstd -cf /payload/debian13-tauri-sysroot.tar.zst .
+          sha256sum /payload/debian13-tauri-sysroot.tar.zst > /payload/evidence/sysroot.sha256
+          stat -c '%s' /payload/debian13-tauri-sysroot.tar.zst > /payload/evidence/sysroot.size
+      - name: Upload Debian 13 sysroot
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian13-tauri-sysroot
+          path: |
+            /payload/debian13-tauri-sysroot.tar.zst
+            /payload/evidence
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
