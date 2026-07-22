@@ -1,0 +1,94 @@
+name: Export Dokkomplekt frontend dependencies
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/export-frontend-deps.yml'
+      - 'ci_payload/frontend_deps_trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Generate exact lock and dependency tree
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          W="$RUNNER_TEMP/dok-frontend"
+          mkdir -p "$W" "$GITHUB_WORKSPACE/payload" "$GITHUB_WORKSPACE/evidence"
+          cat > "$W/package.json" <<'EOF'
+          {
+            "name": "dokkomplekt-universal-tauri",
+            "version": "18.3.2",
+            "private": true,
+            "type": "module",
+            "scripts": {
+              "dev": "vite --host 127.0.0.1",
+              "build": "tsc && vite build",
+              "typecheck": "tsc --noEmit",
+              "test": "vitest run --config vitest.config.ts",
+              "e2e:install": "playwright install --with-deps chromium",
+              "e2e": "playwright test",
+              "tauri:dev": "tauri dev",
+              "tauri:build": "tauri build",
+              "tauri:build:check": "tauri build --debug",
+              "quality": "npm run typecheck && npm run test && npm run build && npm run test:python && python scripts/static_quality_gate.py --source-only",
+              "clean": "node scripts/clean.mjs",
+              "behavior": "vitest run --config vitest.config.ts src/App.test.tsx src/lib/api.test.ts",
+              "parity": "python scripts/static_quality_gate.py --source-only",
+              "prepackage": "bash scripts/prepackage_rust_gate.sh && python scripts/assert_release_ready.py",
+              "release:assert": "python scripts/assert_release_ready.py",
+              "test:python": "python scripts/run_python_contracts_sharded.py",
+              "quality:release": "npm run quality && python scripts/static_quality_gate.py"
+            },
+            "dependencies": {
+              "@tauri-apps/api": "^2.0.0",
+              "react": "^18.3.1",
+              "react-dom": "^18.3.1"
+            },
+            "devDependencies": {
+              "@playwright/test": "^1.46.0",
+              "@tauri-apps/cli": "^2.0.0",
+              "@testing-library/dom": "^10.4.1",
+              "@testing-library/react": "^16.0.0",
+              "@types/react": "^18.3.2",
+              "@types/react-dom": "^18.3.2",
+              "@vitejs/plugin-react": "^6.0.3",
+              "jsdom": "^24.1.0",
+              "typescript": "^5.5.0",
+              "vite": "^8.1.3",
+              "vitest": "^4.1.10"
+            }
+          }
+          EOF
+          cd "$W"
+          npm install --ignore-scripts --no-audit --no-fund
+          npm audit --omit=dev --audit-level=high > "$GITHUB_WORKSPACE/evidence/npm-audit-production.log"
+          node -v > "$GITHUB_WORKSPACE/evidence/node-version.log"
+          npm -v > "$GITHUB_WORKSPACE/evidence/npm-version.log"
+          cp package-lock.json "$GITHUB_WORKSPACE/payload/package-lock.json"
+          sha256sum package.json package-lock.json > "$GITHUB_WORKSPACE/evidence/frontend-inputs.sha256"
+          tar --sort=name --mtime='UTC 2026-07-23' --owner=0 --group=0 --numeric-owner \
+            --zstd -cf "$GITHUB_WORKSPACE/payload/node_modules.tar.zst" node_modules
+          sha256sum "$GITHUB_WORKSPACE/payload/node_modules.tar.zst" > "$GITHUB_WORKSPACE/evidence/node-modules.sha256"
+          stat -c '%s' "$GITHUB_WORKSPACE/payload/node_modules.tar.zst" > "$GITHUB_WORKSPACE/evidence/node-modules.size"
+      - name: Upload frontend dependency closure
+        uses: actions/upload-artifact@v4
+        with:
+          name: dokkomplekt-frontend-node22
+          path: |
+            payload
+            evidence
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
