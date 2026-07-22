@@ -14,31 +14,25 @@ permissions:
 jobs:
   export-audit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.97.0
-      - name: Install auditor and fetch advisory database
+      - name: Install auditor and clone official advisory database
         shell: bash
         run: |
           set -Eeuo pipefail
           cargo install cargo-audit --locked
-          mkdir -p payload evidence empty-project
-          printf '[package]\nname="audit-fetch"\nversion="0.1.0"\nedition="2021"\n' > empty-project/Cargo.toml
-          mkdir -p empty-project/src
-          printf 'fn main() {}\n' > empty-project/src/main.rs
-          (cd empty-project && cargo generate-lockfile && cargo audit fetch)
+          mkdir -p payload evidence
+          git clone --depth 1 https://github.com/RustSec/advisory-db.git payload/advisory-db
           cp "$(command -v cargo-audit)" payload/cargo-audit
           chmod +x payload/cargo-audit
-          DB="${CARGO_AUDIT_DB:-$HOME/.cargo/advisory-db}"
-          test -d "$DB"
-          tar --sort=name --mtime='UTC 2026-07-23' --owner=0 --group=0 --numeric-owner \
-            -C "$(dirname "$DB")" --zstd -cf payload/advisory-db.tar.zst "$(basename "$DB")"
-          cargo audit --version > evidence/cargo-audit-version.log
-          git -C "$DB" rev-parse HEAD > evidence/advisory-db-commit.txt
-          sha256sum payload/cargo-audit payload/advisory-db.tar.zst > evidence/payload.sha256
+          payload/cargo-audit --version > evidence/cargo-audit-version.log
+          git -C payload/advisory-db rev-parse HEAD > evidence/advisory-db-commit.txt
+          find payload/advisory-db -type f -print0 | sort -z | xargs -0 sha256sum > evidence/advisory-db-files.sha256
+          sha256sum payload/cargo-audit > evidence/cargo-audit.sha256
       - name: Upload audit tooling
         uses: actions/upload-artifact@v4
         with:
