@@ -1,0 +1,117 @@
+name: Dokkomplekt v18.3.2 Rust verification
+
+on:
+  push:
+    branches:
+      - ci/v18-3-2-rust-verification
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-verification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout verification branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct exact Rust source snapshot
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p _dokkomplekt
+          cat ci_payload/v18_3_2_core/part-* | base64 --decode > _dokkomplekt-source.tar.xz
+          echo "2eec1f0bf7cecaf3d8767c5e8b0d8f6203bd38ac66a0ff0c12c73abae4c67311  _dokkomplekt-source.tar.xz" | sha256sum --check --strict
+          tar -xJf _dokkomplekt-source.tar.xz -C _dokkomplekt
+          test -f _dokkomplekt/Cargo.toml
+          test -f _dokkomplekt/Cargo.lock
+          test -f _dokkomplekt/src-tauri/src/main.rs
+
+      - name: Install Linux Tauri build dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libdbus-1-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            patchelf \
+            pkg-config
+
+      - name: Install Rust 1.97.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.0
+          components: rustfmt, clippy
+
+      - name: Cache Cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: _dokkomplekt -> target
+          cache-on-failure: true
+
+      - name: Record toolchain
+        working-directory: _dokkomplekt
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p verification-ci
+          rustc -Vv | tee verification-ci/rustc-version.log
+          cargo -V | tee verification-ci/cargo-version.log
+          rustfmt -V | tee verification-ci/rustfmt-version.log
+          cargo clippy -V | tee verification-ci/clippy-version.log
+
+      - name: Rustfmt gate
+        working-directory: _dokkomplekt
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo fmt --all -- --check 2>&1 | tee verification-ci/cargo-fmt.log
+
+      - name: Cargo check workspace all targets locked
+        working-directory: _dokkomplekt
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check --workspace --all-targets --locked 2>&1 | tee verification-ci/cargo-check.log
+
+      - name: Clippy workspace all targets deny warnings
+        working-directory: _dokkomplekt
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 | tee verification-ci/cargo-clippy.log
+
+      - name: Cargo test workspace locked
+        working-directory: _dokkomplekt
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace --locked 2>&1 | tee verification-ci/cargo-test.log
+
+      - name: RustSec audit
+        working-directory: _dokkomplekt
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cargo install cargo-audit --locked
+          set -o pipefail
+          cargo audit --locked 2>&1 | tee verification-ci/cargo-audit.log
+
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dokkomplekt-v18-3-2-rust-verification
+          path: _dokkomplekt/verification-ci
+          if-no-files-found: warn
+          retention-days: 14
