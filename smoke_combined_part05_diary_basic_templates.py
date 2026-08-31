@@ -54,9 +54,15 @@ assert result.report_path is None
 assert not any(path.name.startswith("ОТЧЁТ_") for path in (OUT / "diaries").glob("*.txt"))
 assert result.filled_rows >= 1
 assert result.final_rows_filled == 1
-assert result.removed_after_discharge_rows >= 3
-diary_text = "\n".join("\t".join(cell.text for cell in row.cells) for row in Document(result.created_files[0]).tables[0].rows)
-assert "Пациентка была спокойна" in diary_text
+# The production diary route is text-only. Calendar table rows are not mutated
+# or counted; discharge bounds are enforced while the text-date plan is built.
+assert result.removed_after_discharge_rows == 0
+result_doc = Document(result.created_files[0])
+assert not result_doc.tables, "Text diary output must not resurrect legacy table rendering"
+diary_text = "\n".join(paragraph.text for paragraph in result_doc.paragraphs)
+assert "11.06.26 Пациентка была спокойна" in diary_text
+assert "12.06.26 Состояние улучшилось" in diary_text
+assert "13.06.26" not in diary_text
 assert "не предъявляла" in diary_text
 
 # --- Diary gender source smoke: UI filename may be male, source document is female ---
@@ -75,9 +81,12 @@ result_filename_male = fill_diary_batch(
     force_final_diary=True,
     remove_holiday_rows=True,
 )
-diary_text2 = "\n".join("\t".join(cell.text for cell in row.cells) for row in Document(result_filename_male.created_files[0]).tables[0].rows)
+result_filename_male_doc = Document(result_filename_male.created_files[0])
+assert not result_filename_male_doc.tables
+diary_text2 = "\n".join(paragraph.text for paragraph in result_filename_male_doc.paragraphs)
 assert "Пациентка была спокойна" in diary_text2
 assert "не предъявляла" in diary_text2
+assert "13.06.26" not in diary_text2
 assert result_filename_male.created_files[0].name.startswith("Иванов Иван Иванович")
 
 
