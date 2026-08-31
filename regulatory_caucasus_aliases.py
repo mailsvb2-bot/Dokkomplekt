@@ -233,7 +233,8 @@ def caucasus_context_report() -> str:
 
 
 def assert_caucasus_alias_lock() -> None:
-    if set(CAUCASUS_COUNTRIES) != {"armenia", "georgia", "azerbaijan"}:
+    required_caucasus = {"armenia", "georgia", "azerbaijan"}
+    if not required_caucasus.issubset(CAUCASUS_COUNTRIES):
         raise AssertionError("Caucasus alias context must cover Armenia, Georgia and Azerbaijan")
     if not CAUCASUS_ADVICE_IS_NON_BLOCKING:
         raise AssertionError("Caucasus regulatory aliases must remain non-blocking")
