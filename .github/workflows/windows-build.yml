@@ -111,7 +111,10 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Install build and gate dependencies
+        shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           python -m pip install --upgrade pip
           python -m pip install -r requirements_dev.txt
       - name: Run project code auditor
@@ -131,21 +134,33 @@ jobs:
           Get-Content regression-contour.log -Tail 200
           exit $code
       - name: Run full smoke suite
+        shell: pwsh
         run: |
-          python smoke_test.py
-          python smoke_test_combined.py
-          python smoke_desktop_diary_workflow.py
-          python smoke_universal_hardening.py
-          python smoke_stress_hardening.py
-          python smoke_auditor_layer.py
-          python smoke_project_auditor.py
-          python smoke_technical_debt_cleanup.py
-          python smoke_split_entrypoints.py
-          python smoke_followup_regressions.py
-          python smoke_quality_modernization.py
-          python smoke_points_5_11.py
-          python smoke_user_reported_regressions.py
-          python smoke_full_patient_replay.py
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $smokes = @(
+            'smoke_test.py',
+            'smoke_test_combined.py',
+            'smoke_desktop_diary_workflow.py',
+            'smoke_universal_hardening.py',
+            'smoke_stress_hardening.py',
+            'smoke_auditor_layer.py',
+            'smoke_project_auditor.py',
+            'smoke_technical_debt_cleanup.py',
+            'smoke_split_entrypoints.py',
+            'smoke_followup_regressions.py',
+            'smoke_quality_modernization.py',
+            'smoke_points_5_11.py',
+            'smoke_user_reported_regressions.py',
+            'smoke_full_patient_replay.py'
+          )
+          foreach ($smoke in $smokes) {
+            Write-Host "==> $smoke"
+            & python $smoke
+            if ($LASTEXITCODE -ne 0) {
+              throw "Smoke gate failed: $smoke (exit $LASTEXITCODE)"
+            }
+          }
       - name: Run release gate
         shell: pwsh
         run: |
@@ -157,6 +172,8 @@ jobs:
       - name: Prebuild native license verifier for EXE
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           python -m venv .venv_build
           .\.venv_build\Scripts\python.exe -m pip install --upgrade pip
           .\.venv_build\Scripts\python.exe -m pip install -r requirements_build.txt

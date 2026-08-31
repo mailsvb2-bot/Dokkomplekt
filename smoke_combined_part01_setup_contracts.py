@@ -234,7 +234,12 @@ malicious_pack = OUT / "malicious.medpack.zip"
 import zipfile, json
 with zipfile.ZipFile(malicious_pack, "w") as zf:
     zf.writestr("pack.json", json.dumps(profile_owned_pack.to_dict(), ensure_ascii=False))
-    zf.writestr("templates\\evil.docx", "bad")
+    # ZipInfo normalizes OS separators in its constructor on Windows. Set
+    # filename afterwards so the archive really contains a literal backslash
+    # entry on every platform and the importer security contract is tested.
+    unsafe_entry = zipfile.ZipInfo("templates/placeholder.docx")
+    unsafe_entry.filename = "templates\\evil.docx"
+    zf.writestr(unsafe_entry, "bad")
 try:
     import_document_pack_zip(malicious_pack, OUT / "malicious_import")
 except ValueError as exc:
