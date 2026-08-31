@@ -506,12 +506,15 @@ vk_preflight_logic.vk_date_var = _FakeVar("09.06.2026")
 vk_preflight_logic.vk_protocol_number_var = _FakeVar("42")
 vk_preflight_logic.vk_protocol_date_var = _FakeVar("10.06.2026")
 vk_preflight_logic.vk_mse_work_org_var = _FakeVar("ООО Тест")
+vk_preflight_logic.vk_mse_position_var = _FakeVar("")
 vk_preflight_logic._admission_date_for_validation = _main_module.CombinedMedicalDiaryApp._admission_date_for_validation.__get__(vk_preflight_logic, _main_module.CombinedMedicalDiaryApp)
 vk_preflight_logic._date_is_not_before_admission = _main_module.CombinedMedicalDiaryApp._date_is_not_before_admission.__get__(vk_preflight_logic, _main_module.CombinedMedicalDiaryApp)
 vk_preflight_logic._popup_date_value_is_valid_and_in_episode = _main_module.CombinedMedicalDiaryApp._popup_date_value_is_valid_and_in_episode.__get__(vk_preflight_logic, _main_module.CombinedMedicalDiaryApp)
 vk_preflight_logic._vk_mse_details_complete = _main_module.CombinedMedicalDiaryApp._vk_mse_details_complete.__get__(vk_preflight_logic, _main_module.CombinedMedicalDiaryApp)
 assert vk_preflight_logic._vk_mse_details_complete() is False
 vk_preflight_logic.vk_date_var.set("10.06.2026")
+assert vk_preflight_logic._vk_mse_details_complete() is False, "Working VK MSE case must require position"
+vk_preflight_logic.vk_mse_position_var.set("инженер")
 assert vk_preflight_logic._vk_mse_details_complete() is True
 
 # --- v1.4.31 discharge date UI contract regressions ---
