@@ -213,7 +213,7 @@ def _build_app(primary_path: Path, patient_dir: Path, profile_path: Path, pack):
     app._universal_profile_path = lambda: profile_path
     app._ensure_patient_folder_naming_configured = lambda *args, **kwargs: True
     app._confirm_patient_case_before_creation = lambda review: True
-    app._apply_duplicate_policy = lambda review, selected_medical: True
+    app._apply_duplicate_policy = lambda review, selected_medical, selected_custom=None, selected_diaries=False: True
     app._write_creation_report = lambda **kwargs: None
     app._show_created_document_preview = lambda created_files: None
     app._open_output_folder_after_creation = lambda **kwargs: False
