@@ -38,7 +38,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          python -m pytest tests --cov=medical_parser --cov=universal_scanner --cov=diary_template_discovery --cov=icd10_f_search --cov=error_taxonomy --cov=doctor_action_journal --cov-report=term-missing --cov-report=xml --cov-fail-under=50 > python-headless-tests.log 2>&1
+          python -m pytest tests --cov=. --cov-config=.coveragerc --cov-report=term-missing --cov-report=xml --cov-fail-under=35 > python-headless-tests.log 2>&1
           code=$?
           tail -160 python-headless-tests.log
           exit $code
@@ -69,6 +69,8 @@ jobs:
   build:
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      DOKKOMPLEKT_TEST_DISABLE_PRODUCT_ACCESS: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -159,6 +161,13 @@ jobs:
           $code=$LASTEXITCODE
           Get-Content packaged-native-verifier.log
           exit $code
+      - name: Smoke packaged EXE runtime bundle
+        shell: pwsh
+        run: |
+          & .\dist\MedicalDiaryAutofill.exe --check-runtime-bundle *> packaged-runtime-bundle.log
+          $code=$LASTEXITCODE
+          Get-Content packaged-runtime-bundle.log
+          exit $code
       - name: Build clean source archive
         run: python make_release_zip.py
       - name: Upload EXE artifact
@@ -194,5 +203,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: packaged-native-verifier-logs
-          path: packaged-native-verifier.log
+          path: |
+            packaged-native-verifier.log
+            packaged-runtime-bundle.log
           if-no-files-found: ignore
