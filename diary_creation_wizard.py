@@ -220,7 +220,8 @@ def _confirm_schedule_and_sick_leave(app: object, spec: DiaryScheduleSpec, choic
     if rhythm_spec is None:
         return False
     _set_confirmed_schedule(app, rhythm_spec, choice_text, style_choice)
-    _prompt_sick_leave_epicrisis(app, messagebox, simpledialog)
+    # Sick-leave questions belong to the discharge-document flow.  Selecting
+    # diaries alone must never open a sick-leave popup or mutate that state.
     return True
 
 

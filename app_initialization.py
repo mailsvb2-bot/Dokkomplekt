@@ -223,6 +223,10 @@ class AppInitializationMixin:
         self.labs_without_var = tk.BooleanVar(value=False)
         self.additional_info_text_var = tk.StringVar()
         self.additional_info_source_path_var = tk.StringVar()
+        # Patient-scoped diary correction.  It must exist in the real app, not
+        # only in smoke harnesses, because the diary wizard stores the doctor's
+        # wording here before dynamic epicrises are rendered.
+        self.diary_treatment_correction_var = tk.StringVar()
 
         # Даты popup-окон ВК/комиссий не должны переноситься между разными
         # документами. Например, дата комиссионного осмотра и дата Акта/ВК

@@ -285,7 +285,7 @@ class _RequiredFieldsDialog:
         self._bind_window()
         self._focus_first()
         self.app.root.wait_window(self.win)
-        return self.result["action"] == "save"
+        return self.result["action"] in {"save", "continue_missing"}
 
     def _window(self) -> tk.Toplevel:
         if self.win is None:
@@ -397,8 +397,10 @@ class _RequiredFieldsDialog:
         buttons.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 12))
         buttons.grid_columnconfigure(0, weight=1)
         buttons.grid_columnconfigure(1, weight=1)
+        buttons.grid_columnconfigure(2, weight=1)
         tk.Button(buttons, text="Сохранить и продолжить", command=self._save, bg=ACCENT_2, fg="#03101f", relief="flat", padx=10, pady=8, font=self.app._font(9, "bold")).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        tk.Button(buttons, text="Отмена", command=self._cancel, bg=PANEL_3, fg=TEXT, relief="flat", padx=10, pady=8, font=self.app._font(9, "bold")).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        tk.Button(buttons, text="Продолжить без…", command=self._continue_without, bg=PANEL_3, fg=WARN, relief="flat", padx=10, pady=8, font=self.app._font(9, "bold")).grid(row=0, column=1, sticky="ew", padx=6)
+        tk.Button(buttons, text="Отмена", command=self._cancel, bg=PANEL_3, fg=TEXT, relief="flat", padx=10, pady=8, font=self.app._font(9, "bold")).grid(row=0, column=2, sticky="ew", padx=(6, 0))
 
     def _bind_window(self) -> None:
         win = self._window()
@@ -408,6 +410,19 @@ class _RequiredFieldsDialog:
         win.protocol("WM_DELETE_WINDOW", self._cancel)
         win.transient(self.app.root)
         win.grab_set()
+
+    def _continue_without(self) -> None:
+        labels = [str(getattr(field, "label", getattr(field, "key", "поле"))) for field in self.missing]
+        text = (
+            "Документ будет создан с незаполненными обязательными полями:\n\n"
+            + "\n".join(f"• {label}" for label in labels[:12])
+            + "\n\nПродолжить именно так?"
+        )
+        if not messagebox.askyesno("Продолжить без обязательных полей", text, parent=self._window()):
+            return
+        self.app._allow_missing_required_creation = True
+        self.result["action"] = "continue_missing"
+        self._close()
 
     def _save(self) -> None:
         values: dict[str, str] = {}

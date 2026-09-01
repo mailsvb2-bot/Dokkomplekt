@@ -193,9 +193,11 @@ class ActionsUniversalFlowMixin:
         values = completion_values_from_raw(inputs, raw_values)
         if values:
             return apply_completion_values(case, values, source_document="custom_document_completion_popup")
-        if required_mode:
+        if required_mode and not bool(getattr(self, "_allow_missing_required_creation", False)):
             labels = ", ".join(str(getattr(item, "label", item.field_id)) for item in inputs[:6])
             raise ValueError("Не заполнены обязательные поля custom-документа: " + labels)
+        if required_mode:
+            self._log("\n⚠ Врач явно выбрал «Продолжить без…»: custom-документ будет создан с незаполненными обязательными полями.\n")
         self._log("\nℹ Врач выбрал создание custom-документов как есть, без дополнительных полей.\n")
         return case
 
@@ -225,7 +227,7 @@ class ActionsUniversalFlowMixin:
             document_ids=regular_ids,
             output_dir=out_dir,
             base_dir=self._universal_profile_path().parent,
-            strict=False,
+            strict=not bool(getattr(self, "_allow_missing_required_creation", False)),
             output_language=self._effective_output_language(),
             spellcheck_enabled=bool(getattr(self, "spellcheck_enabled_var", None) and self.spellcheck_enabled_var.get()),
         )

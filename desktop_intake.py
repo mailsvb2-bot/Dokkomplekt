@@ -301,6 +301,36 @@ def _available_dir(path: str | Path) -> Path:
         index += 1
 
 
+def _same_patient_existing_folder(candidate: Path, primary_path: str | Path) -> bool:
+    """Reuse a folder only when an existing primary document identifies the same case."""
+    if not candidate.exists() or not candidate.is_dir():
+        return False
+    try:
+        from desktop_patient_folder import build_patient_folder_info
+        source_info = build_patient_folder_info(primary_path)
+        source_fio = " ".join(source_info.fio.casefold().replace("ё", "е").split())
+        source_date = source_info.admission_date.strip()
+        if not source_fio:
+            return False
+        for doc in candidate.iterdir():
+            if not doc.is_file() or doc.suffix.lower() not in _ALLOWED_PRIMARY_SUFFIXES:
+                continue
+            try:
+                info = build_patient_folder_info(doc)
+            except Exception as exc:
+                record_soft_exception("desktop_intake.same_patient_existing_document", exc, detail=str(doc))
+                continue
+            fio = " ".join(info.fio.casefold().replace("ё", "е").split())
+            if fio != source_fio:
+                continue
+            if source_date and info.admission_date and info.admission_date.strip() != source_date:
+                continue
+            return True
+    except Exception as exc:
+        record_soft_exception("desktop_intake.same_patient_folder", exc, detail=str(candidate))
+    return False
+
+
 def safe_patient_subfolder(folder: str | Path, primary_path: str | Path, folder_name: str | None = None) -> Path:
     if folder_name is None:
         try:
@@ -311,7 +341,10 @@ def safe_patient_subfolder(folder: str | Path, primary_path: str | Path, folder_
             record_soft_exception("desktop_intake.patient_folder_info", exc, detail=str(primary_path))
             folder_name = ""
     name = safe_filename((folder_name or Path(primary_path).stem)).strip(" .") or "Пациент"
-    return _available_dir(Path(folder).expanduser() / name)
+    candidate = Path(folder).expanduser() / name
+    if _same_patient_existing_folder(candidate, primary_path):
+        return candidate
+    return _available_dir(candidate)
 
 
 def _read_intake_docx_text(path: Path, *, context: str) -> str | None:
@@ -336,9 +369,7 @@ def scan_primary_candidates(folder: str | Path, seen_signatures: set[str]) -> tu
     if not root.exists() or not root.is_dir():
         return ()
 
-    fallback_candidates: list[DesktopCandidate] = []
     primary_candidates: list[tuple[int, DesktopCandidate]] = []
-    clear_primary_present = False
 
     for path in sorted(root.iterdir(), key=lambda item: item.name.lower()):
         if not path.is_file() or not _is_supported_intake_document_name(path):
@@ -356,29 +387,18 @@ def scan_primary_candidates(folder: str | Path, seen_signatures: set[str]) -> tu
         if doc_text is None:
             continue
         score = primary_document_score(doc_text)
-        is_clear_primary = score >= 5
-        if is_clear_primary:
-            clear_primary_present = True
+        if score < 5:
+            continue
 
         key = signature_key(path, stat.st_mtime_ns, stat.st_size)
         if key in seen_signatures:
             continue
 
         candidate = DesktopCandidate(path, (stat.st_mtime_ns, stat.st_size))
-        if is_clear_primary:
-            primary_candidates.append((score, candidate))
-            continue
+        primary_candidates.append((score, candidate))
 
-        low_text = doc_text.lower().replace("ё", "е")
-        if any(marker in low_text for marker in _EXCLUDED_DOCUMENT_MARKERS):
-            continue
-        fallback_candidates.append(candidate)
-
-    if clear_primary_present:
-        ordered = sorted(primary_candidates, key=lambda item: (-item[0], item[1].path.name.lower()))
-        return tuple(candidate for _score, candidate in ordered)
-
-    return tuple(fallback_candidates)
+    ordered = sorted(primary_candidates, key=lambda item: (-item[0], item[1].path.name.lower()))
+    return tuple(candidate for _score, candidate in ordered)
 
 
 def is_likely_primary_document(path: str | Path) -> bool:
@@ -395,15 +415,40 @@ def is_likely_primary_document(path: str | Path) -> bool:
     return primary_document_score(text) >= 5
 
 
-def prepare_patient_work_folder(folder: str | Path, primary_path: str | Path, folder_name: str | None = None) -> tuple[Path, Path]:
-    """Create a patient subfolder and move the dropped primary document into it."""
+def prepare_patient_work_folder(
+    folder: str | Path,
+    primary_path: str | Path,
+    folder_name: str | None = None,
+    *,
+    keep_source: bool = False,
+) -> tuple[Path, Path]:
+    """Create a patient subfolder and stage the primary document there.
+
+    ``keep_source=True`` is the transactional desktop-intake mode: the top-level
+    source remains in place until document generation reports success.
+    """
 
     source = Path(primary_path).expanduser()
     if not source.exists() or not source.is_file():
         raise FileNotFoundError(f"Не найден первичный документ для папки пациента: {source}")
     patient_dir = safe_patient_subfolder(folder, source, folder_name=folder_name)
-    patient_dir.mkdir(parents=True, exist_ok=False)
+    patient_dir.mkdir(parents=True, exist_ok=True)
     target = available_path(patient_dir / source.name)
+    if keep_source:
+        try:
+            shutil.copy2(str(source), str(target))
+            return patient_dir, target
+        except Exception as copy_exc:
+            with suppress(Exception):
+                if target.exists():
+                    target.unlink()
+            with suppress(Exception):
+                if patient_dir.exists() and not any(patient_dir.iterdir()):
+                    patient_dir.rmdir()
+            raise RuntimeError(
+                "Не удалось подготовить копию первичного документа в папке пациента.\n"
+                f"Исходный файл: {source}\nПапка пациента: {patient_dir}\nОшибка: {copy_exc}"
+            ) from copy_exc
     try:
         moved = Path(shutil.move(str(source), str(target)))
     except Exception as move_exc:

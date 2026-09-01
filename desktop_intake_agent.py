@@ -19,6 +19,7 @@ import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -418,11 +419,18 @@ def _write_startup_vbs(target: str, arguments: str, appdir: str) -> Path:
     startup.mkdir(parents=True, exist_ok=True)
     command = f'"{target}" {arguments}'.strip()
     script_path = startup / STARTUP_AGENT_SCRIPT_NAME
+    error_log = str((_data_root() / "desktop_intake_agent_startup_error.log").resolve())
     script = "\n".join([
         'On Error Resume Next',
         'Set shell = CreateObject("WScript.Shell")',
         f"shell.CurrentDirectory = {_vbs_string(appdir)}",
         f"shell.Run {_vbs_string(command)}, 0, False",
+        'If Err.Number <> 0 Then',
+        '  Set fso = CreateObject("Scripting.FileSystemObject")',
+        f"  Set logFile = fso.OpenTextFile({_vbs_string(error_log)}, 8, True, -1)",
+        '  logFile.WriteLine Now & " startup error " & Err.Number & ": " & Err.Description',
+        '  logFile.Close',
+        'End If',
         "",
     ])
     # Windows Script Host/VBScript is not reliably UTF-8-BOM aware on all
@@ -506,11 +514,20 @@ def install_agent_autostart(*, start_now: bool = True) -> tuple[bool, str]:
             record_soft_exception("desktop_intake_agent.write_handoff", exc)
         if start_now:
             try:
-                _popen_hidden(_shortcut_launch_command(), cwd=appdir)
-                _write_log(f"autostart agent started without shell: {target} {arguments}")
+                child = _popen_hidden(_shortcut_launch_command(), cwd=appdir)
+                try:
+                    exit_code = child.wait(timeout=0.35)
+                except subprocess.TimeoutExpired:
+                    exit_code = None
+                if exit_code is not None and not _agent_lock_has_live_owner():
+                    detail = f"agent process exited immediately with code {exit_code}"
+                    _write_log(detail)
+                    return False, detail
+                _write_log(f"autostart agent started/confirmed without shell: {target} {arguments}")
             except Exception as exc:
                 record_soft_exception("desktop_intake_agent.start_now_hidden", exc)
                 _write_log(f"autostart start_now failed after startup script creation: {exc}")
+                return False, f"autostart installed but watcher failed to start: {exc}"
         _write_log(f"autostart installed as VBS startup script: {startup_script}")
         return True, f"installed: {startup_script}"
     except Exception as exc:
@@ -680,8 +697,54 @@ def _resolve_pending_state(state: dict, seen: set[str], folder: Path | None = No
     return {}, True
 
 
+def _lock_owner_pid(path: Path) -> int | None:
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        match = re.search(r"(?m)^pid=(\d+)\s*$", text)
+        return int(match.group(1)) if match else None
+    except (OSError, ValueError):
+        return None
+
+
+def _pid_is_running(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if pid == os.getpid():
+        return True
+    if os.name == "nt":
+        try:
+            import ctypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not handle:
+                return False
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        except Exception as exc:
+            record_soft_exception("desktop_intake_agent.pid_probe_windows", exc, detail=str(pid))
+            return True  # do not delete a lock when the OS probe itself failed
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _agent_lock_has_live_owner() -> bool:
+    path = _lock_path()
+    pid = _lock_owner_pid(path) if path.exists() else None
+    return bool(pid and _pid_is_running(pid))
+
+
 def _lock_is_stale(path: Path) -> bool:
     try:
+        pid = _lock_owner_pid(path)
+        if pid is not None and not _pid_is_running(pid):
+            return True
         return time.time() - path.stat().st_mtime > LOCK_STALE_SECONDS
     except OSError:
         return True

@@ -235,10 +235,10 @@ class ActionsCreationExecutionMixin:
                 "Файлы сохранены, но часть документов не удалось отправить на печать:\n\n" + "\n".join(print_result.errors[:10]),
             )
 
-    def create_selected_outputs(self, *, print_after: bool = False) -> None:
+    def create_selected_outputs(self, *, print_after: bool = False) -> bool:
         if getattr(self, "_creation_in_progress", False):
             self._log("\n⚠ Создание уже запущено; повторное нажатие проигнорировано, чтобы документы не ушли на печать дважды.\n")
-            return
+            return False
         self._creation_in_progress = True
         self._allow_missing_required_creation = False
         try:
@@ -246,17 +246,17 @@ class ActionsCreationExecutionMixin:
         finally:
             self._creation_in_progress = False
 
-    def _create_selected_outputs_locked(self, *, print_after: bool = False) -> None:
+    def _create_selected_outputs_locked(self, *, print_after: bool = False) -> bool:
         """Implement the _create_selected_outputs_locked workflow with validation, UI state updates and diagnostics."""
         selected = self._selected_outputs_or_warn()
         if selected is None:
-            return
+            return False
         selected_medical, selected_diaries, selected_custom = selected
         self._active_patient_output_dir = None
         if not self._ensure_patient_folder_naming_configured():
-            return
+            return False
         if not self._collect_creation_requirements(selected_medical, selected_diaries, selected_custom):
-            return
+            return False
         review = self._build_patient_case_review_for_selection(selected_medical, selected_diaries, selected_custom)
         try:
             from doctor_action_journal import append_doctor_action
@@ -275,18 +275,18 @@ class ActionsCreationExecutionMixin:
                 append_doctor_action(output_dir=review.output_dir or self._result_output_dir(), action="Создание отменено на проверке", review=review, category="preflight")
             except Exception as exc:
                 record_soft_exception("actions_creation_execution.journal_preflight_cancel", exc)
-            return
+            return False
         review = self._build_patient_case_review_for_selection(selected_medical, selected_diaries, selected_custom)
         self._active_patient_output_dir = Path(review.output_dir)
-        if not self._apply_duplicate_policy(review, selected_medical):
+        if not self._apply_duplicate_policy(review, selected_medical, selected_custom, selected_diaries):
             self._active_patient_output_dir = None
-            return
+            return False
         review = self._build_patient_case_review_for_selection(selected_medical, selected_diaries, selected_custom)
         self._active_patient_output_dir = Path(review.output_dir)
         if print_after and not self.printer_var.get().strip():
             if not self._select_default_printer_sync():
                 messagebox.showwarning("Принтер не выбран", "Выберите принтер перед печатью или используйте кнопку сохранения без печати.")
-                return
+                return False
         self._start_progress()
         created_medical, created_custom, diary_result, errors = self._run_creation_jobs(selected_medical, selected_diaries, selected_custom)
         if errors:
@@ -304,7 +304,7 @@ class ActionsCreationExecutionMixin:
                 errors=errors,
             )
             messagebox.showwarning("Готово с ошибками", "Часть задач не выполнена:\n\n" + "\n".join(errors))
-            return
+            return False
         created_files = self._created_files_from_results(created_medical, created_custom, diary_result)
         if not created_files:
             warning = "Ничего не создано: выбранные документы не дали итоговых файлов. Проверьте шаблоны и повторите."
@@ -323,7 +323,7 @@ class ActionsCreationExecutionMixin:
             )
             messagebox.showwarning("Ничего не создано", warning)
             self._set_status("Ничего не создано: проверьте шаблоны")
-            return
+            return False
         try:
             from doctor_action_journal import append_doctor_action
             append_doctor_action(
@@ -349,3 +349,4 @@ class ActionsCreationExecutionMixin:
         opened_folder = self._open_output_folder_after_creation(created_files=created_files, creation_report=creation_report)
         self._set_status("Готово: файлы сохранены")
         self._log("\n✅ Готово: файлы сохранены.{}\n".format(" Папка результата открыта." if opened_folder else ""))
+        return True

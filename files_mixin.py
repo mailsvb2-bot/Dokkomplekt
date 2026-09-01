@@ -95,6 +95,17 @@ class FilesMixin:
         self.sick_leave_vk_work_org_var.set("")
         self.sick_leave_vk_position_var.set("")
         self.sick_leave_vk_work_position_var.set("")
+        # Every source below is patient-specific.  Keeping any of them while a
+        # new primary document is loaded can leak patient A data into patient B.
+        for _patient_scoped_var in (
+            "epi_path_var",
+            "additional_info_text_var",
+            "additional_info_source_path_var",
+            "diary_treatment_correction_var",
+        ):
+            patient_var = getattr(self, _patient_scoped_var, None)
+            if patient_var is not None and hasattr(patient_var, "set"):
+                patient_var.set("")
         # Реквизиты специальных popup-окон относятся к конкретному пациенту.
         # При новом первичном документе они не должны перетекать из прошлого
         # случая в РВК/ВК/МСЭ/комиссию/больничный лист.
@@ -125,6 +136,20 @@ class FilesMixin:
         self._manual_diagnosis = False
         self._popup_diagnosis_override = ""
         self._popup_discharge_date_override = ""
+        # Ctrl+Z history belongs to one patient only.  Clear it before programmatic
+        # resets so an undo in the next case cannot resurrect the previous FIO,
+        # diagnosis, case number, dates or treatment.
+        try:
+            self._field_undo_suspended = True
+            self._field_undo_stack = {key: [] for key in getattr(self, "_field_undo_stack", {})}
+            self._field_undo_last = {
+                key: var.get() for key, var in getattr(self, "_field_undo_vars", {}).items()
+            }
+        except Exception as exc:
+            record_soft_exception("files_mixin.reset_undo_state", exc)
+        finally:
+            if hasattr(self, "_field_undo_suspended"):
+                self._field_undo_suspended = False
         try:
             self._semantic_date_state.clear()
         except Exception as exc:
@@ -148,10 +173,21 @@ class FilesMixin:
                 self._update_diary_template_label(success=True)
         else:
             self._update_diary_template_label(success=False)
-        self._set_ui_var(self.patient_name_var, "")
-        self._set_ui_var(self.admission_date_var, "")
-        self._set_ui_var(self.discharge_date_var, "")
-        self._set_ui_var(self.diagnosis_var, "")
+        try:
+            self._field_undo_suspended = True
+            self._set_ui_var(self.patient_name_var, "")
+            self._set_ui_var(self.admission_date_var, "")
+            self._set_ui_var(self.discharge_date_var, "")
+            self._set_ui_var(self.diagnosis_var, "")
+            # These vars are also registered in the undo stack.
+            self.assigned_treatment_var.set("")
+            self.case_number_var.set("")
+            for key, var in getattr(self, "_field_undo_vars", {}).items():
+                self._field_undo_last[key] = var.get()
+                self._field_undo_stack[key] = []
+        finally:
+            if hasattr(self, "_field_undo_suspended"):
+                self._field_undo_suspended = False
         if hasattr(self, "_set_primary_drop_empty"):
             self._set_primary_drop_empty()
         elif hasattr(self, "primary_selected_status_var"):

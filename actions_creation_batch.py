@@ -85,8 +85,11 @@ class ActionsCreationBatchingMixin:
                     primary_documents=primary_documents,
                     output_root=output_root,
                     selected_docs=selected_medical,
-                    discharge_date=current_semantic_date(self, "discharge_date"),
-                    epi_path=self.epi_path_var.get().strip() or None,
+                    # Batch patients must be isolated.  A date/EPI currently
+                    # visible in the single-patient UI must never be broadcast
+                    # to every source in the batch.
+                    discharge_date="",
+                    epi_path=None,
                     service=self.service,
                     folder_naming_settings=self._folder_naming_settings(),
                 )
@@ -126,9 +129,6 @@ class ActionsCreationBatchingMixin:
             source_path = Path(source)
             try:
                 patient = self.service.parse_primary_document(source_path)
-                shared_discharge = current_semantic_date(self, "discharge_date")
-                if shared_discharge:
-                    patient.discharge_date = shared_discharge
                 patient_dir = self._patient_output_dir_for_data(patient, base_dir=output_root)
                 case = patient_data_to_case(patient, source_document=source_path)
                 try:
@@ -142,17 +142,20 @@ class ActionsCreationBatchingMixin:
                     document_ids=selected_custom,
                     output_dir=patient_dir,
                     base_dir=base_dir,
-                    strict=False,
+                    strict=True,
                     output_language=self._effective_output_language(),
                     spellcheck_enabled=bool(getattr(self, "spellcheck_enabled_var", None) and self.spellcheck_enabled_var.get()),
                 )
                 ref = technical_ref(source_path, patient_dir, getattr(patient, "case_number", ""))
-                if result.created_files:
+                if result.created_files and not result.skipped_documents and not result.warnings:
                     created_paths.extend(Path(item) for item in result.created_files)
                     ok += 1
                     display_lines.append(f"✅ {source_path.name}: создано {len(result.created_files)} файл(ов) → {patient_dir}")
                     technical_lines.append(f"✅ {ref}: создано {len(result.created_files)} файл(ов)")
                 else:
+                    # Never paint a partial/invalid batch item green.  Preserve
+                    # any valid files, but surface every skipped document/warning.
+                    created_paths.extend(Path(item) for item in result.created_files)
                     errors += 1
                     skipped = "; ".join(result.skipped_documents or result.warnings or ("ничего не создано",))
                     display_lines.append(f"❌ {source_path.name}: {skipped}")

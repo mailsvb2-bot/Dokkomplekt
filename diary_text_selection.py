@@ -97,6 +97,26 @@ def _icd_match_keys(value: str) -> set[str]:
     return keys
 
 
+def _explicit_icd_codes(value: str) -> tuple[set[str], set[str]]:
+    """Return (base, leaf) ICD codes explicitly present in text.
+
+    If both diagnosis and filename name an ICD code, conflicting subcodes are a
+    hard mismatch.  Lexical similarity must never override K35.8 vs K35.2 or
+    F20.0 vs F20.1.
+    """
+    bases: set[str] = set()
+    leaves: set[str] = set()
+    for match in _ICD_CODE_RE.finditer(str(value or "")):
+        letter = match.group(1).upper().replace("А", "A").replace("В", "B").replace("С", "C").replace("К", "K")
+        number = match.group(2).zfill(2)
+        base = f"{letter}{number}"
+        bases.add(base)
+        decimal = (match.group(3) or "").strip()
+        if decimal:
+            leaves.add(f"{base}.{decimal}")
+    return bases, leaves
+
+
 def _has_forbidden_narrow_diary_bridge() -> bool:
     """Production sentinel used by smoke/prod gates.
 
@@ -216,6 +236,17 @@ def _semantic_keys(value: str) -> set[str]:
 
 
 def diary_diagnosis_match_score(diagnosis: str, filename: str) -> int:
+    diag_bases, diag_leaves = _explicit_icd_codes(diagnosis)
+    name_bases, name_leaves = _explicit_icd_codes(filename)
+    if diag_bases and name_bases:
+        common_bases = diag_bases & name_bases
+        if not common_bases:
+            return 0
+        # Same rubric but different explicit decimal subrubrics are clinically
+        # distinct and must not auto-match solely because the words are equal.
+        if diag_leaves and name_leaves and not (diag_leaves & name_leaves):
+            return 0
+
     diag = normalize_diary_diagnosis_name(diagnosis)
     name = normalize_diary_diagnosis_name(filename)
     if not diag or not name:

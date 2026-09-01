@@ -314,11 +314,16 @@ class DesktopIntakeMixin:
         return body, intake_wheel
 
 
-    def _prepare_desktop_intake_patient_folder(self, primary: Path) -> None:
-        """Move dropped primary DOCX into a patient folder named by doctor settings."""
+    def _prepare_desktop_intake_patient_folder(self, primary: Path, *, keep_source: bool = False) -> Path:
+        """Stage a dropped primary DOCX in the patient folder without stale state.
+
+        The primary is loaded *before* discharge-dependent folder naming so no
+        value from the previous patient can participate in the new folder name.
+        """
 
         from desktop_patient_folder import folder_naming_uses_discharge_date
 
+        self._apply_primary_document_path(str(primary), prompt_for_referral=False)
         settings = self._folder_naming_settings()
         if folder_naming_uses_discharge_date(settings) and not current_semantic_date(self, "discharge_date"):
             ok = self._prompt_common_output_requirements(
@@ -344,8 +349,15 @@ class DesktopIntakeMixin:
             self._desktop_intake_folder,
             primary,
             folder_name=folder_name,
+            keep_source=keep_source,
         )
-        self._apply_primary_document_path(str(effective_primary), prompt_for_referral=False)
+        # The document content was already parsed above.  Only redirect the
+        # canonical primary path to the staged copy; do not reset patient state
+        # again after the doctor may have entered a discharge date for naming.
+        from medical_primary_document_state import sync_selected_primary_document_path
+        sync_selected_primary_document_path(self, effective_primary)
+        if hasattr(self, "_set_primary_drop_selected"):
+            self._set_primary_drop_selected(str(effective_primary))
         if folder_info.fio:
             self._set_ui_var(self.patient_name_var, folder_info.fio)
         if folder_info.admission_date:
@@ -356,6 +368,7 @@ class DesktopIntakeMixin:
                 record_soft_exception("desktop_intake_mixin:folder_info_admission", exc)
         self._set_output_dir_auto_patient_scoped(patient_dir)
         self._refresh_desktop_intake_diary_inputs()
+        return effective_primary
 
     def _open_desktop_intake_popup(self, primary_path: str | Path) -> bool:
         """Implement the _open_desktop_intake_popup workflow with validation, UI state updates and diagnostics."""
@@ -364,6 +377,8 @@ class DesktopIntakeMixin:
         self._desktop_intake_popup_open = True
         primary = Path(primary_path).expanduser()
         processed = False
+        prepared_primary: Path | None = None
+        attempted_creation = False
         try:
             self._activate_window_for_desktop_intake()
             popup = tk.Toplevel(self.root)
@@ -442,24 +457,37 @@ class DesktopIntakeMixin:
                 tk.Radiobutton(freq, text="ежечасно", value="hourly", variable=self.diary_frequency_mode_var, bg=PANEL, fg=TEXT, selectcolor=FIELD).pack(side="left", padx=(12, 0))
 
             def apply_and_create(*, print_after: bool) -> None:
-                nonlocal processed
+                nonlocal processed, prepared_primary, attempted_creation
                 selected_kinds = [kind for kind, var in local_vars.items() if bool(var.get())]
                 if not selected_kinds:
                     messagebox.showwarning("Ничего не выбрано", "Отметьте хотя бы одну кнопку из блока 03.", parent=popup)
                     return
                 if not self._ensure_patient_folder_naming_configured(force=True):
                     return
-                try:
-                    self._prepare_desktop_intake_patient_folder(primary)
-                except Exception as exc:
-                    messagebox.showerror("Папка выписанных пациентов", str(exc), parent=popup)
-                    return
+                if prepared_primary is None:
+                    try:
+                        # Stage by copy.  The intake source remains visible until
+                        # the complete generation workflow returns success.
+                        prepared_primary = self._prepare_desktop_intake_patient_folder(primary, keep_source=True)
+                    except Exception as exc:
+                        messagebox.showerror("Папка выписанных пациентов", str(exc), parent=popup)
+                        return
                 selected_set = set(selected_kinds)
                 self._apply_desktop_intake_selected_kinds(selected_set)
-                self._close_desktop_intake_popup(popup)
+                attempted_creation = True
+                success = bool(self.create_selected_outputs(print_after=print_after))
+                if not success:
+                    self._desktop_intake_popup_outcome = "retry_pending"
+                    return
+                try:
+                    primary.unlink()
+                except FileNotFoundError as exc:
+                    record_soft_exception("desktop_intake_mixin.commit_source_already_absent", exc, detail=str(primary))
+                except OSError as exc:
+                    record_soft_exception("desktop_intake_mixin.commit_remove_source", exc, detail=str(primary))
                 processed = True
                 self._desktop_intake_popup_outcome = "processed"
-                self.create_selected_outputs(print_after=print_after)
+                self._close_desktop_intake_popup(popup)
 
             buttons = tk.Frame(popup, bg=DEEP)
             buttons.grid(row=2, column=0, sticky="ew", padx=14, pady=(0, 14))
@@ -470,7 +498,12 @@ class DesktopIntakeMixin:
             tk.Button(buttons, text="Создать и распечатать", command=lambda: apply_and_create(print_after=True), bg=ACCENT_2, fg="#03101f", relief="flat", font=self._font(10, "bold"), padx=10, pady=10).grid(row=0, column=1, sticky="ew", padx=(8, 8))
             tk.Button(buttons, text="Отмена", command=lambda: on_close(), bg=PANEL_3, fg=TEXT, relief="flat", font=self._font(9), padx=10, pady=10).grid(row=0, column=2, sticky="ew", padx=(8, 0))
             def on_close() -> None:
-                if str(getattr(self, "_desktop_intake_popup_outcome", "") or "") not in {"processed", "setup_needed"}:
+                outcome = str(getattr(self, "_desktop_intake_popup_outcome", "") or "")
+                if attempted_creation and not processed:
+                    # A failed/cancelled creation is not an ignore decision.
+                    # Keep the top-level source eligible for a future retry.
+                    self._desktop_intake_popup_outcome = "retry_pending"
+                elif outcome not in {"processed", "setup_needed"}:
                     self._desktop_intake_popup_outcome = "ignored"
                 self._close_desktop_intake_popup(popup)
             popup.protocol("WM_DELETE_WINDOW", on_close)

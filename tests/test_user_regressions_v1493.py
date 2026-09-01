@@ -81,12 +81,12 @@ def test_dialog_date_validation_does_not_reject_admission_compact_source():
     assert "parse_date(value)" in source
 
 
-def test_visible_diary_flow_forces_text_docx_not_table_template():
+def test_visible_diary_flow_keeps_text_output_but_uses_selected_date_template():
     source = Path("actions_diary_flow.py").read_text(encoding="utf-8")
 
     assert "text_output = True" in source
-    assert "diary_files=[]" in source
-    assert "self.diary_files = []" in source
+    assert "diary_files=list(self.diary_files)" in source
+    assert "self.diary_files = []" not in source
 
 
 def test_text_diary_calendar_starts_plus_one_and_uses_discharge_as_final(tmp_path: Path):
@@ -122,7 +122,7 @@ def test_text_diary_calendar_starts_plus_one_and_uses_discharge_as_final(tmp_pat
     assert "05.06.26" not in text
 
 
-def test_diary_batch_ignores_legacy_table_argument_and_still_uses_single_text_calendar(tmp_path: Path):
+def test_diary_batch_uses_legacy_table_only_for_dates_and_still_outputs_text(tmp_path: Path):
     from docx import Document
     from diary_batch import fill_diary_batch
 
