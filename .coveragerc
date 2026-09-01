@@ -1,0 +1,16 @@
+[run]
+source = .
+omit =
+    tests/*
+    smoke_*.py
+    tools/*
+    project_auditor*.py
+    prod_audit.py
+    release_check.py
+    performance_check.py
+    dnd_contract_check.py
+    make_release_zip.py
+    */site-packages/*
+
+[report]
+skip_empty = True
