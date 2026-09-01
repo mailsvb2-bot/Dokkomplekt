@@ -67,21 +67,33 @@ def extract_docx_text(path: str | Path) -> str:
                             continue
                         seen_cells.add(tc_id)
                         walk(cell)
-    try:
-        from medical_docx_xml_fragments import _docx_xml_text_fragments
-        lines.extend(_docx_xml_text_fragments(compatible_path))
-    except Exception as exc:
-        record_soft_exception("medical_docx_blocks.xml_fragments", exc, detail=str(compatible_path))
-
-    deduped: list[str] = []
-    seen: set[str] = set()
+    # Preserve repeated structural labels from tables/body. Only supplementary
+    # raw XML fragments are deduplicated against already collected content.
+    normalized_lines: list[str] = []
+    seen_structured: set[str] = set()
     for line in lines:
         normalized = normalize_text(str(line or ""))
         if not normalized:
             continue
+        normalized_lines.append(normalized)
         key = normalized.casefold().replace("ё", "е")
-        if key in seen:
+        seen_structured.add(key)
+
+    xml_lines: list[str] = []
+    try:
+        from medical_docx_xml_fragments import _docx_xml_text_fragments
+        xml_lines = _docx_xml_text_fragments(compatible_path)
+    except Exception as exc:
+        record_soft_exception("medical_docx_blocks.xml_fragments", exc, detail=str(compatible_path))
+
+    for line in xml_lines:
+        normalized = normalize_text(str(line or ""))
+        if not normalized:
             continue
-        seen.add(key)
-        deduped.append(normalized)
+        key = normalized.casefold().replace("ё", "е")
+        if key in seen_structured:
+            continue
+        seen_structured.add(key)
+        normalized_lines.append(normalized)
+    deduped = normalized_lines
     return normalize_text("\n".join(deduped))

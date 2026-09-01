@@ -1,6 +1,15 @@
 # MedicalDiaryAutofill / Dokkomplekt
 
-Version: `v1.4.90_intake_takeover_full_icd10`
+Version: `v1.4.91_audit_hardening`
+
+## v1.4.91 — audit hardening
+
+Security/runtime hardening after an independent production audit: fail-closed
+trial/license accounting, pinned packaged Ed25519 verification key, real DOCM
+compatibility through a macro-free working copy, safer batch primary discovery,
+extension-preserving output names, broader runtime coverage and a packaged
+runtime-bundle smoke check. A production EXE build now requires
+`DOKKOMPLEKT_LICENSE_PUBLIC_KEY_B64`; the issuer/private key is never bundled.
 
 ## v1.4.89 hotfix — discharge custom case propagation
 
@@ -64,6 +73,6 @@ python project_auditor.py . --ci --quiet
 ## Regression policy
 
 `v1.4.85_baseline_foundation_SOURCE` remains the behavior baseline.  Starting
-with `v1.4.90_intake_takeover_full_icd10`, a future version is allowed to
+with `v1.4.91_audit_hardening`, a future version is allowed to
 be considered better only if it preserves `USER_BEHAVIOR_CONTRACT.md` and
 passes `REGRESSION_CONTOUR.md` / `REGRESSION_MATRIX.md` checks.
