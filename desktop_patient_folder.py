@@ -135,7 +135,12 @@ def _looks_like_human_fio(value: str) -> bool:
     low = {part.casefold().strip(".,:;") for part in parts}
     if low & bad:
         return False
-    return all(re.fullmatch(r"[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?", part.strip(".,:;")) for part in parts)
+    full_name = re.compile(r"(?:[А-ЯЁ][а-яё]+|[А-ЯЁ]{2,})(?:-(?:[А-ЯЁ][а-яё]+|[А-ЯЁ]{2,}))?")
+    initials = re.compile(r"(?:[А-ЯЁ]\.){1,2}")
+    cleaned = [part.strip(" ,:;") for part in parts]
+    if not full_name.fullmatch(cleaned[0]):
+        return False
+    return all(full_name.fullmatch(part) or initials.fullmatch(part) for part in cleaned[1:])
 
 def patient_folder_name(fio: str, admission_date: str) -> str:
     """Backward-compatible default used by desktop intake smoke tests."""

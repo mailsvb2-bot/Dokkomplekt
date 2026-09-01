@@ -186,19 +186,17 @@ class ActionsUniversalFlowMixin:
         required_mode = self._completion_inputs_are_required(inputs)
         try:
             raw_values = self._prompt_regulatory_completion_values(inputs, parent=self.root)
-            from regulatory_completion_blocks import apply_completion_values, completion_values_from_raw
-
-            values = completion_values_from_raw(inputs, raw_values)
-            if values:
-                return apply_completion_values(case, values, source_document="custom_document_completion_popup")
-            if required_mode:
-                labels = ", ".join(str(getattr(item, "label", item.field_id)) for item in inputs[:6])
-                raise ValueError("Не заполнены обязательные поля custom-документа: " + labels)
-            self._log("\nℹ Врач выбрал создание custom-документов как есть, без дополнительных полей.\n")
         except Exception as exc:
-            if required_mode:
-                raise
-            self._log(f"\n⚠ Не удалось открыть popup дополнения custom-документа; создаю как есть: {exc}\n")
+            raise RuntimeError(f"Не удалось открыть popup дополнения custom-документа: {exc}") from exc
+        from regulatory_completion_blocks import apply_completion_values, completion_values_from_raw
+
+        values = completion_values_from_raw(inputs, raw_values)
+        if values:
+            return apply_completion_values(case, values, source_document="custom_document_completion_popup")
+        if required_mode:
+            labels = ", ".join(str(getattr(item, "label", item.field_id)) for item in inputs[:6])
+            raise ValueError("Не заполнены обязательные поля custom-документа: " + labels)
+        self._log("\nℹ Врач выбрал создание custom-документов как есть, без дополнительных полей.\n")
         return case
 
     def _create_custom_documents_impl(self, selected_custom_ids: List[str]) -> List[Path]:
@@ -261,10 +259,29 @@ class ActionsUniversalFlowMixin:
                 regular_ids.append(document_id)
         return diary_ids, regular_ids
 
-    def _ensure_diary_text_files_for_creation(self) -> None:
-        """Ensure diary generation has concrete text files, not only a remembered folder."""
+    def _ensure_diary_text_files_for_creation(self, current_pack=None, diary_ids: List[str] | None = None) -> None:
+        """Ensure custom diaries have a real text source before generation.
+
+        External diagnosis-matched text files remain preferred when selected.  If
+        every selected doctor-owned diary template already contains observation
+        texts, the template itself is the text source and no redundant chooser is
+        shown.
+        """
         if getattr(self, "status_files", None):
             return
+        if current_pack is not None and diary_ids:
+            try:
+                from universal_diary_generation import diary_documents_have_embedded_status_texts
+
+                if diary_documents_have_embedded_status_texts(
+                    pack=current_pack,
+                    document_ids=diary_ids,
+                    base_dir=self._universal_profile_path().parent,
+                ):
+                    return
+            except Exception as exc:
+                from diagnostic_logging import record_soft_exception
+                record_soft_exception("actions_universal_flow.embedded_diary_text_probe", exc)
         auto_select = getattr(self, "_auto_select_diary_text_by_diagnosis", None)
         if callable(auto_select) and auto_select(ask_folder=False) and getattr(self, "status_files", None):
             return
@@ -273,12 +290,12 @@ class ActionsUniversalFlowMixin:
             chooser()
         if not getattr(self, "status_files", None):
             raise ValueError(
-                "Выберите файл(ы) с текстами дневников. Тексты должны быть фактически выбранными DOC/DOCX/DOCM из папки текстов дневников; одна сохранённая папка без файла не используется."
+                "Выберите файл(ы) с текстами дневников или используйте doctor-owned шаблон, в котором уже есть тексты наблюдения."
             )
 
     def _create_custom_diary_documents_impl(self, current_pack, case, diary_ids: List[str], out_dir) -> List[Path]:
         """Create doctor-owned custom diary documents with confirmed text files and calendar settings."""
-        self._ensure_diary_text_files_for_creation()
+        self._ensure_diary_text_files_for_creation(current_pack, diary_ids)
 
         from diary_creation_wizard import confirm_diary_creation, current_diary_calendar_schedule
 

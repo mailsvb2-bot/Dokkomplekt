@@ -15,6 +15,7 @@ future fully dynamic document checklist.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Sequence
@@ -246,7 +247,14 @@ def render_documents_from_pack(
     spellcheck_enabled: bool = True,
     output_format: str = "docx",
 ) -> PackGenerationResult:
-    """Render selected custom documents from a DocumentPack as Word or PDF."""
+    """Render selected custom documents from a DocumentPack as Word or PDF.
+
+    Output names and validation are planned deterministically first. Independent
+    DOCX renders then use a small bounded thread pool: python-docx spends most of
+    its batch time parsing XML and compressing ZIP members, which can overlap on
+    Windows without sharing mutable Document objects. PDF export remains serial
+    because Word/COM automation is not thread-safe.
+    """
 
     output_root = Path(output_dir).expanduser()
     if output_root.exists() and not output_root.is_dir():
@@ -263,6 +271,8 @@ def render_documents_from_pack(
     requested_format = normalize_output_format(output_format)
     for unknown_id in sorted(selected - known_ids):
         skipped.append(f"Неизвестный документ профиля: {unknown_id}")
+
+    plans: list[tuple[DocumentTemplateSpec, Path, Path]] = []
     for document in pack.documents:
         if selected and document.id not in selected:
             continue
@@ -276,7 +286,11 @@ def render_documents_from_pack(
             continue
         rendered_name = render_output_name(document, case, output_language=output_language, spellcheck_enabled=spellcheck_enabled)
         docx_path = _available_batch_path(output_root / rendered_name, reserved_output_names, reserved_output_paths)
-        result = render_template_to_docx(
+        plans.append((document, template_path, docx_path))
+
+    def render_one(plan: tuple[DocumentTemplateSpec, Path, Path]) -> RenderResult:
+        document, template_path, docx_path = plan
+        return render_template_to_docx(
             template_path=template_path,
             output_path=docx_path,
             case=case,
@@ -285,6 +299,19 @@ def render_documents_from_pack(
             output_language=output_language,
             spellcheck_enabled=spellcheck_enabled,
         )
+
+    if len(plans) >= 4:
+        # Keep the pool deliberately small. Profiling shows five workers gives
+        # useful Windows ZIP/XML overlap without turning batch creation into an
+        # unbounded CPU/disk fan-out. Futures are consumed in document order.
+        with ThreadPoolExecutor(max_workers=min(5, len(plans)), thread_name_prefix="dokkomplekt-render") as executor:
+            futures = [executor.submit(render_one, plan) for plan in plans]
+            render_pairs = [(plan, future.result()) for plan, future in zip(plans, futures, strict=True)]
+    else:
+        render_pairs = [(plan, render_one(plan)) for plan in plans]
+
+    for plan, result in render_pairs:
+        document, _template_path, _docx_path = plan
         renders.append(result)
         final_path = Path(result.output_path)
         if requested_format == "pdf":

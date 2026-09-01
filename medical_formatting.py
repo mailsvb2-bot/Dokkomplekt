@@ -338,8 +338,15 @@ def safe_filename(value: str) -> str:
     # а не подчёркиваниями: итоговые документы должны сохраняться как
     # «Сидоров Иван Михайлович Выписной эпикриз.docx».
     value = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', " ", value)
-    value = re.sub(r"\s+", " ", value)
-    value = value.strip(". ")[:80].rstrip(". ") or "Пациент"
+    value = re.sub(r"\s+", " ", value).strip(". ") or "Пациент"
+    known_suffixes = (".docx", ".docm", ".doc", ".pdf", ".txt", ".json", ".zip")
+    suffix = next((item for item in known_suffixes if value.casefold().endswith(item)), "")
+    if suffix:
+        stem = value[: -len(suffix)].rstrip(". ") or "Документ"
+        stem_limit = max(1, 80 - len(suffix))
+        value = stem[:stem_limit].rstrip(". ") + suffix
+    else:
+        value = value[:80].rstrip(". ") or "Пациент"
     reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
     # Windows treats device names as reserved even when an extension is present
     # (for example ``CON.txt`` / ``LPT1.docx``). Protect both exact names and
@@ -383,7 +390,7 @@ _CASE_RE = _re.compile(r"(?:истори[яи]\s*болезни\s*)?№\s*[\w\-/
 def technical_ref(*values: object) -> str:
     """Return a stable non-reversible short reference for support logs."""
 
-    material = "\u241f".join(str(value or "").strip() for value in values if str(value or "").strip())
+    material = "␟".join(str(value or "").strip() for value in values if str(value or "").strip())
     if not material:
         material = "empty"
     return "ref-" + _hashlib.sha256(material.encode("utf-8", errors="ignore")).hexdigest()[:12]

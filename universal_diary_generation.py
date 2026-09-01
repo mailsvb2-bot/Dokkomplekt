@@ -179,6 +179,36 @@ def assert_universal_diary_generation_lock() -> None:
         raise AssertionError("Custom diary generation must pass sick-leave dynamic epicrisis fields")
 
 
+def diary_documents_have_embedded_status_texts(
+    *,
+    pack: DocumentPack,
+    document_ids: Sequence[str],
+    base_dir: str | Path | None,
+) -> bool:
+    """Return True when every selected custom diary can supply its own status texts.
+
+    The application must not force a second text-file chooser when the doctor's
+    diary template already contains the observation texts consumed by this engine.
+    """
+
+    selected = {str(item).strip() for item in document_ids if str(item).strip()}
+    matched = 0
+    for document in pack.documents:
+        if document.category != "diaries" or (selected and document.id not in selected):
+            continue
+        matched += 1
+        template = _resolve_template(document, base_dir)
+        if not template.exists():
+            return False
+        try:
+            if not extract_statuses_from_docx(template):
+                return False
+        except Exception as exc:
+            record_soft_exception("universal_diary_generation.embedded_status_probe", exc, detail=str(template))
+            return False
+    return matched > 0
+
+
 def _effective_status_files(status_files: Sequence[str | Path], template: Path) -> tuple[Path, ...]:
     explicit = tuple(Path(item).expanduser() for item in status_files if str(item).strip())
     if explicit:

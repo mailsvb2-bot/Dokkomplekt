@@ -403,8 +403,41 @@ def discover_primary_documents(folder: str | Path) -> tuple[Path, ...]:
         probe_text = _safe_docx_probe_text(path)
         if "{{" in probe_text and "}}" in probe_text:
             continue
+        if not _looks_like_primary_document(path, probe_text):
+            continue
         result.append(path)
     return tuple(result)
+
+
+def _looks_like_primary_document(path: Path, probe_text: str) -> bool:
+    """Reject generated/downstream documents from recursive batch discovery."""
+
+    from medical_text_utils import normalize_match
+    from regulatory_document_classifier import classify_document_text
+
+    text = str(probe_text or "")
+    haystack = normalize_match(f"{path.stem}\n{text}")
+    strong_markers = (
+        "первичный осмотр",
+        "осмотр при поступлении",
+        "направление на госпитализацию",
+        "осмотр врача приемного покоя",
+        "осмотр врача приёмного покоя",
+    )
+    if any(marker in haystack for marker in strong_markers):
+        return True
+    classification = classify_document_text(text, source_path=str(path))
+    accepted_roles = {
+        "primary_exam",
+        "hospitalization_referral",
+        "admission_doctor_exam",
+        "inpatient_record",
+    }
+    if classification.role_id in accepted_roles and classification.confidence >= 0.35:
+        return True
+    if classification.role_id != "unknown" and classification.confidence >= 0.35:
+        return False
+    return any(marker in haystack for marker in ("фио", "ф.и.о", "пациент", "больной", "больная"))
 
 
 def create_documents_batch(*, primary_documents: Iterable[str | Path], output_root: str | Path, selected_docs: Sequence[str], discharge_date: str = "", epi_path: str | Path | None = None, service: MedicalDocumentService | None = None, patient_subfolders: bool = True, folder_naming_settings: object | None = None) -> BatchGenerationResult:

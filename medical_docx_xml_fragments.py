@@ -39,9 +39,77 @@ def existing_word_file(path: str | Path | None, label: str) -> Path:
 
 def ensure_docx_compatible(path: str | Path, *, label: str = "Word document") -> Path:
     source = existing_word_file(path, label)
-    if source.suffix.lower() in OPENXML_WORD_SUFFIXES:
+    if source.suffix.lower() == ".docx":
         return source
+    if source.suffix.lower() == ".docm":
+        return convert_docm_to_docx(source)
     return convert_doc_to_docx(source)
+
+
+def convert_docm_to_docx(path: str | Path) -> Path:
+    """Create a macro-free DOCX view of a DOCM package for python-docx.
+
+    ``python-docx`` rejects the macro-enabled main content type even though the
+    document body is ordinary WordprocessingML. For reading/rendering doctor
+    templates we deliberately strip VBA parts and rewrite the package content
+    type into a temporary DOCX. The original user-owned DOCM is never changed.
+    """
+
+    source = existing_word_file(path, "macro-enabled Word document")
+    if source.suffix.lower() != ".docm":
+        return source
+    target = _conversion_target(source)
+    try:
+        source_stat = source.stat()
+        if target.exists() and target.stat().st_mtime_ns >= source_stat.st_mtime_ns and target.stat().st_size > 0:
+            return target
+    except OSError as exc:
+        record_soft_exception("medical_word_format.docm_stat", exc, detail=str(source))
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp_target = target.with_suffix(".tmp")
+    macro_main_type = b"application/vnd.ms-word.document.macroEnabled.main+xml"
+    docx_main_type = b"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
+    try:
+        with zipfile.ZipFile(source, "r") as src, zipfile.ZipFile(tmp_target, "w", compression=zipfile.ZIP_DEFLATED) as dst:
+            for info in src.infolist():
+                name = info.filename
+                lower_name = name.casefold()
+                if lower_name.startswith("word/vba") or lower_name.endswith("vbaproject.bin"):
+                    continue
+                data = src.read(name)
+                if name == "[Content_Types].xml":
+                    data = data.replace(macro_main_type, docx_main_type)
+                    try:
+                        root = ET.fromstring(data)
+                        for child in list(root):
+                            ctype = str(child.attrib.get("ContentType", "")).casefold()
+                            extension = str(child.attrib.get("Extension", "")).casefold()
+                            part_name = str(child.attrib.get("PartName", "")).casefold()
+                            if "vba" in ctype or (extension == "bin" and "vba" in part_name):
+                                root.remove(child)
+                        data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                    except ET.ParseError as exc:
+                        record_soft_exception("medical_word_format.docm_content_types", exc, detail=str(source))
+                elif lower_name.endswith(".rels") and b"vbaProject" in data:
+                    try:
+                        root = ET.fromstring(data)
+                        for child in list(root):
+                            rel_type = str(child.attrib.get("Type", ""))
+                            target_name = str(child.attrib.get("Target", ""))
+                            if "vbaProject" in rel_type or "vbaProject" in target_name:
+                                root.remove(child)
+                        data = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                    except ET.ParseError as exc:
+                        record_soft_exception("medical_word_format.docm_relationships", exc, detail=str(source))
+                dst.writestr(info, data)
+        os.replace(tmp_target, target)
+        return target
+    except Exception as exc:
+        with suppress(Exception):
+            tmp_target.unlink()
+        record_soft_exception("medical_word_format.convert_docm_to_docx", exc, detail=str(source))
+        raise RuntimeError("Failed to prepare DOCM as a macro-free DOCX copy.") from exc
 
 
 def convert_doc_to_docx(path: str | Path) -> Path:

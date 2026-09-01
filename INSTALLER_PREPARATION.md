@@ -1,3 +1,15 @@
+# Production license-key provisioning
+
+Before building a distributable production EXE, set
+`DOKKOMPLEKT_LICENSE_PUBLIC_KEY_B64` to the Ed25519 **public** verification key
+that corresponds to the private issuer key used by the license server.
+`build_exe_windows.bat` embeds only this public key into
+`resources/license_public_key.b64`. A non-CI production build fails if no key is
+provided, rather than shipping an EXE that cannot validate paid licenses.
+
+Never place `DOKKOMPLEKT_LICENSE_ISSUER_KEY_B64` or any payment-provider secret
+inside the desktop repository or EXE.
+
 # Installer preparation — MedicalDiaryAutofill
 
 Эта версия остаётся source/EXE-ready. Для продажи врачу нужен отдельный установщик.

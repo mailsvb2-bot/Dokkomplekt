@@ -15,6 +15,7 @@ import json
 import os
 import platform
 from pathlib import Path
+import sys
 from typing import Any, Iterable, Mapping
 import uuid
 
@@ -26,7 +27,8 @@ NO_PATIENT_DATA_IN_LICENSE_STATE = True
 LOCAL_ONLY_PRODUCT_ACCESS = True
 FOOTER_WATERMARK_ENABLED = True
 NO_WATERMARK_FOR_PAID_LICENSES = True
-PRODUCT_ACCESS_DISABLED_ENV = "MEDICAL_AUTOFILL_DISABLE_PRODUCT_ACCESS"
+TEST_PRODUCT_ACCESS_DISABLED_ENV = "DOKKOMPLEKT_TEST_DISABLE_PRODUCT_ACCESS"
+PRODUCT_ACCESS_STATE_VERSION = 2
 TRIAL_WATERMARK_TEXT = "ПРОБНАЯ ВЕРСИЯ. НЕ ИСПОЛЬЗОВАТЬ КАК МЕДИЦИНСКИЙ ДОКУМЕНТ."
 EXPIRED_DEMO_WATERMARK_TEXT = "ДЕМО-ДОКУМЕНТ. ЛИЦЕНЗИЯ НЕ АКТИВНА."
 
@@ -37,11 +39,9 @@ def _env_flag(name: str) -> bool:
 
 def product_access_enforcement_enabled() -> bool:
     """Return whether runtime document creation should enforce product access."""
-    if _env_flag(PRODUCT_ACCESS_DISABLED_ENV):
-        return False
-    if _env_flag("CI"):
-        return False
-    return True
+    if getattr(sys, "frozen", False):
+        return True
+    return not _env_flag(TEST_PRODUCT_ACCESS_DISABLED_ENV)
 
 
 def utc_now() -> datetime:
@@ -258,6 +258,7 @@ class ProductAccessManager:
         self.now = now
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.state_path = self.storage_dir / "product_access_state.json"
+        self.state_guard_path = self.storage_dir / "product_access_guard.json"
         self.license_path = Path(os.getenv("DOKKOMPLEKT_LICENSE_FILE") or self.storage_dir / "license.json")
 
     @staticmethod
@@ -271,21 +272,122 @@ class ProductAccessManager:
     def _now(self) -> datetime:
         return self.now or utc_now()
 
-    def _load_state_payload(self) -> dict[str, Any]:
+    def _state_integrity_key(self) -> bytes:
+        seed = f"dokkomplekt-product-access-v2|{machine_fingerprint()}"
+        return hashlib.sha256(seed.encode("utf-8", errors="replace")).digest()
+
+    def _with_state_integrity(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        result = dict(payload)
+        result["state_version"] = PRODUCT_ACCESS_STATE_VERSION
+        result.pop("_state_mac", None)
+        message = stable_json(result).encode("utf-8")
+        result["_state_mac"] = hmac.new(self._state_integrity_key(), message, hashlib.sha256).hexdigest()
+        return result
+
+    def _verify_state_integrity(self, payload: Mapping[str, Any]) -> bool:
+        actual = str(payload.get("_state_mac") or "").strip()
+        if not actual:
+            return int(payload.get("state_version") or 1) < PRODUCT_ACCESS_STATE_VERSION
+        unsigned = dict(payload)
+        unsigned.pop("_state_mac", None)
+        expected = hmac.new(self._state_integrity_key(), stable_json(unsigned).encode("utf-8"), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(actual, expected)
+
+    def _read_state_copy(self, path: Path) -> tuple[dict[str, Any] | None, bool]:
+        if not path.exists():
+            return None, False
         try:
-            if not self.state_path.exists():
-                return {}
-            payload = json.loads(self.state_path.read_text("utf-8"))
-            return payload if isinstance(payload, dict) else {}
-        except Exception:
+            payload = json.loads(path.read_text("utf-8"))
+            if not isinstance(payload, dict) or not self._verify_state_integrity(payload):
+                return None, True
+            return payload, False
+        except Exception as exc:
+            record_soft_exception("product_access.read_state_copy", exc, detail=str(path))
+            return None, True
+
+    def _read_registry_guard(self) -> tuple[dict[str, Any] | None, bool]:
+        if os.name != "nt":
+            return None, False
+        try:
+            import winreg  # type: ignore
+
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Dokkomplekt\ProductAccess") as key:
+                raw, _kind = winreg.QueryValueEx(key, "TrialGuard")
+            payload = json.loads(str(raw or "{}"))
+            if not isinstance(payload, dict) or not self._verify_state_integrity(payload):
+                return None, True
+            return payload, False
+        except FileNotFoundError:
+            return None, False
+        except Exception as exc:
+            record_soft_exception("product_access.read_registry_guard", exc)
+            return None, True
+
+    @staticmethod
+    def _merge_state_copies(copies: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+        items = [dict(item) for item in copies if isinstance(item, Mapping)]
+        if not items:
             return {}
+        result = dict(items[0])
+        starts = [parse_dt(str(item.get("trial_started_at") or "")) for item in items]
+        starts = [item for item in starts if item is not None]
+        if starts:
+            result["trial_started_at"] = iso(min(starts))
+        result["trial_created_total"] = max(int(item.get("trial_created_total", 0) or 0) for item in items)
+        merged_usage: dict[str, int] = {}
+        for item in items:
+            usage = item.get("usage_by_month") if isinstance(item.get("usage_by_month"), dict) else {}
+            for key, value in usage.items():
+                merged_usage[str(key)] = max(merged_usage.get(str(key), 0), int(value or 0))
+        result["usage_by_month"] = merged_usage
+        result.pop("_state_mac", None)
+        result["state_version"] = PRODUCT_ACCESS_STATE_VERSION
+        return result
+
+    def _load_state_payload(self) -> dict[str, Any]:
+        primary, primary_corrupt = self._read_state_copy(self.state_path)
+        guard, guard_corrupt = self._read_state_copy(self.state_guard_path)
+        registry, registry_corrupt = self._read_registry_guard()
+        valid = [item for item in (primary, guard, registry) if item is not None]
+        if valid:
+            merged = self._merge_state_copies(valid)
+            if primary_corrupt or guard_corrupt or registry_corrupt or primary is None or guard is None:
+                self._save_state_payload(merged)
+            return merged
+        if primary_corrupt or guard_corrupt or registry_corrupt:
+            return {"_state_corrupt": True}
+        return {}
+
+    @staticmethod
+    def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        with tmp_path.open("w", encoding="utf-8", newline="\n") as handle:
+            json.dump(dict(payload), handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+
+    def _write_registry_guard(self, payload: Mapping[str, Any]) -> None:
+        if os.name != "nt":
+            return
+        try:
+            import winreg  # type: ignore
+
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Dokkomplekt\ProductAccess") as key:
+                winreg.SetValueEx(key, "TrialGuard", 0, winreg.REG_SZ, json.dumps(dict(payload), ensure_ascii=False, sort_keys=True))
+        except Exception as exc:
+            record_soft_exception("product_access.write_registry_guard", exc)
 
     def _save_state_payload(self, payload: Mapping[str, Any]) -> None:
-        tmp_path = self.state_path.with_suffix(".tmp")
-        tmp_path.write_text(json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True), "utf-8")
-        os.replace(tmp_path, self.state_path)
+        protected = self._with_state_integrity(payload)
+        self._atomic_write_json(self.state_path, protected)
+        self._atomic_write_json(self.state_guard_path, protected)
+        self._write_registry_guard(protected)
 
     def _ensure_trial_started(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if payload.get("_state_corrupt"):
+            return payload
         if not payload.get("trial_started_at"):
             payload = dict(payload)
             payload["trial_started_at"] = iso(self._now())
@@ -305,13 +407,15 @@ class ProductAccessManager:
             return ""
 
     def load_license(self) -> LicenseEntitlement | None:
-        try:
-            if not self.license_path.exists():
-                return None
-            payload = json.loads(self.license_path.read_text("utf-8"))
-            return LicenseEntitlement.from_mapping(payload) if isinstance(payload, dict) else None
-        except Exception:
+        if not self.license_path.exists():
             return None
+        try:
+            payload = json.loads(self.license_path.read_text("utf-8"))
+        except Exception as exc:
+            raise ValueError(f"Файл лицензии повреждён: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("Файл лицензии должен содержать JSON-объект.")
+        return LicenseEntitlement.from_mapping(payload)
 
     def install_license_text(self, text: str) -> LicenseState:
         payload = json.loads(text or "{}")
@@ -333,7 +437,7 @@ class ProductAccessManager:
         if entitlement.plan not in PLAN_LIMITS or entitlement.plan == "trial":
             raise ValueError(f"Неизвестный тариф лицензии: {entitlement.plan!r}.")
         secret = self._license_secret()
-        unsigned_ok = _env_flag("DOKKOMPLEKT_ALLOW_UNSIGNED_LICENSES")
+        unsigned_ok = _env_flag("DOKKOMPLEKT_ALLOW_UNSIGNED_LICENSES") and not getattr(sys, "frozen", False)
         if secret and not entitlement.signature_valid(secret):
             raise ValueError("Подпись лицензии не прошла проверку.")
         if not secret and not unsigned_ok:
@@ -348,13 +452,22 @@ class ProductAccessManager:
         usage = payload.get("usage_by_month") if isinstance(payload.get("usage_by_month"), dict) else {}
         used = int(usage.get(month_key(self._now()), 0) or 0)
         trial_total = int(payload.get("trial_created_total", 0) or 0)
-        entitlement = self.load_license()
+        try:
+            entitlement = self.load_license()
+        except Exception as exc:
+            return self._blocked_state(f"Файл лицензии повреждён или не может быть проверен: {exc}", used, trial_total)
         if entitlement:
             try:
                 self._validate_license(entitlement, require_not_expired=False)
                 return self._paid_state(entitlement, used)
             except ValueError as exc:
                 return self._blocked_state(str(exc), used, trial_total)
+        if payload.get("_state_corrupt"):
+            return self._blocked_state(
+                "Локальное состояние пробного периода повреждено. Восстановите файл состояния/резервную копию или установите лицензию.",
+                used,
+                trial_total,
+            )
         return self._trial_state(payload, used, trial_total)
 
     def _paid_state(self, entitlement: LicenseEntitlement, used: int) -> LicenseState:
@@ -531,6 +644,27 @@ class ProductAccessMixin:
     def _product_access_manager(self) -> ProductAccessManager:
         return ProductAccessManager()
 
+    def _enforce_product_access_on_created_files(self, created_files: Iterable[str | Path]) -> list[Path]:
+        paths = [Path(item) for item in created_files]
+        if not paths or not product_access_enforcement_enabled():
+            return paths
+        manager = self._product_access_manager()
+        watermark = manager.current_watermark_text()
+        if watermark:
+            result = apply_watermark_to_files(paths, watermark)
+            if result.errors:
+                self._discard_unlicensed_outputs(paths)
+                raise RuntimeError(
+                    "Документы не выданы: не удалось гарантированно применить водяной знак trial/demo:\n"
+                    + "\n".join(result.errors[:10])
+                )
+        try:
+            manager.record_created_documents(len(paths))
+        except Exception as exc:
+            self._discard_unlicensed_outputs(paths)
+            raise RuntimeError("Документы не выданы: не удалось надёжно записать счётчик лицензии.") from exc
+        return paths
+
     def create_selected_outputs(self, *, print_after: bool = False) -> None:
         if not product_access_enforcement_enabled():
             return super().create_selected_outputs(print_after=print_after)
@@ -557,22 +691,17 @@ class ProductAccessMixin:
 
     def _created_files_from_results(self, created_medical: list[Path], created_custom: list[Path], diary_result):
         created_files = super()._created_files_from_results(created_medical, created_custom, diary_result)
-        if not created_files or not product_access_enforcement_enabled():
-            return created_files
-        manager = self._product_access_manager()
-        watermark = manager.current_watermark_text()
-        if watermark:
-            result = apply_watermark_to_files(created_files, watermark)
-            if result.errors:
-                try:
-                    self._log("\n⚠ Водяной знак trial/demo применён не ко всем документам:\n" + "\n".join(result.errors[:10]) + "\n")
-                except Exception as exc:
-                    record_soft_exception("product_access.watermark_log", exc)
-        try:
-            manager.record_created_documents(len(created_files))
-        except Exception as exc:
-            record_soft_exception("product_access.record_created_documents", exc)
-        return created_files
+        return self._enforce_product_access_on_created_files(created_files)
+
+    @staticmethod
+    def _discard_unlicensed_outputs(paths: Iterable[str | Path]) -> None:
+        for raw_path in paths:
+            path = Path(raw_path)
+            try:
+                if path.is_file():
+                    path.unlink()
+            except Exception as exc:
+                record_soft_exception("product_access.discard_unlicensed_output", exc, detail=str(path))
 
 
 class ProductLicenseMixin:

@@ -84,6 +84,19 @@ if errorlevel 1 (
 :AFTER_PRECHECKS
 
 echo [6/6] Собираю один EXE через PyInstaller...
+if not exist resources mkdir resources
+if not "%DOKKOMPLEKT_LICENSE_PUBLIC_KEY_B64%"=="" (
+  > resources\license_public_key.b64 echo %DOKKOMPLEKT_LICENSE_PUBLIC_KEY_B64%
+  echo [INFO] Публичный Ed25519-ключ лицензирования встроен в resources.
+) else if not exist resources\license_public_key.b64 (
+  if /I "%CI%"=="true" (
+    echo [WARN] CI-сборка без production public key: платные лицензии в этом CI-артефакте не активируются.
+  ) else (
+    echo [ОШИБКА] Для production EXE задайте DOKKOMPLEKT_LICENSE_PUBLIC_KEY_B64.
+    echo Публичный ключ безопасно хранить в EXE; приватный issuer key в EXE попадать не должен.
+    exit /b 1
+  )
+)
 set ADD_TEMPLATES=
 if exist templates (
   set ADD_TEMPLATES=--add-data "templates;templates"

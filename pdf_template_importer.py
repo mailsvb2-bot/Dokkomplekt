@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from contextlib import suppress
+import importlib
+import os
 from pathlib import Path
 from typing import Iterable
 
 from docx import Document
 
+from diagnostic_logging import record_soft_exception
 from document_intelligence.analyzer import DocumentIntelligenceCore
 from document_intelligence.models import DocumentSource
 from document_intelligence.pdf_reader import read_pdf_text
@@ -35,7 +39,7 @@ def import_pdf_templates_to_pack(
         blueprint = DocumentIntelligenceCore().analyze_source(DocumentSource(str(source), user_label=source.stem))
         label = unique_button_label(blueprint.title or source.stem, existing_labels)
         target = _available_path(templates_dir / (_safe_stem(label or source.stem) + ".docx"))
-        _write_pdf_text_template(target, pdf_text.text)
+        conversion_mode = _write_pdf_template(source, target, pdf_text.text)
         spec = DocumentTemplateSpec(
             id=stable_document_id("pdf", label, source),
             button_label=label,
@@ -44,7 +48,11 @@ def import_pdf_templates_to_pack(
             required_fields=blueprint.required_field_ids,
             optional_fields=(),
             category=blueprint.domain or "custom",
-            description="Generated from a user-owned PDF text source.",
+            description=(
+                "Converted from a user-owned PDF through Microsoft Word with layout preservation."
+                if conversion_mode == "word"
+                else "Reconstructed from extractable PDF text; complex PDF layout may require manual adjustment."
+            ),
             role_id="pdf_source",
             button_language="auto",
             source_language="auto",
@@ -54,6 +62,41 @@ def import_pdf_templates_to_pack(
         existing_labels.add(label.casefold())
         imported.append(label)
     return tuple(imported)
+
+
+def _write_pdf_template(source: Path, path: Path, text: str) -> str:
+    """Prefer Word's PDF reflow on Windows; fall back to explicit text rebuild."""
+
+    if os.name == "nt":
+        word = None
+        document = None
+        try:
+            win32com_client = importlib.import_module("win32com.client")
+            word = win32com_client.DispatchEx("Word.Application")
+            word.Visible = False
+            word.DisplayAlerts = 0
+            document = word.Documents.Open(
+                str(source.resolve()),
+                ReadOnly=True,
+                AddToRecentFiles=False,
+                ConfirmConversions=False,
+            )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            document.SaveAs2(str(path.resolve()), FileFormat=16)
+            if path.exists() and path.stat().st_size > 0:
+                return "word"
+        except Exception as exc:
+            record_soft_exception("pdf_template_importer.word_pdf_reflow", exc, detail=str(source))
+        finally:
+            with suppress(Exception):
+                if document is not None:
+                    document.Close(False)
+            with suppress(Exception):
+                if word is not None:
+                    word.Quit()
+
+    _write_pdf_text_template(path, text)
+    return "text"
 
 
 def _write_pdf_text_template(path: Path, text: str) -> None:

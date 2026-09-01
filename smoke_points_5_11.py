@@ -44,8 +44,9 @@ def main() -> None:
     workflow = _read(".github/workflows/windows-build.yml")
     assert "python -m ruff check ." in workflow
     assert "python -m mypy --config-file pyproject.toml" in workflow
-    assert "--cov=error_taxonomy" in workflow
-    assert "--cov=doctor_action_journal" in workflow
+    assert "--cov=." in workflow
+    assert "--cov-config=.coveragerc" in workflow
+    assert "--cov-fail-under=35" in workflow
 
     tests = {p.name for p in (ROOT / "tests").glob("test_*.py")}
     assert "test_points_5_11_logic.py" in tests
