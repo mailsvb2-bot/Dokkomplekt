@@ -59,7 +59,8 @@ def main() -> None:
     workflow = _read(".github/workflows/windows-build.yml")
     assert "headless-tests" in workflow
     assert "python -m pytest tests" in workflow
-    assert "--cov=medical_parser" in workflow
+    assert "--cov=." in workflow
+    assert "--cov-config=.coveragerc" in workflow
     assert "Upload coverage artifact" in workflow
 
     dev = _read("requirements_dev.txt")

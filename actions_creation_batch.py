@@ -41,6 +41,20 @@ class ActionsCreationBatchingMixin:
         if not primary_documents:
             messagebox.showwarning("Пакетная обработка", "В выбранной папке не найдено первичных DOCX/DOCM документов пациентов.")
             return
+        try:
+            from product_access import product_access_enforcement_enabled
+
+            if product_access_enforcement_enabled():
+                requested_count = len(primary_documents) * max(1, len(selected_medical) + len(selected_custom))
+                decision = self._product_access_manager().check_document_creation(requested_count)
+                if not decision.allowed:
+                    messagebox.showwarning(decision.title, decision.message)
+                    self._set_status("Пакетная обработка заблокирована лицензией")
+                    return
+        except Exception as exc:
+            record_soft_exception("actions_creation_batch.product_access_preflight", exc)
+            messagebox.showerror("Пакетная обработка", f"Не удалось проверить лицензию перед пакетной обработкой:\n{exc}")
+            return
         output_root = filedialog.askdirectory(
             title="Куда сохранить пакетный результат",
             initialdir=str(self._base_output_dir()),
@@ -64,6 +78,7 @@ class ActionsCreationBatchingMixin:
             self._set_status("Пакетная обработка...")
             self.root.update_idletasks()
             reports: list[str] = []
+            created_paths: list[Path] = []
             if selected_medical:
                 from medical_service import create_documents_batch, save_batch_generation_report
                 result = create_documents_batch(
@@ -77,8 +92,13 @@ class ActionsCreationBatchingMixin:
                 )
                 report_path = save_batch_generation_report(result, history_dir(output_root) / "batch_generation_report.txt")
                 reports.append(result.human_report() + f"\nОтчёт: {report_path}")
+                created_paths.extend(Path(path) for item in result.items for path in item.created_files)
             if selected_custom:
-                reports.append(self._create_custom_documents_batch(primary_documents, Path(output_root), selected_custom))
+                custom_report, custom_created = self._create_custom_documents_batch(primary_documents, Path(output_root), selected_custom)
+                reports.append(custom_report)
+                created_paths.extend(custom_created)
+            if created_paths:
+                self._enforce_product_access_on_created_files(created_paths)
             message = "\n\n".join(item for item in reports if item)
             self._log("\n" + message + "\n")
             self._open_result_folder_silent(Path(output_root))
@@ -89,7 +109,7 @@ class ActionsCreationBatchingMixin:
             messagebox.showerror("Пакетная обработка", f"Не удалось выполнить пакетную обработку:\n{exc}")
             self._set_status("Ошибка пакетной обработки")
 
-    def _create_custom_documents_batch(self, primary_documents, output_root: Path, selected_custom: list[str]) -> str:
+    def _create_custom_documents_batch(self, primary_documents, output_root: Path, selected_custom: list[str]) -> tuple[str, list[Path]]:
         """Implement the _create_custom_documents_batch workflow with validation, UI state updates and diagnostics."""
         from universal_case_adapter import merge_patient_cases, patient_data_to_case
         from universal_generation import render_documents_from_pack
@@ -101,6 +121,7 @@ class ActionsCreationBatchingMixin:
         technical_lines = ["ПАКЕТНАЯ ОБРАБОТКА СВОИХ ШАБЛОНОВ — технический обезличенный отчёт", ""]
         ok = 0
         errors = 0
+        created_paths: list[Path] = []
         for source in primary_documents:
             source_path = Path(source)
             try:
@@ -127,6 +148,7 @@ class ActionsCreationBatchingMixin:
                 )
                 ref = technical_ref(source_path, patient_dir, getattr(patient, "case_number", ""))
                 if result.created_files:
+                    created_paths.extend(Path(item) for item in result.created_files)
                     ok += 1
                     display_lines.append(f"✅ {source_path.name}: создано {len(result.created_files)} файл(ов) → {patient_dir}")
                     technical_lines.append(f"✅ {ref}: создано {len(result.created_files)} файл(ов)")
@@ -151,7 +173,7 @@ class ActionsCreationBatchingMixin:
         report_path.write_text("\n".join(technical_lines) + "\n", encoding="utf-8")
         display_lines.append("")
         display_lines.append(f"Отчёт: {report_path}")
-        return "\n".join(display_lines)
+        return "\n".join(display_lines), created_paths
 
     def _open_result_folder_silent(self, folder: Path) -> bool:
         """Открыть папку результата без дополнительного popup-уведомления."""

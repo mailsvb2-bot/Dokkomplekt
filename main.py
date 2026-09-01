@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import traceback
+from pathlib import Path
 
 
 def __getattr__(name: str):
@@ -56,12 +58,50 @@ def _check_native_license_core() -> int:
     return 0 if result["ok"] else 1
 
 
+def _check_runtime_bundle() -> int:
+    """Exercise packaged non-GUI dependencies and the DOCX intake path."""
+
+    result = {"check": "runtime_bundle", "ok": False, "checks": {}, "error": None}
+    checks = result["checks"]
+    try:
+        import lxml  # noqa: F401
+        import tkinterdnd2  # noqa: F401
+        import win32api  # type: ignore  # noqa: F401
+        import win32print  # type: ignore  # noqa: F401
+        from docx import Document
+        from medical_docx_blocks import extract_docx_text
+        from medical_service import discover_primary_documents
+
+        checks["imports"] = True
+        with tempfile.TemporaryDirectory(prefix="dokkomplekt-runtime-smoke-") as temp_dir:
+            root = Path(temp_dir)
+            primary = root / "01.09.2026 Первичный осмотр.docx"
+            document = Document()
+            document.add_paragraph("01.09.2026 Первичный осмотр")
+            document.add_paragraph("ФИО: ИВАНОВ ИВАН ИВАНОВИЧ")
+            document.add_paragraph("Жалобы")
+            document.add_paragraph("Анамнез")
+            document.add_paragraph("Диагноз")
+            document.save(primary)
+            text = extract_docx_text(primary)
+            checks["docx_read"] = "Первичный осмотр" in text and "ИВАНОВ" in text
+            checks["batch_discovery"] = discover_primary_documents(root) == (primary,)
+        result["ok"] = bool(checks) and all(bool(value) for value in checks.values())
+    except Exception as exc:  # pragma: no cover - packaged EXE smoke
+        result["error"] = repr(exc)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
 def main() -> None:
     # Background and diagnostic modes must stay GUI-free: check them before importing Tk/app.
     # This keeps Windows autostart lighter and avoids hidden GUI dependency failures when
     # launched by pythonw.exe or the packaged EXE.
     if "--check-native-license-core" in sys.argv:
         raise SystemExit(_check_native_license_core())
+
+    if "--check-runtime-bundle" in sys.argv:
+        raise SystemExit(_check_runtime_bundle())
 
     if "--install-intake-agent" in sys.argv:
         from desktop_intake_agent import install_agent_autostart

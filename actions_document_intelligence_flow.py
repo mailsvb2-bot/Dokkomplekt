@@ -114,6 +114,7 @@ class ActionsDocumentIntelligenceFlowMixin:
         from document_output_format import export_docx_to_pdf
 
         exported: list[Path] = []
+        errors: list[str] = []
         for path in paths:
             try:
                 exported.append(export_docx_to_pdf(path))
@@ -121,6 +122,10 @@ class ActionsDocumentIntelligenceFlowMixin:
                 from diagnostic_logging import record_soft_exception
 
                 record_soft_exception("actions_document_intelligence.pdf_export", exc, detail=str(path))
-                self._log(f"\n⚠ PDF не создан для {path.name}; Word-файл сохранён: {exc}\n")
-                exported.append(path)
+                errors.append(f"{path.name}: {exc}")
+        if errors:
+            raise RuntimeError(
+                "Выбран формат PDF, но PDF не удалось создать. Word-файлы сохранены как аварийные копии:\n"
+                + "\n".join(errors[:10])
+            )
         return exported

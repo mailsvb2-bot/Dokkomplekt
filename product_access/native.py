@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 import json
 import os
+from pathlib import Path
+import sys
 from typing import Any, Mapping
 
 from product_access import AccessDecision, LicenseEntitlement, ProductAccessManager
@@ -34,10 +36,35 @@ def _native_module():
         raise NativeLicenseError("Rust native license core is unavailable.") from exc
 
 
+def _verification_key() -> str:
+    """Load the pinned Ed25519 public key from source env or packaged resources."""
+
+    candidates: list[Path] = []
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        candidates.append(Path(bundle_root) / "resources" / "license_public_key.b64")
+    if not getattr(sys, "frozen", False):
+        key = os.getenv(PUBLIC_KEY_ENV, "").strip()
+        if key:
+            return key
+    candidates.append(Path(__file__).resolve().parent.parent / "resources" / "license_public_key.b64")
+    for path in candidates:
+        try:
+            value = path.read_text("utf-8").strip()
+        except OSError:
+            continue
+        if value:
+            return value
+    return ""
+
+
 def _verify_text(text: str) -> None:
-    key = os.getenv(PUBLIC_KEY_ENV, "").strip()
+    key = _verification_key()
     if not key:
-        raise NativeLicenseError("License public verification key is not configured.")
+        raise NativeLicenseError(
+            "License public verification key is not configured in this build. "
+            "Rebuild with DOKKOMPLEKT_LICENSE_PUBLIC_KEY_B64."
+        )
     native = _native_module()
     if native.proof_ok(text, key) is not True:
         raise NativeLicenseError("Rust license proof was rejected.")
@@ -97,6 +124,8 @@ class NativeProductAccessManager(ProductAccessManager):
         entitlement = LicenseEntitlement.from_mapping(payload) if isinstance(payload, dict) else None
         if entitlement and entitlement.signature == "rust-ed25519":
             raise NativeLicenseError("Flat JSON license cannot use the Rust native signature marker.")
+        if entitlement and getattr(sys, "frozen", False):
+            raise NativeLicenseError("Packaged Dokkomplekt accepts only native Ed25519 license documents.")
         return super().install_license_text(text)
 
     def _validate_license(self, entitlement: LicenseEntitlement, *, require_not_expired: bool = True) -> None:
@@ -113,6 +142,8 @@ class NativeProductAccessManager(ProductAccessManager):
             if entitlement.allowed_machines and machine_fingerprint() not in entitlement.allowed_machines:
                 raise ValueError("Лицензия не привязана к этому компьютеру.")
             return
+        if getattr(sys, "frozen", False):
+            raise ValueError("Packaged Dokkomplekt accepts only native Ed25519 licenses.")
         return super()._validate_license(entitlement, require_not_expired=require_not_expired)
 
     def current_state(self):

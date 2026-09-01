@@ -270,12 +270,13 @@ def _assert_build_contract() -> None:
         "headless-tests",
         "python -m pytest tests",
         "python tools/run_regression_contour.py",
-        "--cov=medical_parser",
+        "--cov=.",
+        "--cov-config=.coveragerc",
+        "--cov-fail-under=35",
         "Upload coverage artifact",
         "python -m ruff check .",
         "python -m mypy --config-file pyproject.toml",
-        "--cov=error_taxonomy",
-        "--cov=doctor_action_journal",
+        "--check-runtime-bundle",
     ]:
         if snippet not in workflow:
             raise SystemExit(f"GitHub Actions workflow misses production snippet: {snippet}")

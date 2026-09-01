@@ -186,19 +186,17 @@ class ActionsUniversalFlowMixin:
         required_mode = self._completion_inputs_are_required(inputs)
         try:
             raw_values = self._prompt_regulatory_completion_values(inputs, parent=self.root)
-            from regulatory_completion_blocks import apply_completion_values, completion_values_from_raw
-
-            values = completion_values_from_raw(inputs, raw_values)
-            if values:
-                return apply_completion_values(case, values, source_document="custom_document_completion_popup")
-            if required_mode:
-                labels = ", ".join(str(getattr(item, "label", item.field_id)) for item in inputs[:6])
-                raise ValueError("Не заполнены обязательные поля custom-документа: " + labels)
-            self._log("\nℹ Врач выбрал создание custom-документов как есть, без дополнительных полей.\n")
         except Exception as exc:
-            if required_mode:
-                raise
-            self._log(f"\n⚠ Не удалось открыть popup дополнения custom-документа; создаю как есть: {exc}\n")
+            raise RuntimeError(f"Не удалось открыть popup дополнения custom-документа: {exc}") from exc
+        from regulatory_completion_blocks import apply_completion_values, completion_values_from_raw
+
+        values = completion_values_from_raw(inputs, raw_values)
+        if values:
+            return apply_completion_values(case, values, source_document="custom_document_completion_popup")
+        if required_mode:
+            labels = ", ".join(str(getattr(item, "label", item.field_id)) for item in inputs[:6])
+            raise ValueError("Не заполнены обязательные поля custom-документа: " + labels)
+        self._log("\nℹ Врач выбрал создание custom-документов как есть, без дополнительных полей.\n")
         return case
 
     def _create_custom_documents_impl(self, selected_custom_ids: List[str]) -> List[Path]:

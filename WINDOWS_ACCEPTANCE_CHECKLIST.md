@@ -1,4 +1,4 @@
-# Windows acceptance checklist — MedicalDiaryAutofill v1.4.53
+# Windows acceptance checklist — MedicalDiaryAutofill v1.4.91
 
 Цель: проверить реальный врачебный сценарий на Windows, Word и Defender, который нельзя доказать в headless-среде.
 
