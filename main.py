@@ -93,6 +93,16 @@ def _check_runtime_bundle() -> int:
     return 0 if result["ok"] else 1
 
 
+def _check_user_journey() -> int:
+    """Run the packaged GUI-free doctor journey from intake to generated patient files."""
+
+    from user_journey_check import run_user_journey_check
+
+    result = run_user_journey_check()
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    return 0 if result.get("ok") else 1
+
+
 def main() -> None:
     # Background and diagnostic modes must stay GUI-free: check them before importing Tk/app.
     # This keeps Windows autostart lighter and avoids hidden GUI dependency failures when
@@ -102,6 +112,9 @@ def main() -> None:
 
     if "--check-runtime-bundle" in sys.argv:
         raise SystemExit(_check_runtime_bundle())
+
+    if "--check-user-journey" in sys.argv:
+        raise SystemExit(_check_user_journey())
 
     if "--install-intake-agent" in sys.argv:
         from desktop_intake_agent import install_agent_autostart
