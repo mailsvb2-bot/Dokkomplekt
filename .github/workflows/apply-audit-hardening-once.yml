@@ -4,7 +4,6 @@ on:
   push:
     branches: [fix/audit-hardening-1491]
     paths:
-      - tools/audit_hardening_remaining.patch.gz.b64
       - .github/workflows/apply-audit-hardening-once.yml
   workflow_dispatch:
 
@@ -30,11 +29,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements_dev.txt
-      - name: Apply verified patch and validate
+      - name: Reassemble, verify and apply patch
         shell: bash
         run: |
           set -euo pipefail
-          base64 -d tools/audit_hardening_remaining.patch.gz.b64 | gzip -d > /tmp/audit.patch
+          cat tools/audit_hardening_remaining.part{1,2,3,4,5}.b64 > /tmp/audit.patch.gz.b64
+          base64 -d /tmp/audit.patch.gz.b64 > /tmp/audit.patch.gz
+          echo 'ee68e04fa08a41a7c2495efc63707c99ab47fe59fe7810431a89d886c6bb228c  /tmp/audit.patch.gz' | sha256sum -c -
+          gzip -dc /tmp/audit.patch.gz > /tmp/audit.patch
+          echo '193e49ba230aafce41f49598eb8145a197854146f7fa17f762dd97a6b597c2f6  /tmp/audit.patch' | sha256sum -c -
           git apply --check /tmp/audit.patch
           git apply /tmp/audit.patch
           python -m compileall -q .
@@ -47,7 +50,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git rm tools/audit_hardening_remaining.patch.gz.b64 .github/workflows/apply-audit-hardening-once.yml
+          git rm \
+            tools/audit_hardening_remaining.patch.gz.b64 \
+            tools/audit_hardening_remaining.part1.b64 \
+            tools/audit_hardening_remaining.part2.b64 \
+            tools/audit_hardening_remaining.part3.b64 \
+            tools/audit_hardening_remaining.part4.b64 \
+            tools/audit_hardening_remaining.part5.b64 \
+            .github/workflows/apply-audit-hardening-once.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
