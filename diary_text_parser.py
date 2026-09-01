@@ -63,6 +63,11 @@ def looks_like_status(text: str) -> bool:
     low = text.lower()
     if len(text) < MIN_STATUS_LEN:
         return False
+    # Do not turn document titles/section captions into patient observations.
+    # Real status prose contains punctuation or is long enough to be prose; a
+    # short all-caps/label-only heading is structural content, not a diary text.
+    if len(text) <= 140 and text.upper() == text and any(ch.isalpha() for ch in text):
+        return False
     if is_signature_paragraph_text(text):
         return False
     if any(low.startswith(prefix) for prefix in STRUCTURAL_DIARY_PREFIXES):
@@ -80,7 +85,10 @@ def extract_statuses_from_docx(path: str | Path) -> list[str]:
     statuses: list[str] = []
     seen_statuses: set[str] = set()
 
-    def add_candidate(text: str) -> None:
+    def add_candidate(text: str, *, style_name: str = "") -> None:
+        style_low = str(style_name or "").strip().casefold()
+        if style_low.startswith(("title", "heading", "заголовок")):
+            return
         cleaned = clean_status_text(text)
         key = cleaned.lower().replace("ё", "е")
         if looks_like_status(cleaned) and key not in seen_statuses:
@@ -88,7 +96,7 @@ def extract_statuses_from_docx(path: str | Path) -> list[str]:
             seen_statuses.add(key)
 
     for paragraph in doc.paragraphs:
-        add_candidate(paragraph.text)
+        add_candidate(paragraph.text, style_name=getattr(getattr(paragraph, "style", None), "name", ""))
     for table in doc.tables:
         for row in table.rows:
             seen_cells: set[int] = set()
@@ -98,5 +106,5 @@ def extract_statuses_from_docx(path: str | Path) -> list[str]:
                     continue
                 seen_cells.add(tc_id)
                 for paragraph in cell.paragraphs:
-                    add_candidate(paragraph.text)
+                    add_candidate(paragraph.text, style_name=getattr(getattr(paragraph, "style", None), "name", ""))
     return statuses

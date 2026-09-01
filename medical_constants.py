@@ -49,4 +49,4 @@ DOCUMENT_LABELS: Dict[str, str] = {
 }
 
 DOCUMENT_ORDER = ("primary", "discharge", "commission", "vk_mse", "admission_doctor_referral", "sick_leave_vk", "rvk")
-TARGET_MEDICAL_FACILITY = "медицинскую организацию по профилю"
+TARGET_MEDICAL_FACILITY = "ГБУЗ НО «НКЦПЗ» диспансер №2"

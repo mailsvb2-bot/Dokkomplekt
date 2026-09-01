@@ -238,12 +238,22 @@ def _date_label(value: str, date_format: str = "short") -> str:
 
 
 def _fio_to_surname_initials(fio: str) -> str:
-    parts = [part.strip(" .,") for part in str(fio or "").split() if part.strip(" .,")]
+    parts = [part.strip(" ,") for part in str(fio or "").split() if part.strip(" ,")]
     if not parts:
         return ""
-    surname = parts[0]
-    initials = "".join(f"{part[0].upper()}." for part in parts[1:3] if part)
-    return f"{surname} {initials}".strip()
+    surname = parts[0].strip(".")
+    initials: list[str] = []
+    for part in parts[1:]:
+        # Preserve already abbreviated forms such as ``И.И.`` instead of
+        # collapsing the whole block to the first ``И``.
+        letters = re.findall(r"(?:^|\.)([A-Za-zА-ЯЁа-яё])(?=\.|$)", part)
+        if len(letters) >= 2:
+            initials.extend(letter.upper() + "." for letter in letters[: 2 - len(initials)])
+        elif part.strip("."):
+            initials.append(part.strip(".")[0].upper() + ".")
+        if len(initials) >= 2:
+            break
+    return f"{surname} {''.join(initials)}".strip()
 
 
 def _month_year_label(value: str) -> str:

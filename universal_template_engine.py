@@ -197,7 +197,9 @@ def extract_template_placeholders(
     """Read a DOCX/DOCM template and return all semantic placeholders."""
 
     candidate = _existing_docx(path, "шаблон документа")
-    doc = Document(str(candidate))
+    from medical_docx_xml_fragments import ensure_docx_compatible
+    readable = ensure_docx_compatible(candidate, label="шаблон документа")
+    doc = Document(str(readable))
     found: list[TemplatePlaceholder] = []
 
     for paragraph, hint in _iter_docx_paragraphs(doc):
@@ -418,6 +420,8 @@ def render_template_to_docx(
     """Render a custom DOCX template using explicit ``{{field.id}}`` placeholders."""
 
     template = _existing_docx(template_path, "шаблон документа")
+    from medical_docx_xml_fragments import ensure_docx_compatible
+    template = ensure_docx_compatible(template, label="шаблон документа")
     missing_required = missing_required_fields(case, document)
     if strict and missing_required:
         raise ValueError("Не заполнены обязательные поля для документа: " + ", ".join(missing_required))
@@ -430,6 +434,8 @@ def render_template_to_docx(
     for paragraph, _hint in _iter_docx_paragraphs(doc):
         _replace_paragraph_placeholders(paragraph, context, replaced, missing_seen, document=document)
 
+    if strict and missing_seen:
+        raise ValueError("Не заполнены поля шаблона: " + ", ".join(sorted(missing_seen)))
     remove_forbidden_hospitalization_phrase_from_document(doc)
     output = Path(output_path).expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -466,39 +472,48 @@ def attach_template_to_pack(
     source_language: str = "auto",
     button_label_source: str = "manual",
 ) -> tuple[DocumentTemplateSpec, Path]:
-    """Copy a user DOCX into the profile folder and attach it as a dynamic document.
-
-    v1.4.1 stored only ``path.name`` in the JSON profile.  That made the UI look
-    successful, but export/validation could later miss the physical DOCX when
-    it lived in Downloads/Desktop.  The universal product contract is stricter:
-    once a doctor adds a template, the profile owns a private copy under
-    ``profiles/templates/`` and portable ``.medpack.zip`` can include it.
-    """
+    """Validate/read first, then copy one owned DOCX and mutate the pack atomically."""
 
     source = _existing_docx(template_path, "шаблон документа")
+    from medical_docx_xml_fragments import ensure_docx_compatible
+    readable = ensure_docx_compatible(source, label="шаблон документа")
     profile_root = Path(profile_dir).expanduser()
     templates_dir = profile_root / TEMPLATE_DIR_NAME
     templates_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        source_already_owned = source.parent.resolve() == templates_dir.resolve()
-    except Exception as exc:
-        record_soft_exception("universal_template_engine.template_dir_resolve", exc, detail=str(source))
-        source_already_owned = False
-    target = source if source_already_owned else _available_template_copy_path(templates_dir / source.name)
-    if source.resolve() != target.resolve():
-        shutil.copy2(source, target)
-    spec = infer_document_spec_from_template(target, button_label=button_label, document_id=document_id, category=category, registry=registry, role_id=role_id)
-    spec = replace(
-        spec,
-        id=unique_document_id_for_pack(pack, spec.id, template_path=target),
-        template=(PurePosixPath(TEMPLATE_DIR_NAME) / target.name).as_posix(),
-        role_id=role_id or spec.role_id,
-        button_language=button_language or spec.button_language,
-        source_language=source_language or spec.source_language,
-        button_label_source=button_label_source or spec.button_label_source,
+
+    # Infer before touching the profile directory.  A broken DOCM/DOCX must not
+    # leave an orphan file behind after the operation fails.
+    draft = infer_document_spec_from_template(
+        readable, button_label=button_label, document_id=document_id,
+        category=category, registry=registry, role_id=role_id,
     )
-    pack.add_document(spec)
-    return spec, target
+    target_name = source.with_suffix(".docx").name if source.suffix.lower() == ".docm" else source.name
+    target = _available_template_copy_path(templates_dir / target_name)
+    copied = False
+    try:
+        if readable.resolve() != target.resolve():
+            shutil.copy2(readable, target)
+            copied = True
+        else:
+            target = readable
+        spec = replace(
+            draft,
+            id=unique_document_id_for_pack(pack, draft.id, template_path=target),
+            template=(PurePosixPath(TEMPLATE_DIR_NAME) / target.name).as_posix(),
+            role_id=role_id or draft.role_id,
+            button_language=button_language or draft.button_language,
+            source_language=source_language or draft.source_language,
+            button_label_source=button_label_source or draft.button_label_source,
+        )
+        pack.add_document(spec)
+        return spec, target
+    except Exception:
+        if copied:
+            try:
+                target.unlink()
+            except OSError as cleanup_exc:
+                record_soft_exception("universal_template_engine.attach_template_cleanup", cleanup_exc, detail=str(target))
+        raise
 
 def export_document_pack_zip(pack: DocumentPack, target_zip: str | Path, *, template_base_dir: str | Path | None = None) -> Path:
     """Export a profile as a portable ``.medpack.zip`` with manifest and templates."""
@@ -617,25 +632,35 @@ def _diary_context_values(case: PatientCase, document: DocumentTemplateSpec) -> 
         }
 
 
+def _iter_table_paragraphs(table, prefix: str):
+    """Yield all paragraphs from a table, including arbitrarily nested tables."""
+    seen_cells: set[int] = set()
+    for row_index, row in enumerate(table.rows):
+        for cell_index, cell in enumerate(row.cells):
+            cell_key = id(cell._tc)
+            if cell_key in seen_cells:
+                continue
+            seen_cells.add(cell_key)
+            cell_prefix = f"{prefix}.row[{row_index}].cell[{cell_index}]"
+            for paragraph_index, paragraph in enumerate(cell.paragraphs):
+                yield paragraph, f"{cell_prefix}.paragraph[{paragraph_index}]"
+            for nested_index, nested in enumerate(cell.tables):
+                yield from _iter_table_paragraphs(nested, f"{cell_prefix}.table[{nested_index}]")
+
+
 def _iter_docx_paragraphs(doc: Document):
-    """Yield paragraphs from body, tables, headers and footers with stable hints."""
+    """Yield body/header/footer paragraphs recursively through nested tables."""
 
     for paragraph_index, paragraph in enumerate(doc.paragraphs):
         yield paragraph, f"paragraph[{paragraph_index}]"
     for table_index, table in enumerate(doc.tables):
-        for row_index, row in enumerate(table.rows):
-            for cell_index, cell in enumerate(row.cells):
-                for paragraph_index, paragraph in enumerate(cell.paragraphs):
-                    yield paragraph, f"table[{table_index}].row[{row_index}].cell[{cell_index}].paragraph[{paragraph_index}]"
+        yield from _iter_table_paragraphs(table, f"table[{table_index}]")
     for section_index, section in enumerate(doc.sections):
         for area_name, area in (("header", section.header), ("footer", section.footer)):
             for paragraph_index, paragraph in enumerate(area.paragraphs):
                 yield paragraph, f"section[{section_index}].{area_name}.paragraph[{paragraph_index}]"
             for table_index, table in enumerate(area.tables):
-                for row_index, row in enumerate(table.rows):
-                    for cell_index, cell in enumerate(row.cells):
-                        for paragraph_index, paragraph in enumerate(cell.paragraphs):
-                            yield paragraph, f"section[{section_index}].{area_name}.table[{table_index}].row[{row_index}].cell[{cell_index}].paragraph[{paragraph_index}]"
+                yield from _iter_table_paragraphs(table, f"section[{section_index}].{area_name}.table[{table_index}]")
 
 
 def _resolve_pack_template_path(template_value: str, base_dir: str | Path | None) -> Path:
@@ -905,6 +930,41 @@ def insert_placeholder_after_selection(
     return _apply_visual_placeholder(template_path, selected_text, field_id, mode="template_insert_after", create_backup=create_backup)
 
 
+def _replace_substring_preserving_runs(paragraph, start: int, end: int, value: str) -> None:
+    if not paragraph.runs:
+        text = paragraph.text or ""
+        paragraph.text = text[:start] + value + text[end:]
+        return
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    for run in paragraph.runs:
+        nxt = cursor + len(run.text or "")
+        spans.append((cursor, nxt))
+        cursor = nxt
+
+    def locate(offset: int) -> tuple[int, int]:
+        for idx, (a, b) in enumerate(spans):
+            if a <= offset < b:
+                return idx, offset - a
+        idx = max(0, len(spans) - 1)
+        return idx, max(0, min(offset - spans[idx][0], len(paragraph.runs[idx].text or "")))
+
+    sr, so = locate(start)
+    er, eo = locate(max(start, end - 1))
+    eo += 1
+    if sr == er:
+        run = paragraph.runs[sr]
+        text = run.text or ""
+        run.text = text[:so] + value + text[eo:]
+        return
+    first = paragraph.runs[sr]
+    first.text = (first.text or "")[:so] + value
+    for idx in range(sr + 1, er):
+        paragraph.runs[idx].text = ""
+    last = paragraph.runs[er]
+    last.text = (last.text or "")[eo:]
+
+
 def _apply_visual_placeholder(
     template_path: str | Path,
     selected_text: str,
@@ -914,6 +974,8 @@ def _apply_visual_placeholder(
     create_backup: bool,
 ) -> TemplateMarkResult:
     path = _existing_docx(template_path, "шаблон для цветной разметки")
+    from medical_docx_xml_fragments import ensure_docx_compatible
+    readable = ensure_docx_compatible(path, label="шаблон для цветной разметки")
     selected = " ".join(str(selected_text or "").replace("\r", "\n").split())
     if not selected:
         raise ValueError("Выделите текст/строку в шаблоне, куда нужно поставить поле.")
@@ -923,28 +985,31 @@ def _apply_visual_placeholder(
         backup_path = _available_visual_backup_path(path)
         shutil.copy2(path, backup_path)
         backup = str(backup_path)
-    doc = Document(str(path))
-    replacements = 0
+    doc = Document(str(readable))
+    matches: list[tuple[object, int, int]] = []
     for paragraph, _hint in _iter_docx_paragraphs(doc):
         current = paragraph.text or ""
-        if mode == "template_replace":
-            pos = current.find(selected)
-            if pos < 0:
-                continue
-            paragraph.text = current[:pos] + placeholder + current[pos + len(selected):]
-            replacements += 1
-            break
-        if mode == "template_insert_after":
-            if current.find(selected) < 0 and selected not in " ".join(current.split()):
-                continue
-            if placeholder not in current:
-                paragraph.text = current + ("\n" if current and not current.endswith("\n") else "") + placeholder
-            replacements += 1
-            break
+        pos = current.find(selected)
+        if pos >= 0:
+            matches.append((paragraph, pos, pos + len(selected)))
+    if not matches:
+        return TemplateMarkResult(str(path), normalize_placeholder_id(field_id), placeholder, mode, 0, backup)
+    if len(matches) > 1:
+        raise ValueError(
+            f"Выделенный текст встречается в шаблоне {len(matches)} раз. "
+            "Выберите более длинный уникальный фрагмент, чтобы программа не изменила не то место."
+        )
+    paragraph, start, end = matches[0]
+    if mode == "template_replace":
+        _replace_substring_preserving_runs(paragraph, start, end, placeholder)
+    elif mode == "template_insert_after":
+        suffix = "\n" if paragraph.text and not paragraph.text.endswith("\n") else ""
+        paragraph.add_run(suffix + placeholder)
+    else:
         raise ValueError(f"Неизвестный режим цветной разметки: {mode}")
-    if replacements:
-        doc.save(str(path))
-    return TemplateMarkResult(str(path), normalize_placeholder_id(field_id), placeholder, mode, replacements, backup)
+    save_target = path if readable == path else path.with_suffix(".docx")
+    doc.save(str(save_target))
+    return TemplateMarkResult(str(save_target), normalize_placeholder_id(field_id), placeholder, mode, 1, backup)
 
 
 def _available_visual_backup_path(path: Path) -> Path:

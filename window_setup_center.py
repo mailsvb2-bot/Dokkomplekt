@@ -284,10 +284,13 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
             messagebox.showerror("Проверка своих шаблонов", str(exc), parent=dialog)
     def teach_source_document() -> None:
         status_var.set("Сейчас откроется обучение чтению первичного документа: выберите пример DOCX, выделите нужный текст и нажмите «Запомнить».")
+        # Late import avoids the old hidden dependency where another module had
+        # to monkey-patch this module before the button could work.
+        from window_document_mapper import open_universal_document_mapper
         open_universal_document_mapper(self)
         refresh("Если правило было сохранено, профиль уже обновлён.")
     def add_templates_fast() -> None:
-        """Implement the add_templates_fast workflow with validation, UI state updates and diagnostics."""
+        """Add many templates atomically: either the profile is saved, or new copies are rolled back."""
         template_paths = filedialog.askopenfilenames(
             title="Выберите Word-шаблоны врача — можно сразу несколько",
             initialdir=self._dialog_initial_dir(DIR_PRIMARY_DOCUMENTS),
@@ -296,8 +299,15 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
         )
         if not template_paths:
             return
+        fast_profile_dir: Path | None = None
+        fast_templates_before: set[Path] = set()
+        fast_pack_saved = False
         try:
             pack = self._load_or_create_universal_pack()
+            fast_profile_dir = self._universal_profile_path().parent
+            fast_templates_dir = fast_profile_dir / "templates"
+            if fast_templates_dir.exists():
+                fast_templates_before = {item.resolve() for item in fast_templates_dir.iterdir() if item.is_file()}
             language_id = self._effective_output_language() if hasattr(self, "_effective_output_language") else "ru"
             from universal_profile_builder import recognize_template_buttons
             recognitions = recognize_template_buttons(
@@ -339,6 +349,23 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
                 role_id = "" if str(item.role_id or "").strip().lower() == "unknown" else str(item.role_id or "").strip().lower()
                 is_diary = looks_like_diary_template(item.path) or role_id == "daily_diary"
                 document_id = stable_document_id(role_id or "unknown", label, item.path)
+                pre_validation = validate_template(
+                    item.path,
+                    registry=current_pack.registry(),
+                    role_id="daily_diary" if is_diary else role_id,
+                    category="diaries" if is_diary else "medical",
+                    button_label=label,
+                )
+                if not is_diary and not pre_validation.ok:
+                    reasons: list[str] = []
+                    if not pre_validation.placeholders:
+                        reasons.append("нет меток {{patient.fio}}, {{case.number}} и т.п.")
+                    if pre_validation.unknown_fields:
+                        reasons.append("неизвестные поля: " + ", ".join(pre_validation.unknown_fields))
+                    if pre_validation.missing_required_placeholders:
+                        reasons.append("нет обязательных меток: " + ", ".join(pre_validation.missing_required_placeholders))
+                    warnings.append(f"«{label}» не добавлен: " + "; ".join(reasons or ["шаблон не прошёл проверку"]))
+                    continue
                 spec, copied_to = attach_template_to_pack(
                     current_pack,
                     item.path,
@@ -352,10 +379,11 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
                     source_language="auto",
                     button_label_source="doctor_review_table",
                 )
-                validation = validate_template(copied_to, required_fields=spec.required_fields, registry=current_pack.registry())
-                if not validation.ok and not validation.placeholders:
-                    warnings.append(f"«{label}»: кнопка создана, но в шаблоне пока нет меток {{patient.fio}}, {{case.number}} и т.п.; документ будет создан как копия шаблона, пока врач не добавит метки.")
-                elif validation.warnings:
+                validation = validate_template(
+                    copied_to, required_fields=spec.required_fields, registry=current_pack.registry(),
+                    role_id=spec.role_id, category=spec.category, button_label=spec.button_label,
+                )
+                if validation.warnings:
                     warnings.extend(f"«{label}»: {warning}" for warning in validation.warnings[:2])
                 if is_diary:
                     from diary_schedule import DiaryScheduleSpec, infer_diary_schedule_from_docx
@@ -372,14 +400,16 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
                 return
             _mark_buttons_created(current_pack)
             _save_pack(current_pack)
+            fast_pack_saved = True
             _refresh_main_tiles("doctor_review_table")
-            # Doctor-facing result stays short; technical template warnings go to logs.
             if warnings:
                 record_soft_exception(
                     "window_mapper_dialog.doctor_button_setup_warnings",
                     RuntimeError("; ".join(warnings[:12])),
                 )
             result_text = f"Готово. Создано кнопок: {len(added_labels)}."
+            if warnings:
+                result_text += "\n\nНе добавлено/требует внимания:\n" + "\n".join(f"• {item}" for item in warnings[:8])
             if review.replace_existing:
                 result_text += "\nСтарые кнопки заменены выбранными шаблонами."
             messagebox.showinfo("Готово", result_text, parent=dialog)
@@ -390,6 +420,22 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
             )
             refresh(f"Созданы кнопки: {', '.join(added_labels)}")
         except Exception as exc:
+            # The DocumentPack is saved only after the full loop succeeds.  If a
+            # later template fails before that commit, remove only files created
+            # by this attempt so the profile directory cannot accumulate orphan
+            # templates or diverge from pack.json.
+            if not fast_pack_saved and fast_profile_dir is not None:
+                try:
+                    fast_templates_dir = fast_profile_dir / "templates"
+                    if fast_templates_dir.exists():
+                        for item in fast_templates_dir.iterdir():
+                            try:
+                                if item.is_file() and item.resolve() not in fast_templates_before:
+                                    item.unlink()
+                            except Exception as cleanup_exc:
+                                record_soft_exception("window_setup_center.fast_template_rollback_file", cleanup_exc, detail=str(item))
+                except Exception as cleanup_exc:
+                    record_soft_exception("window_setup_center.fast_template_rollback", cleanup_exc)
             messagebox.showerror("Свои шаблоны", f"Не удалось быстро добавить шаблоны:\n\n{exc}", parent=dialog)
     def add_template_button() -> None:
         """Implement the add_template_button workflow with validation, UI state updates and diagnostics."""
@@ -474,6 +520,20 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
                     from universal_diary_templates import looks_like_diary_template
                     is_diary = looks_like_diary_template(template_path) or role_id == "daily_diary"
                     from universal_template_engine import attach_template_to_pack, validate_template
+                    pre_validation = validate_template(
+                        template_path,
+                        registry=current_pack.registry(),
+                        role_id="daily_diary" if is_diary else role_id,
+                        category="diaries" if is_diary else "medical",
+                        button_label=label,
+                    )
+                    if not is_diary and not pre_validation.ok:
+                        details = []
+                        if not pre_validation.placeholders:
+                            details.append("нет меток {{patient.fio}}, {{case.number}} и т.п.")
+                        if pre_validation.unknown_fields:
+                            details.append("неизвестные поля: " + ", ".join(pre_validation.unknown_fields))
+                        raise ValueError("Шаблон не добавлен: " + "; ".join(details or ["проверка шаблона не пройдена"]))
                     spec, copied_to = attach_template_to_pack(
                         current_pack,
                         template_path,

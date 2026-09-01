@@ -104,6 +104,72 @@ def _existing_docx_files(paths: Iterable[str | Path], label: str) -> list[Path]:
     return result
 
 
+def _day_offsets_from_date_templates(
+    diary_files: Sequence[str | Path],
+    *,
+    admission_date_value: date | None,
+    discharge_date_value: date | None,
+) -> tuple[int, ...]:
+    """Extract explicit diary dates from doctor-selected 01–31 Word files.
+
+    The output remains text-based; only the date plan comes from the selected
+    legacy template.  This preserves the user's Dates+Texts workflow without
+    resurrecting the removed table writer.
+    """
+    if not diary_files or admission_date_value is None:
+        return ()
+    from medical_docx_reader import extract_docx_text
+    result: list[int] = []
+    seen: set[int] = set()
+    for raw in diary_files:
+        try:
+            readable = ensure_docx_compatible(raw, label="diary date template")
+            text = extract_docx_text(readable)
+            template_doc = Document(str(readable))
+        except Exception as exc:
+            record_soft_exception("diary_batch.date_template_read", exc, detail=str(raw))
+            continue
+
+        candidates: list[tuple[int, int, str | None]] = []
+        for match in re.finditer(r"(?<!\d)([0-3]?\d)[./-]([01]?\d)(?:[./-](20\d{2}|\d{2}))?(?!\d)", text):
+            candidates.append((int(match.group(1)), int(match.group(2)), match.group(3)))
+        # Classic 01–31 templates often keep day and month/year in separate
+        # table cells.  Recover those rows without using the removed row writer.
+        for table in template_doc.tables:
+            for row in table.rows:
+                cells = [" ".join(cell.text.split()) for cell in row.cells]
+                day_value: int | None = None
+                month_value: int | None = None
+                year_value: str | None = None
+                for cell_text in cells:
+                    if day_value is None and re.fullmatch(r"0?[1-9]|[12]\d|3[01]", cell_text):
+                        day_value = int(cell_text)
+                    month_year = re.search(r"(?<!\d)(0?[1-9]|1[0-2])[./-](20\d{2}|\d{2})(?!\d)", cell_text)
+                    if month_year:
+                        month_value = int(month_year.group(1)); year_value = month_year.group(2)
+                if day_value is not None and month_value is not None:
+                    candidates.append((day_value, month_value, year_value))
+
+        for day, month, year_raw in candidates:
+            try:
+                year = int(year_raw) if year_raw else admission_date_value.year
+                if year < 100:
+                    year += 2000
+                candidate = date(year, month, day)
+                if not year_raw and candidate < admission_date_value and admission_date_value.month == 12 and month == 1:
+                    candidate = date(admission_date_value.year + 1, month, day)
+                offset = (candidate - admission_date_value).days
+                if offset < 1:
+                    continue
+                if discharge_date_value is not None and candidate > discharge_date_value:
+                    continue
+                if offset not in seen:
+                    seen.add(offset); result.append(offset)
+            except (TypeError, ValueError):
+                continue
+    return tuple(sorted(result))
+
+
 def _resolve_output_dir(output_dir: str | Path | None, fallback_dir: Path) -> Path:
     result = fallback_dir if output_dir is None or str(output_dir).strip() == "" else Path(output_dir).expanduser()
     if result.exists() and not result.is_dir():
@@ -475,7 +541,7 @@ def fill_diary_batch(
     sick_leave_from: str = "",
 ) -> DiaryBatchResult:
     """Validate diary inputs and create text-route diary output for one patient."""
-    _ = (diary_files, reset_each_file, keep_signature, fill_months, remove_holiday_rows, text_output)
+    _ = (reset_each_file, keep_signature, fill_months, remove_holiday_rows, text_output)
     status_file_paths = _existing_docx_files(status_files, "тексты дневников") if status_files else []
     if not status_file_paths and not allow_empty_statuses:
         raise ValueError("Сначала выберите тексты дневников. Даты берутся из календаря программы, а не из таблицы дневников.")
@@ -484,6 +550,11 @@ def fill_diary_batch(
     except ValueError:
         admission_date_value = None
     discharge_date_value = parse_optional_discharge_date(discharge_value)
+    template_offsets = _day_offsets_from_date_templates(
+        diary_files, admission_date_value=admission_date_value, discharge_date_value=discharge_date_value
+    )
+    if template_offsets:
+        diary_day_offsets = template_offsets
     if admission_date_value is not None and discharge_date_value is not None and discharge_date_value < admission_date_value:
         raise ValueError("Дата выписки не может быть раньше даты поступления.")
     gender_name = safe_filename_part(gender_source_name or patient_name)

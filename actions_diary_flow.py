@@ -20,13 +20,11 @@ class ActionsDiaryFlowMixin:
         if not self.status_files:
             raise ValueError("Выберите файл(ы) с текстами дневников. Тексты можно выбирать из DOCX/DOCM/DOC.")
 
-        self.diary_files = []
-        self.diary_template_dir = ""
-        self._diary_files_auto_selected = False
-        try:
-            self._update_diary_template_label(success=True)
-        except Exception as exc:
-            record_soft_exception("actions_diary_flow.force_text_output_label", exc)
+        # Output is text, but an explicitly selected 01–31 Word template may
+        # still provide the date plan.  Do not silently discard the doctor's
+        # Dates selection here.
+        if not self.diary_files and getattr(self, "diary_template_dir", ""):
+            self._auto_select_numbered_diary_template(ask_folder=False)
         text_output = True
         self._diary_text_output_enabled = True
         try:
@@ -66,7 +64,7 @@ class ActionsDiaryFlowMixin:
         treatment_correction = str(getattr(getattr(self, "diary_treatment_correction_var", None), "get", lambda: "")() or "").strip()
         result = fill_diary_batch(
             status_files=self.status_files,
-            diary_files=[],
+            diary_files=list(self.diary_files),
             output_dir=str(self._result_output_dir()),
             patient_name=diary_patient_name,
             admission_value=diary_admission_value,

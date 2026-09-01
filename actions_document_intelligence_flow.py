@@ -73,7 +73,7 @@ class ActionsDocumentIntelligenceFlowMixin:
             document_ids=regular_ids,
             output_dir=out_dir,
             base_dir=self._universal_profile_path().parent,
-            strict=False,
+            strict=not bool(getattr(self, "_allow_missing_required_creation", False)),
             output_language=self._effective_output_language(),
             spellcheck_enabled=bool(getattr(self, "spellcheck_enabled_var", None) and self.spellcheck_enabled_var.get()),
             output_format="docx",

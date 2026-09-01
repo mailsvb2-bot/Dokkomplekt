@@ -64,37 +64,19 @@ class RegressionStateOverlayMixin:
         return True
 
     def _auto_select_numbered_diary_template(self, *, ask_folder: bool = False) -> bool:
-        """Legacy numbered diary date templates are isolated from production."""
-        return False
+        return super()._auto_select_numbered_diary_template(ask_folder=ask_folder)  # type: ignore[misc]
 
     def _set_numbered_diary_template_dir(self, folder, *, auto_select: bool = True, warn_if_missing: bool = False) -> bool:
-        """Treat a legacy numbered-template drop as a request for diary dates."""
-        return self._activate_diary_calendar_mode(source="старый набор 01–31")
+        return super()._set_numbered_diary_template_dir(folder, auto_select=auto_select, warn_if_missing=warn_if_missing)  # type: ignore[misc]
 
     def _set_manual_diary_template_file(self, selected) -> bool:
-        """Treat a legacy date-template file as a request for calendar dates."""
-        return self._activate_diary_calendar_mode(source="старый файл дат")
+        return super()._set_manual_diary_template_file(selected)  # type: ignore[misc]
 
     def choose_diary_files(self) -> None:
-        """The Dates button confirms the program calendar principle only."""
-        try:
-            from diary_creation_wizard import prompt_diary_calendar_principle
-            if not prompt_diary_calendar_principle(self):
-                return None
-            self._activate_diary_calendar_mode()
-            return None
-        except Exception as exc:
-            record_soft_exception("app.choose_diary_calendar_principle", exc)
-            return None
+        return super().choose_diary_files()  # type: ignore[misc]
 
     def _diary_template_label_text(self) -> str:
-        principle = str(getattr(self, "_doctor_confirmed_diary_principle", "") or "календарь программы: +1 день")
-        text = "Даты: " + principle
-        try:
-            return self._truncate_label_text(text, max_chars=42 if getattr(self, "_compact_ui", False) else 78)
-        except Exception as exc:
-            record_soft_exception("app.diary_calendar_label", exc)
-            return text
+        return super()._diary_template_label_text()  # type: ignore[misc]
 
     def _vk_mse_work_position_value(self) -> str:
         if hasattr(self, "vk_mse_work_position_var"):
@@ -178,9 +160,8 @@ class RegressionStateOverlayMixin:
         try:
             self._doctor_confirmed_diary_day_offsets = ()
             self._doctor_confirmed_diary_hour_offsets = ()
+            self._doctor_confirmed_diary_minute_offsets = ()
             self._doctor_confirmed_diary_principle = ""
-            self.diary_files = []
-            self.diary_template_dir = ""
             if hasattr(self, "diary_calendar_principle_var"):
                 self.diary_calendar_principle_var.set("")
         except Exception as exc:

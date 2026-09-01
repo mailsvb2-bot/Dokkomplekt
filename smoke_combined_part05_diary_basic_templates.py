@@ -131,17 +131,20 @@ assert "self._auto_select_numbered_diary_template(ask_folder=False)" not in desk
 assert "self._auto_select_numbered_diary_template(ask_folder=False)" not in actions_source
 assert "self._auto_select_numbered_diary_template(ask_folder=False)" not in files_source[primary_start:primary_end]
 
-# The visible Dates control and legacy drops converge on one calendar activation method.
+# The visible Dates control must expose the real doctor-owned 01–31 inputs.
+# app.py is only a compatibility facade; the concrete chooser lives in FilesMixin.
 app_source = Path("app.py").read_text(encoding="utf-8")
-choose_start = app_source.index("    def choose_diary_files")
-choose_end = app_source.index("    def _diary_template_label_text", choose_start)
-choose_source = app_source[choose_start:choose_end]
-assert "prompt_diary_calendar_principle" in choose_source
-assert "self._activate_diary_calendar_mode()" in choose_source
-assert "filedialog.askopenfilename" not in choose_source
-assert "filedialog.askdirectory" not in choose_source
-assert 'source="старый набор 01–31"' in app_source
-assert 'source="старый файл дат"' in app_source
+files_source = Path("files_mixin.py").read_text(encoding="utf-8")
+choose_start = files_source.index("    def choose_diary_files")
+choose_end = files_source.index("    @staticmethod", choose_start)
+choose_source = files_source[choose_start:choose_end]
+assert "filedialog.askopenfilename" in choose_source
+assert "filedialog.askdirectory" in choose_source
+assert "self._set_manual_diary_template_file(selected)" in choose_source
+assert "self._set_numbered_diary_template_dir(folder" in choose_source
+app_choose_start = app_source.index("    def choose_diary_files")
+app_choose_end = app_source.index("    def _diary_template_label_text", app_choose_start)
+assert "super().choose_diary_files()" in app_source[app_choose_start:app_choose_end]
 
 # --- Diary text auto-selection by diagnosis filename ---
 from diary_text_selection import (

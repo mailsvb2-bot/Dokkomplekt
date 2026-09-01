@@ -27,6 +27,47 @@ class ActionsCreationFolderingMixin:
                     existing.append(candidate)
         return existing
 
+    def _existing_all_targets(
+        self,
+        review,
+        selected_medical: list[str],
+        selected_custom: list[str] | None = None,
+        selected_diaries: bool = False,
+    ) -> list[Path]:
+        """Find collisions for every block-03 output type, not legacy medical only."""
+        out_dir = Path(review.output_dir or self._result_output_dir()).expanduser()
+        existing = list(self._existing_medical_targets(review, selected_medical))
+        names: set[str] = set()
+        try:
+            if selected_custom:
+                from universal_generation import render_output_name
+                case = self._current_universal_patient_case()
+                for document in self._selected_custom_document_specs(selected_custom):
+                    if getattr(document, "category", "") == "diaries":
+                        selected_diaries = True
+                        continue
+                    names.add(render_output_name(
+                        document, case,
+                        output_language=self._effective_output_language(),
+                        spellcheck_enabled=bool(getattr(self, "spellcheck_enabled_var", None) and self.spellcheck_enabled_var.get()),
+                    ))
+        except Exception as exc:
+            record_soft_exception("actions_creation_foldering.custom_collision_names", exc)
+        if selected_diaries:
+            from diary_paths import make_diary_output_name, safe_filename_part
+            names.add(make_diary_output_name(safe_filename_part(review.patient_stem()), file_index=1, total_files=1))
+        seen = {str(path).casefold() for path in existing}
+        for name in names:
+            direct = out_dir / name
+            candidates = [direct]
+            candidates.extend(out_dir.glob(direct.stem + " (*).docx"))
+            candidates.extend(out_dir.glob(direct.stem + "_*.docx"))
+            for candidate in candidates:
+                if candidate.exists() and str(candidate).casefold() not in seen:
+                    existing.append(candidate)
+                    seen.add(str(candidate).casefold())
+        return existing
+
     def _versioned_output_dir(self, out_dir: Path, patient_stem: str) -> Path:
         date_part = datetime.now().strftime("%Y-%m-%d")
         base = out_dir / f"{safe_filename(patient_stem)}_{date_part}_версия"
@@ -92,8 +133,10 @@ class ActionsCreationFolderingMixin:
         path.rename(candidate)
         return candidate
 
-    def _apply_duplicate_policy(self, review, selected_medical: list[str]) -> bool:
-        existing = self._existing_medical_targets(review, selected_medical)
+    def _apply_duplicate_policy(
+        self, review, selected_medical: list[str], selected_custom: list[str] | None = None, selected_diaries: bool = False
+    ) -> bool:
+        existing = self._existing_all_targets(review, selected_medical, selected_custom, selected_diaries)
         if not existing:
             return True
         policy = self._prompt_duplicate_policy(existing)
