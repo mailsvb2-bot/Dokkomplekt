@@ -39,7 +39,7 @@ def test_custom_diary_requires_actual_text_file_before_wizard(tmp_path: Path, mo
     monkeypatch.setattr(diary_creation_wizard, "confirm_diary_creation", forbidden_confirm)
     app = _CustomDiaryHarness(str(tmp_path))
 
-    with pytest.raises(ValueError, match="DOC"):
+    with pytest.raises(ValueError, match="текстами дневников"):
         app._create_custom_diary_documents_impl(current_pack=None, case=_Case(), diary_ids=["daily_diary"], out_dir=tmp_path)
 
     assert app.auto_called
@@ -47,12 +47,6 @@ def test_custom_diary_requires_actual_text_file_before_wizard(tmp_path: Path, mo
 
 
 def test_patient_data_to_case_preserves_combined_vk_mse_work_position() -> None:
-    data = PatientData(
-        vk_mse_work_org="ACME",
-        vk_mse_position="manager",
-        vk_mse_work_position="ACME / manager",
-    )
-
+    data = PatientData(vk_mse_work_org="ACME", vk_mse_position="manager", vk_mse_work_position="ACME / manager")
     case = patient_data_to_case(data)
-
     assert case.get("vk_mse.work_position") == "ACME / manager"

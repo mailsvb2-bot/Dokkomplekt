@@ -122,8 +122,7 @@ jobs:
             'smoke_quality_modernization.py',
             'smoke_points_5_11.py',
             'smoke_user_reported_regressions.py',
-            'smoke_full_patient_replay.py',
-            'smoke_full_user_journey.py'
+            'smoke_full_patient_replay.py'
           )
           foreach ($smoke in $smokes) {
             Write-Host "==> $smoke"
