@@ -122,7 +122,8 @@ jobs:
             'smoke_quality_modernization.py',
             'smoke_points_5_11.py',
             'smoke_user_reported_regressions.py',
-            'smoke_full_patient_replay.py'
+            'smoke_full_patient_replay.py',
+            'smoke_full_user_journey.py'
           )
           foreach ($smoke in $smokes) {
             Write-Host "==> $smoke"
@@ -168,6 +169,13 @@ jobs:
           $code=$LASTEXITCODE
           Get-Content packaged-runtime-bundle.log
           exit $code
+      - name: Smoke packaged EXE full user journey
+        shell: pwsh
+        run: |
+          & .\dist\MedicalDiaryAutofill.exe --check-user-journey *> packaged-user-journey.log
+          $code=$LASTEXITCODE
+          Get-Content packaged-user-journey.log
+          exit $code
       - name: Build clean source archive
         run: python make_release_zip.py
       - name: Upload EXE artifact
@@ -206,4 +214,5 @@ jobs:
           path: |
             packaged-native-verifier.log
             packaged-runtime-bundle.log
+            packaged-user-journey.log
           if-no-files-found: ignore
