@@ -222,11 +222,10 @@ class FilesMixin:
                 self.data.discharge_date = popup_discharge_after_prompt
         else:
             self._set_status("Первичный осмотр распознан. Popup не требуется.")
-        # После того как диагноз и дата поступления точно подтянуты, пробуем
-        # автоматически подобрать тексты дневников по названию диагноза и
-        # конкретный 01–31-шаблон по дате госпитализации.
+        # После того как диагноз и дата поступления точно подтянуты,
+        # автоматически подбираем только тексты дневников по диагнозу.
+        # Даты строятся подтверждённым календарём программы.
         self._auto_select_diary_text_by_diagnosis(ask_folder=False)
-        self._auto_select_numbered_diary_template(ask_folder=False)
         try:
             from doctor_action_journal import append_doctor_action
             append_doctor_action(

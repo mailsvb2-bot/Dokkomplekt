@@ -489,14 +489,13 @@ class DesktopIntakeMixin:
 
         Desktop intake first moves the primary DOCX into the patient subfolder.
         Only after that do we know the final output/navigation roots.  This
-        method intentionally reruns the old diary selectors so the legacy
-        behaviour stays intact, but now also works from the intake folder.
+        method refreshes diary text discovery after the move. Diary dates are
+        generated from the confirmed program calendar, not numbered DOCX files.
         """
         try:
             if not current_semantic_date(self, "admission_date"):
                 self._sync_admission_date_from_title(force=True)
             self._auto_select_diary_text_by_diagnosis(ask_folder=False)
-            self._auto_select_numbered_diary_template(ask_folder=False)
         except Exception as exc:
             record_soft_exception("desktop_intake_mixin:refresh_diary_inputs", exc)
 

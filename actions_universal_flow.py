@@ -130,9 +130,10 @@ class ActionsUniversalFlowMixin:
         add("vk_mse.protocol_number", var_text("vk_protocol_number_var"))
         vk_mse_work = var_text("vk_mse_work_org_var")
         vk_mse_position = var_text("vk_mse_position_var")
+        vk_mse_combined = var_text("vk_mse_work_position_var") or ", ".join(part for part in (vk_mse_work, vk_mse_position) if part)
         add("vk_mse.work", vk_mse_work)
         add("vk_mse.position", vk_mse_position)
-        add("vk_mse.work_position", ", ".join(part for part in (vk_mse_work, vk_mse_position) if part))
+        add("vk_mse.work_position", vk_mse_combined)
         add("sick_leave_vk.protocol_number", var_text("sick_leave_vk_protocol_number_var"))
         add("sick_leave_vk.work", var_text("sick_leave_vk_work_org_var"))
         add("sick_leave_vk.position", var_text("sick_leave_vk_position_var"))
@@ -260,9 +261,24 @@ class ActionsUniversalFlowMixin:
                 regular_ids.append(document_id)
         return diary_ids, regular_ids
 
+    def _ensure_diary_text_files_for_creation(self) -> None:
+        """Ensure diary generation has concrete text files, not only a remembered folder."""
+        if getattr(self, "status_files", None):
+            return
+        auto_select = getattr(self, "_auto_select_diary_text_by_diagnosis", None)
+        if callable(auto_select) and auto_select(ask_folder=False) and getattr(self, "status_files", None):
+            return
+        chooser = getattr(self, "choose_status_files", None)
+        if callable(chooser):
+            chooser()
+        if not getattr(self, "status_files", None):
+            raise ValueError(
+                "Выберите файл(ы) с текстами дневников. Тексты должны быть фактически выбранными DOC/DOCX/DOCM из папки текстов дневников; одна сохранённая папка без файла не используется."
+            )
+
     def _create_custom_diary_documents_impl(self, current_pack, case, diary_ids: List[str], out_dir) -> List[Path]:
-        if not self.status_files:
-            self._auto_select_diary_text_by_diagnosis(ask_folder=False)
+        """Create doctor-owned custom diary documents with confirmed text files and calendar settings."""
+        self._ensure_diary_text_files_for_creation()
 
         from diary_creation_wizard import confirm_diary_creation, current_diary_calendar_schedule
 
@@ -283,6 +299,13 @@ class ActionsUniversalFlowMixin:
         data = getattr(self, "data", None)
         sick_leave_yes = self._normalize_yes_no(getattr(self, "expert_sick_leave_needed_var", None).get() if getattr(self, "expert_sick_leave_needed_var", None) else "") == "да"
         treatment_correction = str(getattr(getattr(self, "diary_treatment_correction_var", None), "get", lambda: "")() or "").strip()
+        profile_status = str(
+            getattr(data, "profile_status", "")
+            or getattr(data, "mental_status", "")
+            or case.get("status.specialty")
+            or case.get("status.objective")
+            or ""
+        )
         from universal_diary_generation import render_diary_documents_from_pack
 
         result = render_diary_documents_from_pack(
@@ -312,7 +335,7 @@ class ActionsUniversalFlowMixin:
             birth_date=str(getattr(data, "birth", "") or case.get("patient.birth_date") or ""),
             complaints=str(getattr(data, "complaints", "") or case.get("complaints") or ""),
             treatment=str(getattr(data, "treatment_plan", "") or case.get("treatment.plan") or ""),
-            profile_status=str(getattr(data, "mental_status", "") or case.get("mental_status") or ""),
+            profile_status=profile_status,
             sick_leave_from=current_semantic_date(self, "expert_sick_leave_from") or case.get("expert.sick_leave_from"),
         )
         if result.skipped:

@@ -32,38 +32,56 @@ def _not_working_value(value: str) -> bool:
 
 
 class RegressionStateOverlayMixin:
+    def _activate_diary_calendar_mode(self, *, source: str = "") -> bool:
+        """Use one canonical diary-date model: the confirmed program calendar."""
+        from diary_constants import DIARY_KIND
+
+        self.diary_files = []
+        self.diary_template_dir = ""
+        self._diary_files_auto_selected = False
+        try:
+            self.output_vars[DIARY_KIND].set(True)
+        except Exception as exc:
+            record_soft_exception("app.diary_calendar_select_output", exc)
+        try:
+            self._update_diary_template_label(success=True)
+            self._redraw_selection_controls()
+        except Exception as exc:
+            record_soft_exception("app.diary_calendar_refresh_ui", exc)
+        try:
+            if hasattr(self, "_update_selected_outputs_status"):
+                self._update_selected_outputs_status()
+        except Exception as exc:
+            record_soft_exception("app.diary_calendar_status", exc)
+        try:
+            suffix = f" Источник: {source}." if source else ""
+            self._log(
+                "\n✅ Даты дневников: календарь программы (+1/+2/...), "
+                f"без шаблона дат.{suffix}\n"
+            )
+        except Exception as exc:
+            record_soft_exception("app.diary_calendar_log", exc)
+        return True
+
     def _auto_select_numbered_diary_template(self, *, ask_folder: bool = False) -> bool:
-        """Legacy numbered diary date templates are not part of the visible flow."""
+        """Legacy numbered diary date templates are isolated from production."""
         return False
+
+    def _set_numbered_diary_template_dir(self, folder, *, auto_select: bool = True, warn_if_missing: bool = False) -> bool:
+        """Treat a legacy numbered-template drop as a request for diary dates."""
+        return self._activate_diary_calendar_mode(source="старый набор 01–31")
+
+    def _set_manual_diary_template_file(self, selected) -> bool:
+        """Treat a legacy date-template file as a request for calendar dates."""
+        return self._activate_diary_calendar_mode(source="старый файл дат")
 
     def choose_diary_files(self) -> None:
         """The Dates button confirms the program calendar principle only."""
         try:
-            from diary_constants import DIARY_KIND
             from diary_creation_wizard import prompt_diary_calendar_principle
             if not prompt_diary_calendar_principle(self):
                 return None
-            self.diary_files = []
-            self.diary_template_dir = ""
-            self._diary_files_auto_selected = False
-            try:
-                self.output_vars[DIARY_KIND].set(True)
-            except Exception as exc:
-                record_soft_exception("app.diary_calendar_select_output", exc)
-            try:
-                self._update_diary_template_label(success=True)
-                self._redraw_selection_controls()
-            except Exception as exc:
-                record_soft_exception("app.diary_calendar_refresh_ui", exc)
-            try:
-                if hasattr(self, "_update_selected_outputs_status"):
-                    self._update_selected_outputs_status()
-            except Exception as exc:
-                record_soft_exception("app.diary_calendar_status", exc)
-            try:
-                self._log("\n✅ Принцип дат дневников подтверждён: календарь программы (+1/+2/...), без шаблона дат.\n")
-            except Exception as exc:
-                record_soft_exception("app.diary_calendar_log", exc)
+            self._activate_diary_calendar_mode()
             return None
         except Exception as exc:
             record_soft_exception("app.choose_diary_calendar_principle", exc)

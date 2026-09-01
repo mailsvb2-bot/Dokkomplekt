@@ -551,6 +551,13 @@ def import_document_pack_zip(source_zip: str | Path, target_dir: str | Path) -> 
 
     with zipfile.ZipFile(source, "r") as zf:
         infos = zf.infolist()
+        # On Windows ``zipfile`` normalizes backslashes in ``filename`` while
+        # preserving the archive's original member name in ``orig_filename``.
+        # Validate both representations before using any member so a crafted
+        # archive cannot bypass path checks through platform normalization.
+        for info in infos:
+            _assert_safe_zip_name(str(getattr(info, "orig_filename", info.filename)))
+            _assert_safe_zip_name(info.filename)
         names = [info.filename for info in infos]
         if PACK_MANIFEST_NAME not in names:
             raise ValueError("В medpack-архиве нет pack.json.")
@@ -559,8 +566,6 @@ def import_document_pack_zip(source_zip: str | Path, target_dir: str | Path) -> 
         total_size = sum(max(0, info.file_size) for info in infos)
         if total_size > 100 * 1024 * 1024:
             raise ValueError("medpack-архив слишком большой для безопасного импорта.")
-        for name in names:
-            _assert_safe_zip_name(name)
         manifest_data = json.loads(zf.read(PACK_MANIFEST_NAME).decode("utf-8"))
         if not isinstance(manifest_data, dict):
             raise ValueError("pack.json внутри medpack должен содержать JSON-объект.")
@@ -849,6 +854,7 @@ def _assert_safe_zip_name(name: str) -> None:
         or ".." in path.parts
         or normalized.startswith(("/", "\\"))
         or "\\" in normalized
+        or "\x00" in normalized
         or ":" in first_part
     ):
         raise ValueError(f"Небезопасный путь внутри medpack: {name}")

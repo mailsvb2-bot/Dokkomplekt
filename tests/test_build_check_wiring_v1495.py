@@ -39,6 +39,12 @@ def test_build_checks_are_wired_into_ci_and_release_gate():
 
     assert "test_regression_state_overlay_v1491.py" in runner
     assert "smoke_user_reported" in runner
+    assert "$PSNativeCommandUseErrorActionPreference = $true" in workflow
+    assert "Smoke gate failed: $smoke" in workflow
+    assert "if ($LASTEXITCODE -ne 0)" in workflow
+    assert "contents: write" not in workflow
+    assert "git push origin HEAD:main" not in workflow
+    assert "apply-hotfix" not in workflow
 
 
 def test_release_metadata_and_hotfix_notes_stay_synchronized():

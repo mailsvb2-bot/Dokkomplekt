@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Sequence
 
+from document_output_format import export_docx_to_pdf, normalize_output_format
 from medical_formatting import redact_technical_text, technical_ref
 from universal_fields import PatientCase, normalize_field_id
 from universal_profiles import DocumentPack, DocumentTemplateSpec
@@ -243,8 +244,9 @@ def render_documents_from_pack(
     strict: bool = True,
     output_language: str = "auto",
     spellcheck_enabled: bool = True,
+    output_format: str = "docx",
 ) -> PackGenerationResult:
-    """Render selected custom DOCX documents from a DocumentPack."""
+    """Render selected custom documents from a DocumentPack as Word or PDF."""
 
     output_root = Path(output_dir).expanduser()
     if output_root.exists() and not output_root.is_dir():
@@ -258,6 +260,7 @@ def render_documents_from_pack(
     warnings: list[str] = []
     reserved_output_names: dict[str, int] = {}
     reserved_output_paths: set[str] = set()
+    requested_format = normalize_output_format(output_format)
     for unknown_id in sorted(selected - known_ids):
         skipped.append(f"Неизвестный документ профиля: {unknown_id}")
     for document in pack.documents:
@@ -272,10 +275,10 @@ def render_documents_from_pack(
             skipped.append(f"{document.button_label}: не заполнены поля {', '.join(missing)}")
             continue
         rendered_name = render_output_name(document, case, output_language=output_language, spellcheck_enabled=spellcheck_enabled)
-        out_path = _available_batch_path(output_root / rendered_name, reserved_output_names, reserved_output_paths)
+        docx_path = _available_batch_path(output_root / rendered_name, reserved_output_names, reserved_output_paths)
         result = render_template_to_docx(
             template_path=template_path,
-            output_path=out_path,
+            output_path=docx_path,
             case=case,
             document=document,
             strict=strict,
@@ -283,7 +286,13 @@ def render_documents_from_pack(
             spellcheck_enabled=spellcheck_enabled,
         )
         renders.append(result)
-        created.append(result.output_path)
+        final_path = Path(result.output_path)
+        if requested_format == "pdf":
+            try:
+                final_path = export_docx_to_pdf(final_path)
+            except Exception as exc:
+                warnings.append(f"{document.button_label}: PDF export failed, Word file kept: {exc}")
+        created.append(str(final_path))
         if result.missing_fields:
             warnings.append(f"{document.button_label}: placeholders без значения: {', '.join(result.missing_fields)}")
     return PackGenerationResult(tuple(created), tuple(renders), tuple(skipped), tuple(dict.fromkeys(warnings)))

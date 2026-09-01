@@ -28,7 +28,10 @@ compact_data2 = service.parser.parse_text("""
 Диагноз: K35.8 тест
 """)
 assert compact_data2.fio == "Сидоров Сергей Петрович", compact_data2.fio
-assert compact_data2.birth == "1980 г.р", compact_data2.birth
+# Parser stores the semantic birth value without presentation suffixes; renderers
+# add exactly one ``г.р.`` via format_birth_for_person_line().
+assert compact_data2.birth == "1980", compact_data2.birth
+assert format_birth_for_person_line(compact_data2.birth) == "1980 г.р."
 assert compact_data2.registered == "Нижний Новгород, ул. Тестовая, д. 1", compact_data2.registered
 
 referral_kind = service.parser.parse_text("""

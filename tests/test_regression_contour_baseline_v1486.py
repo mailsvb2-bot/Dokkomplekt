@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import zipfile
 
 from docx import Document
+import pytest
 
 from actions_universal_flow import ActionsUniversalFlowMixin
 from desktop_patient_folder import PrimaryPatientFolderInfo, build_patient_folder_name_from_info, folder_naming_uses_discharge_date
@@ -247,3 +250,16 @@ def test_medpack_export_import_keeps_template_paths_portable_and_buttons_profile
     assert imported_doc.template.startswith("templates/")
     assert str(tmp_path) not in imported_doc.template
     assert copied.exists()
+
+
+def test_medpack_import_rejects_original_backslash_member_name(tmp_path: Path) -> None:
+    archive = tmp_path / "unsafe.medpack.zip"
+    pack = DocumentPack(pack_id="doctor.unsafe", name="Unsafe fixture")
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("pack.json", json.dumps(pack.to_dict(), ensure_ascii=False))
+        unsafe_entry = zipfile.ZipInfo("templates/placeholder.docx")
+        unsafe_entry.filename = "templates\\evil.docx"
+        zf.writestr(unsafe_entry, b"bad")
+
+    with pytest.raises(ValueError, match="Небезопасный путь"):
+        import_document_pack_zip(archive, tmp_path / "unsafe-import")

@@ -9,84 +9,66 @@ from medical_constants import TEMPLATE_FILES as _legacy_template_files
 def _legacy_fixed_templates_available() -> bool:
     return all((_legacy_template_dir() / filename).exists() for filename in _legacy_template_files.values())
 
-# --- Diary columns regression: no birth year, month/year from admission title date ---
-column_dir = OUT / "diary_column_regression"
-column_dir.mkdir(parents=True, exist_ok=True)
-column_texts = column_dir / "texts.docx"
-column_text_doc = Document()
-column_text_doc.add_paragraph("01.01.2026 Пациент был спокоен, жалоб не предъявлял, в беседе доступен, инструкции выполнял.")
-column_text_doc.save(column_texts)
-column_template = column_dir / "13.docx"
-column_template_doc = Document()
-column_table = column_template_doc.add_table(rows=1, cols=4)
-for i, h in enumerate(["День госпитализации", "Число", "Месяц/Год", "Дневник наблюдения"]):
-    column_table.rows[0].cells[i].text = h
-for day in [13, 14, 15, 1]:
-    row = column_table.add_row()
-    row.cells[0].text = ""
-    row.cells[1].text = f"{day:02d}"
-    row.cells[2].text = ""
-    row.cells[3].text = "Лечащий врач Балаганин С.В."
-column_template_doc.save(column_template)
-column_result = fill_diary_batch(
-    status_files=[column_texts],
-    diary_files=[column_template],
-    output_dir=column_dir / "out",
+# --- Text diary calendar regression: dates come from admission + confirmed offsets ---
+calendar_dir = OUT / "diary_calendar_regression"
+calendar_dir.mkdir(parents=True, exist_ok=True)
+calendar_texts = calendar_dir / "texts.docx"
+calendar_text_doc = Document()
+calendar_text_doc.add_paragraph("Пациент спокоен, жалоб не предъявляет, в беседе доступен, инструкции выполняет.")
+calendar_text_doc.save(calendar_texts)
+calendar_result = fill_diary_batch(
+    status_files=[calendar_texts],
+    diary_files=[],
+    output_dir=calendar_dir / "out",
     patient_name="Сидоров Иван Михайлович",
     gender_source_name="Сидоров Иван Михайлович",
     admission_value="12.01.2026",
     discharge_value="",
     repeat_statuses=True,
-    reset_each_file=True,
-    keep_signature=True,
-    fill_months=True,
-    force_final_diary=True,
-    remove_holiday_rows=True,
+    force_final_diary=False,
+    diary_day_offsets=(1, 2, 3, 20),
 )
-column_out_doc = Document(column_result.created_files[0])
-column_values = [(row.cells[1].text.strip(), row.cells[2].text.strip()) for row in column_out_doc.tables[0].rows[1:]]
-assert column_values[:4] == [("13", "01.2026"), ("14", "01.2026"), ("15", "01.2026"), ("01", "02.2026")]
-assert "2000" not in "\n".join("\t".join(cell.text for cell in row.cells) for row in column_out_doc.tables[0].rows)
+calendar_out_doc = Document(calendar_result.created_files[0])
+assert not calendar_out_doc.tables, "Production diary output must remain text-only"
+calendar_lines = [p.text.strip() for p in calendar_out_doc.paragraphs if p.text.strip()]
+for expected_date in ("13.01.26", "14.01.26", "15.01.26", "01.02.26"):
+    assert any(line.startswith(expected_date + " ") for line in calendar_lines), expected_date
+assert "2000" not in "\n".join(calendar_lines)
 
-
-# --- Diary date columns regression: use admission date from title, never birth date ---
-real_column_dir = OUT / "diary_real_date_columns"
+# --- Admission date wins over birth date and drives the text calendar ---
+real_column_dir = OUT / "diary_real_date_calendar"
 real_column_dir.mkdir(parents=True, exist_ok=True)
+real_primary = real_column_dir / "primary.docx"
+real_primary_doc = Document()
+real_primary_doc.add_paragraph("15.04.2026 Первичный осмотр")
+real_primary_doc.add_paragraph("Ф.И.О.: Сидоров Иван Михайлович, Дата рождения: 01.01.2000")
+real_primary_doc.add_paragraph("Диагноз: K35.8 тест")
+real_primary_doc.save(real_primary)
+real_primary_data = MedicalDocumentService().parse_primary_document(real_primary)
+assert real_primary_data.admission_date == "15.04.2026", real_primary_data.admission_date
+assert real_primary_data.birth == "01.01.2000", real_primary_data.birth
 real_texts = real_column_dir / "texts.docx"
 real_text_doc = Document()
 real_text_doc.add_paragraph("Состояние стабильное. Жалоб активно не предъявляет. Поведение упорядочено. Сон и аппетит достаточные.")
 real_text_doc.save(real_texts)
-real_template = real_column_dir / "15.docx"
-real_template_doc = Document()
-real_table = real_template_doc.add_table(rows=1, cols=4)
-for i, h in enumerate(["День госпитализации", "Число", "Месяц/Год", "Дневник наблюдения"]):
-    real_table.rows[0].cells[i].text = h
-for hospital_day, old_day, old_month in [(2, "05", "01.2000"), (3, "06", "01.2000"), (4, "07", "01.2000"), (7, "09", "01.2000"), (11, "14", "01.2000")]:
-    row = real_table.add_row()
-    row.cells[0].text = str(hospital_day)
-    row.cells[1].text = old_day
-    row.cells[2].text = old_month
-    row.cells[3].text = "Лечащий врач Балаганин С.В."
-real_template_doc.save(real_template)
 real_result = fill_diary_batch(
     status_files=[real_texts],
-    diary_files=[real_template],
+    diary_files=[],
     output_dir=real_column_dir / "out",
     patient_name="Сидоров Иван Михайлович",
     gender_source_name="Сидоров Иван Михайлович",
-    admission_value="15.04.2026",
+    admission_value=real_primary_data.admission_date,
     discharge_value="",
     repeat_statuses=True,
-    reset_each_file=True,
-    keep_signature=True,
-    fill_months=True,
     force_final_diary=False,
-    remove_holiday_rows=False,
+    diary_day_offsets=(1, 2, 3, 6, 10),
 )
 real_out_doc = Document(real_result.created_files[0])
-real_values = [(row.cells[0].text.strip(), row.cells[1].text.strip(), row.cells[2].text.strip()) for row in real_out_doc.tables[0].rows[1:]]
-assert real_values[:5] == [("2", "16", "04.2026"), ("3", "17", "04.2026"), ("4", "18", "04.2026"), ("7", "21", "04.2026"), ("11", "25", "04.2026")]
-assert "01.2000" not in "\n".join("\t".join(cell.text for cell in row.cells) for row in real_out_doc.tables[0].rows)
+assert not real_out_doc.tables
+real_lines = [p.text.strip() for p in real_out_doc.paragraphs if p.text.strip()]
+for expected_date in ("16.04.26", "17.04.26", "18.04.26", "21.04.26", "25.04.26"):
+    assert any(line.startswith(expected_date + " ") for line in real_lines), expected_date
+assert "01.01.2000" not in "\n".join(real_lines)
 
 from icd10_f import assert_icd10_full_catalog_lock, format_diagnosis
 from medical_language_catalog import SUPPORTED_LANGUAGE_IDS
@@ -101,64 +83,33 @@ for _lang in SUPPORTED_LANGUAGE_IDS:
     _matches = search_icd10_f("K35", language_id=_lang, limit=1)
     assert _matches and format_diagnosis(_matches[0], language_id=_lang), _lang
 
-# --- Diary columns regression: rows with empty calendar-day column but filled hospitalization-day column are filled ---
-blank_day_dir = OUT / "diary_blank_calendar_day_regression"
+# --- No date-template file is required: program calendar is self-sufficient ---
+blank_day_dir = OUT / "diary_without_date_template"
 blank_day_dir.mkdir(parents=True, exist_ok=True)
 blank_texts = blank_day_dir / "texts.docx"
 blank_text_doc = Document()
 blank_text_doc.add_paragraph("Пациент спокоен, жалоб не предъявляет, контакт доступен, сон и аппетит достаточные.")
 blank_text_doc.save(blank_texts)
-blank_template = blank_day_dir / "15.docx"
-blank_template_doc = Document()
-blank_table = blank_template_doc.add_table(rows=1, cols=4)
-for i, h in enumerate(["День госпитализации", "Число", "Месяц/Год", "Дневник наблюдения"]):
-    blank_table.rows[0].cells[i].text = h
-for hosp_day in [2, 3, 4, 7, 11]:
-    row = blank_table.add_row()
-    row.cells[0].text = str(hosp_day)
-    row.cells[1].text = ""
-    row.cells[2].text = ""
-    row.cells[3].text = "Лечащий врач Балаганин С.В."
-blank_template_doc.save(blank_template)
 blank_result = fill_diary_batch(
     status_files=[blank_texts],
-    diary_files=[blank_template],
+    diary_files=[],
     output_dir=blank_day_dir / "out",
     patient_name="Сидоров Иван Михайлович",
     gender_source_name="Сидоров Иван Михайлович",
     admission_value="15.04.2026",
-    discharge_value="",
+    discharge_value="25.04.2026",
     repeat_statuses=True,
-    reset_each_file=True,
-    fill_months=True,
-    force_final_diary=False,
-    open_result_folder=False,
+    force_final_diary=True,
+    diary_day_offsets=(1, 2, 3, 6, 10, 14),
 )
 blank_doc = Document(blank_result.created_files[0])
-blank_values = [(row.cells[1].text.strip(), row.cells[2].text.strip()) for row in blank_doc.tables[0].rows[1:]]
-assert blank_values[:5] == [("16", "04.2026"), ("17", "04.2026"), ("18", "04.2026"), ("21", "04.2026"), ("25", "04.2026")], blank_values[:5]
-
-
-# --- Numbered diary template lookup regression: extensionless filenames 1/01 are accepted ---
-extless_dir = OUT / "extensionless_numbered_templates"
-extless_dir.mkdir(parents=True, exist_ok=True)
-extless_template = extless_dir / "02"
-extless_doc = Document()
-extless_table = extless_doc.add_table(rows=1, cols=4)
-for i, h in enumerate(["День госпитализации", "Число", "Месяц/Год", "Дневник наблюдения"]):
-    extless_table.rows[0].cells[i].text = h
-extless_row = extless_table.add_row()
-extless_row.cells[0].text = "2"
-extless_row.cells[1].text = ""
-extless_row.cells[2].text = ""
-extless_row.cells[3].text = "Лечащий врач Балаганин С.В."
-extless_doc.save(extless_template)
-lookup_app = _main_module.CombinedMedicalDiaryApp.__new__(_main_module.CombinedMedicalDiaryApp)
-found_extless = lookup_app._find_numbered_diary_template(extless_dir, 2)
-assert found_extless is not None and found_extless.name == "02", found_extless
-assert _main_module.CombinedMedicalDiaryApp._template_filename_day(extless_template) == 2
-
-
+assert not blank_doc.tables
+blank_lines = [p.text.strip() for p in blank_doc.paragraphs if p.text.strip()]
+for expected_date in ("16.04.26", "17.04.26", "18.04.26", "21.04.26"):
+    assert any(line.startswith(expected_date + " ") for line in blank_lines), expected_date
+assert any(line.startswith("25.04.26 Состояние улучшилось") for line in blank_lines)
+assert not any(line.startswith("26.04.26") for line in blank_lines)
+assert blank_result.final_rows_filled == 1
 
 # --- Production settings regression: corrupted settings are quarantined, patient data is never persisted ---
 settings_app = _main_module.CombinedMedicalDiaryApp.__new__(_main_module.CombinedMedicalDiaryApp)
@@ -669,7 +620,7 @@ bad_status_txt.write_text("Пациент спокоен", encoding="utf-8")
 try:
     fill_diary_batch(
         status_files=[bad_status_txt],
-        diary_files=[blank_template],
+        diary_files=[],
         output_dir=OUT / "bad_status_out",
         patient_name="Сидоров Иван Иванович",
         admission_value="15.04.2026",
@@ -683,7 +634,7 @@ except ValueError as exc:
 try:
     fill_diary_batch(
         status_files=[blank_texts],
-        diary_files=[blank_template],
+        diary_files=[],
         output_dir=OUT / "bad_diary_date_order",
         patient_name="Сидоров Иван Иванович",
         admission_value="15.04.2026",
@@ -697,7 +648,7 @@ except ValueError as exc:
 
 space_output_result = fill_diary_batch(
     status_files=[blank_texts],
-    diary_files=[blank_template],
+    diary_files=[],
     output_dir="   ",
     patient_name="Сидоров Иван Иванович",
     admission_value="15.04.2026",
@@ -706,12 +657,12 @@ space_output_result = fill_diary_batch(
     force_final_diary=False,
     open_result_folder=False,
 )
-assert space_output_result.created_files[0].parent == blank_template.parent
-assert all(path.parent == blank_template.parent for path in space_output_result.created_files)
+assert space_output_result.created_files[0].parent == blank_texts.parent
+assert all(path.parent == blank_texts.parent for path in space_output_result.created_files)
 # Windows/Win32 normalizes paths made only of trailing spaces in a platform-specific
 # way, so checking Path("   ").exists() is not portable. The contract we need is
 # stronger and user-visible: a blank/whitespace output_dir must fall back to the
-# diary template folder and all generated files must be placed there.
+# diary-text source folder and all generated files must be placed there.
 
 
 
@@ -752,7 +703,7 @@ diary_file_output_target.write_text("I am a file, not an output directory", enco
 try:
     fill_diary_batch(
         status_files=[blank_texts],
-        diary_files=[blank_template],
+        diary_files=[],
         output_dir=diary_file_output_target,
         patient_name="Сидоров Иван Иванович",
         admission_value="15.04.2026",
@@ -764,9 +715,9 @@ try:
 except ValueError as exc:
     assert "Папка результата" in str(exc), str(exc)
 
-duplicate_diary_file_result = fill_diary_batch(
+calendar_only_result = fill_diary_batch(
     status_files=[blank_texts],
-    diary_files=[blank_template, blank_template],
+    diary_files=[],
     output_dir=OUT / "duplicate_diary_input",
     patient_name="Сидоров Иван Иванович",
     admission_value="15.04.2026",
@@ -774,12 +725,12 @@ duplicate_diary_file_result = fill_diary_batch(
     force_final_diary=False,
     open_result_folder=False,
 )
-assert len(duplicate_diary_file_result.created_files) == 1, duplicate_diary_file_result.created_files
+assert len(calendar_only_result.created_files) == 1, calendar_only_result.created_files
 
 try:
     fill_diary_batch(
         status_files=["   "],
-        diary_files=[blank_template],
+        diary_files=[],
         output_dir=OUT / "blank_status_path",
         patient_name="Сидоров Иван Иванович",
         admission_value="15.04.2026",

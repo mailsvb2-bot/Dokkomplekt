@@ -93,11 +93,9 @@ class ActionsNavigationMixin:
                     data.case_number = ""
             if data.diagnosis and (not self._manual_diagnosis or not self.diagnosis_var.get().strip()):
                 self._set_ui_var(self.diagnosis_var, normalize_diagnosis_with_icd10(data.diagnosis, language_id=self._diagnosis_language() if hasattr(self, "_diagnosis_language") else "ru"))
-            # Если папки уже известны, автоматически подставляем:
-            # 1) текст дневников по названию диагноза;
-            # 2) конкретный 01–31 DOCX-шаблон по дате госпитализации.
+            # Если папки уже известны, автоматически подставляем только
+            # текст дневников по диагнозу. Даты строит календарь программы.
             self._auto_select_diary_text_by_diagnosis(ask_folder=False)
-            self._auto_select_numbered_diary_template(ask_folder=False)
             self._set_preview(_format_preview_lazy(data))
             self._log(f"\n✅ Первичный документ прочитан ({data.input_document_kind or 'тип не определён'}). Данные подтянуты в общую карточку пациента.\n")
         except Exception as exc:
