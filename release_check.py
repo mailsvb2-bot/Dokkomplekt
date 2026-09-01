@@ -279,6 +279,9 @@ def _assert_build_contract() -> None:
     ]:
         if snippet not in workflow:
             raise SystemExit(f"GitHub Actions workflow misses production snippet: {snippet}")
+    for forbidden in ["contents: write", "git push origin HEAD:main", "apply-hotfix"]:
+        if forbidden in workflow:
+            raise SystemExit(f"GitHub Actions workflow must not mutate main during CI: {forbidden}")
     attrs = (ROOT / ".gitattributes").read_text(encoding="utf-8", errors="replace")
     for snippet in ["*.py text eol=lf", "*.bat text eol=crlf", "*.docx binary", "*.zip binary"]:
         if snippet not in attrs:

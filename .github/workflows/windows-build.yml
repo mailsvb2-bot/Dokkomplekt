@@ -16,37 +16,7 @@ concurrency:
 
 jobs:
 
-  apply-hotfix:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    if: github.event_name == 'push' && github.ref_name == 'main'
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout main
-        uses: actions/checkout@v4
-        with:
-          ref: main
-      - name: Apply regression hotfix to main
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat tools/apply_v1502_hotfix.part1 tools/apply_v1502_hotfix.part2 > tools/apply_v1502_hotfix.py
-          python tools/apply_v1502_hotfix.py
-          if git diff --quiet; then
-            echo "source already applied"
-            exit 0
-          fi
-          python -m py_compile tools/apply_v1502_hotfix.py
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add desktop_intake.py desktop_intake_agent.py actions_creation_maintenance.py desktop_intake_mixin.py diary_text_selection.py files_mixin.py diary_batch.py actions_creation_execution.py architecture_contracts.py tools/run_regression_contour.py tools/apply_v1502_hotfix.py tests/test_diary_user_emulation_matrix_v1497.py tests/test_diary_filler_donor_parity_v1490.py tests/test_startup_vbs_encoding_v1472.py tests/test_intake_agent_update_handoff_v1494x.py tests/test_desktop_intake_patient_chain_v1502.py
-          git commit -m "Apply intake discharge diary regression fixes"
-          git push origin HEAD:main
-
   headless-tests:
-    needs: apply-hotfix
-    if: always() && (needs.apply-hotfix.result == 'success' || needs.apply-hotfix.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -97,8 +67,6 @@ jobs:
           if-no-files-found: ignore
 
   build:
-    needs: apply-hotfix
-    if: always() && (needs.apply-hotfix.result == 'success' || needs.apply-hotfix.result == 'skipped')
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
