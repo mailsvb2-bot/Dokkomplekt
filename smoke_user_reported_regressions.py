@@ -324,7 +324,7 @@ assert "add_diary_entry" in desktop_popup_source
 
 # 12) Custom documents must not report success when no file was actually created.
 universal_flow_source = Path("actions_universal_flow.py").read_text(encoding="utf-8")
-assert "Custom-документы профиля не созданы" in universal_flow_source
+assert "Неполный комплект custom-документов запрещён" in universal_flow_source
 assert "Custom-дневники не созданы" in universal_flow_source
 assert "Не указана дата выписки для дневников" in universal_flow_source
 execution_source = Path("actions_creation_execution.py").read_text(encoding="utf-8")
