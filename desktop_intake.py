@@ -470,6 +470,22 @@ def prepare_patient_work_folder(
             continue
         try:
             if _file_content_digest(existing) == source_digest:
+                if not keep_source:
+                    try:
+                        same_path = source.resolve() == existing.resolve()
+                    except OSError:
+                        same_path = source.absolute() == existing.absolute()
+                    if not same_path:
+                        source_already_removed = False
+                        try:
+                            source.unlink()
+                        except FileNotFoundError:
+                            source_already_removed = True
+                        except OSError as unlink_exc:
+                            raise RuntimeError(
+                                "Первичный документ уже есть в папке пациента, но исходный файл "
+                                "не удалось удалить. Перенос не завершён; закройте файл и повторите."
+                            ) from unlink_exc
                 return patient_dir, existing
         except OSError:
             continue

@@ -23,11 +23,13 @@ class OutputTransaction:
     overwrite_paths: tuple[Path, ...] = ()
     stage_dir: Path | None = None
     _final_existed: bool = field(default=False, init=False)
+    _created_dirs: list[Path] = field(default_factory=list, init=False)
 
     def begin(self) -> Path:
         final = Path(self.final_dir).expanduser()
         self.final_dir = final
         self._final_existed = final.exists()
+        self._created_dirs = []
         final.parent.mkdir(parents=True, exist_ok=True)
         stage = final.parent / f".dokkomplekt-staging-{uuid.uuid4().hex}"
         stage.mkdir(parents=False, exist_ok=False)
@@ -45,6 +47,36 @@ class OutputTransaction:
             return str(path.resolve()).casefold()
         except OSError:
             return str(path.absolute()).casefold()
+
+    def _ensure_target_parent(self, parent: Path) -> None:
+        """Create target directories while recording only directories we own.
+
+        ``exist_ok=True`` cannot distinguish our mkdir from a concurrent creator.
+        Building one level at a time with ``exist_ok=False`` lets rollback remove
+        only directories this transaction actually created; ``rmdir`` then
+        refuses to delete a directory another process populated later.
+        """
+        missing: list[Path] = []
+        cursor = parent
+        while not cursor.exists():
+            missing.append(cursor)
+            cursor = cursor.parent
+        for directory in reversed(missing):
+            try:
+                directory.mkdir(exist_ok=False)
+            except FileExistsError:
+                continue
+            self._created_dirs.append(directory)
+
+    def _remove_empty_created_dirs(self) -> None:
+        for directory in reversed(self._created_dirs):
+            try:
+                directory.rmdir()
+            except OSError:
+                # A concurrent process may have populated a directory after we
+                # created it. Never recurse into or delete such shared content.
+                continue
+        self._created_dirs = []
 
     @staticmethod
     def _backup_path(path: Path) -> Path:
@@ -86,13 +118,14 @@ class OutputTransaction:
                 backups.append((original, backup))
 
             for source, target in targets:
-                target.parent.mkdir(parents=True, exist_ok=True)
+                self._ensure_target_parent(target.parent)
                 os.replace(source, target)
                 committed.append(target)
                 mapping[source] = target
 
             shutil.rmtree(stage, ignore_errors=True)
             self.stage_dir = None
+            self._created_dirs = []
             return mapping
         except Exception:
             for target in reversed(committed):
@@ -107,6 +140,5 @@ class OutputTransaction:
                     backup.rename(original)
                 except OSError as restore_exc:
                     record_soft_exception("output_transaction.restore_backup", restore_exc, detail=str(original))
-            if not self._final_existed and self.final_dir.exists():
-                shutil.rmtree(self.final_dir, ignore_errors=True)
+            self._remove_empty_created_dirs()
             raise

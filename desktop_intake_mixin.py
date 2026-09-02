@@ -414,21 +414,22 @@ class DesktopIntakeMixin:
             for col in range(2):
                 body.grid_columnconfigure(col, weight=1)
             local_vars: dict[str, tk.BooleanVar] = {}
-            entries: list[tuple[str, str]] = []
+            entries: list[tuple[str, str, bool, str]] = []
             try:
+                from desktop_intake_choices import profile_choices_for_desktop_intake
                 from layout_checklist import _doctor_buttons_setup_completed
-                from universal_main_documents import custom_documents_for_main_ui
                 pack = self._load_or_create_universal_pack()
-                # Keep this popup exactly in sync with visible block 03 buttons.
+                # Keep this popup in sync with block 03 while making a missing
+                # template visibly broken rather than deceptively selectable.
                 if _doctor_buttons_setup_completed(pack):
-                    for doc in custom_documents_for_main_ui(pack, base_dir=self._universal_profile_path().parent):
-                        entries.append((doc.kind, doc.label))
+                    for choice in profile_choices_for_desktop_intake(pack, base_dir=self._universal_profile_path().parent):
+                        entries.append((choice.kind, choice.label, choice.available, choice.problem))
             except Exception as exc:
                 record_soft_exception("desktop_intake_mixin:154", exc)
             try:
                 diary_ready = bool(getattr(self, "status_files", None) or getattr(self, "diary_texts_dir", "") or getattr(self, "diary_files", None) or getattr(self, "diary_template_dir", ""))
-                if diary_ready and not any(kind == DIARY_KIND for kind, _label in entries):
-                    entries.append((DIARY_KIND, DIARY_LABEL))
+                if diary_ready and not any(kind == DIARY_KIND for kind, _label, _available, _problem in entries):
+                    entries.append((DIARY_KIND, DIARY_LABEL, True, ""))
             except Exception as exc:
                 record_soft_exception("desktop_intake_mixin:add_diary_entry", exc)
             if not entries:
@@ -438,7 +439,8 @@ class DesktopIntakeMixin:
                 tk.Label(empty_state, text="В блоке 03 ещё нет созданных врачом кнопок. Сначала загрузите Word-шаблоны — программа создаст кнопки из названий документов.", bg=PANEL, fg=WARN, font=self._font(10, "bold"), wraplength=690, justify="left").grid(row=0, column=0, sticky="ew", pady=(0, 8))
                 tk.Button(empty_state, text="Создать свои кнопки", command=lambda: (setattr(self, "_desktop_intake_popup_outcome", "setup_needed"), self._close_desktop_intake_popup(popup), self._open_first_run_create_buttons_popup()), bg=ACCENT_2, fg="#03101f", relief="flat", font=self._font(10, "bold"), padx=14, pady=8).grid(row=1, column=0, sticky="ew")
             tools_row = 0
-            if entries:
+            available_entries = [entry for entry in entries if entry[2]]
+            if available_entries:
                 tools = tk.Frame(body, bg=PANEL)
                 tools.grid(row=0, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 8))
                 tools.grid_columnconfigure(0, weight=1)
@@ -452,20 +454,24 @@ class DesktopIntakeMixin:
                 tk.Button(tools, text="Выбрать всё", command=select_all_docs, bg=FIELD, fg=TEXT, relief="flat", font=self._font(9, "bold"), padx=8, pady=6).grid(row=0, column=0, sticky="ew", padx=(0, 6))
                 tk.Button(tools, text="Снять всё", command=clear_all_docs, bg=PANEL_3, fg=TEXT, relief="flat", font=self._font(9), padx=8, pady=6).grid(row=0, column=1, sticky="ew", padx=(6, 0))
                 tools_row = 1
-            for idx, (kind, label) in enumerate(entries):
+            for idx, (kind, label, available, problem) in enumerate(entries):
                 var = tk.BooleanVar(value=False)
-                local_vars[kind] = var
+                if available:
+                    local_vars[kind] = var
+                display_label = label if available else f"⚠ {label} — {problem or 'Word-шаблон недоступен'}"
                 check = tk.Checkbutton(
                     body,
-                    text=label,
+                    text=display_label,
                     variable=var,
                     bg=PANEL,
-                    fg=TEXT,
+                    fg=TEXT if available else WARN,
+                    disabledforeground=WARN,
                     selectcolor=FIELD,
                     activebackground=PANEL,
                     activeforeground=TEXT,
                     font=self._font(10),
                     anchor="w",
+                    state="normal" if available else "disabled",
                 )
                 check.grid(row=tools_row + idx // 2, column=idx % 2, sticky="ew", padx=6, pady=4)
                 check.bind("<MouseWheel>", intake_wheel, add="+")

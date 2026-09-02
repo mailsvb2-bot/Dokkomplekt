@@ -550,8 +550,15 @@ def export_document_pack_zip(pack: DocumentPack, target_zip: str | Path, *, temp
             missing.append(f"{document.button_label or document.id}: {document.template or 'template не указан'}")
             continue
         try:
-            with zipfile.ZipFile(source, "r"):
-                pass
+            with zipfile.ZipFile(source, "r") as probe:
+                names = set(probe.namelist())
+                required_members = {"[Content_Types].xml", "_rels/.rels", "word/document.xml"}
+                absent_members = sorted(required_members - names)
+                bad_member = probe.testzip()
+                if absent_members:
+                    raise ValueError("нет обязательных частей Word: " + ", ".join(absent_members))
+                if bad_member:
+                    raise ValueError(f"ошибка CRC в {bad_member}")
         except Exception as exc:
             missing.append(f"{document.button_label or document.id}: шаблон повреждён ({exc})")
             continue
