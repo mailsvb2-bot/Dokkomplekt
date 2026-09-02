@@ -68,9 +68,10 @@ def test_seen_ledger_preserves_more_than_300_entries() -> None:
 def test_live_agent_pid_cannot_be_stolen_due_to_old_mtime(monkeypatch, tmp_path: Path) -> None:
     import desktop_intake_agent as agent
     lock = tmp_path / "agent.lock"
-    lock.write_text("pid=4242\nversion=x\ntoken=" + "a" * 32 + "\n", encoding="utf-8")
+    lock.write_text("pid=4242\nversion=x\nprocess_started=proc:same\ntoken=" + "a" * 32 + "\n", encoding="utf-8")
     os.utime(lock, (1, 1))
     monkeypatch.setattr(agent, "_pid_is_running", lambda pid: pid == 4242)
+    monkeypatch.setattr(agent, "_process_start_identity", lambda pid: "proc:same" if pid == 4242 else "")
     assert agent._lock_is_stale(lock) is False
 
 

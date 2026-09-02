@@ -739,6 +739,23 @@ def _lock_owner_token(path: Path) -> str:
         return ""
 
 
+def _lock_owner_process_identity(path: Path) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        match = re.search(r"(?m)^process_started=([^\r\n]+)\s*$", text)
+        return match.group(1).strip() if match else ""
+    except OSError:
+        return ""
+
+
+def _lock_age_seconds(path: Path, now: float | None = None) -> float:
+    current = time.time() if now is None else now
+    try:
+        return max(0.0, current - path.stat().st_mtime)
+    except OSError:
+        return float("inf")
+
+
 def _process_start_identity(pid: int) -> str:
     """Return a stable process-start identity for PID reuse detection."""
     if pid <= 0:
@@ -809,19 +826,32 @@ def _pid_is_running(pid: int) -> bool:
         return False
 
 
-def _agent_lock_has_live_owner() -> bool:
-    path = _lock_path()
+def _agent_lock_owner_is_current(path: Path) -> bool:
     pid = _lock_owner_pid(path) if path.exists() else None
-    return bool(pid and _pid_is_running(pid))
+    if not pid or not _pid_is_running(pid):
+        return False
+    stored_identity = _lock_owner_process_identity(path)
+    live_identity = _process_start_identity(pid)
+    if stored_identity and live_identity:
+        return stored_identity == live_identity
+    # Legacy locks (and transient identity-probe failures) may suppress a new
+    # watcher only while their heartbeat is fresh. Active legacy agents touch
+    # the lock every poll, so this preserves them without trusting a reused PID
+    # forever.
+    return _lock_age_seconds(path) <= LOCK_STALE_SECONDS
+
+
+def _agent_lock_has_live_owner() -> bool:
+    return _agent_lock_owner_is_current(_lock_path())
 
 
 def _lock_is_stale(path: Path) -> bool:
     try:
         pid = _lock_owner_pid(path)
-        if pid is not None:
-            return not _pid_is_running(pid)
-        # Legacy/corrupt locks without an owner may be reclaimed after timeout.
-        return time.time() - path.stat().st_mtime > LOCK_STALE_SECONDS
+        if pid is None:
+            # Legacy/corrupt locks without an owner may be reclaimed after timeout.
+            return _lock_age_seconds(path) > LOCK_STALE_SECONDS
+        return not _agent_lock_owner_is_current(path)
     except OSError:
         return True
 
@@ -834,7 +864,16 @@ def _acquire_agent_lock() -> int | None:
         try:
             token = uuid.uuid4().hex
             fd = os.open(str(path), flags)
-            os.write(fd, f"pid={os.getpid()}\nversion={AGENT_VERSION}\ntoken={token}\n".encode("utf-8"))
+            process_started = _process_start_identity(os.getpid())
+            os.write(
+                fd,
+                (
+                    f"pid={os.getpid()}\n"
+                    f"version={AGENT_VERSION}\n"
+                    f"process_started={process_started}\n"
+                    f"token={token}\n"
+                ).encode("utf-8"),
+            )
             atexit.register(_release_agent_lock, fd, path, token)
             return fd
         except FileExistsError:
