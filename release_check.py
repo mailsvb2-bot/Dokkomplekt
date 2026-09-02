@@ -10,9 +10,12 @@ from __future__ import annotations
 from diagnostic_logging import record_soft_exception
 import ast
 import compileall
+import json
 import os
 import shutil
 import subprocess
+import tempfile
+import zipfile
 import runpy
 import sys
 from pathlib import Path
@@ -607,7 +610,6 @@ def _assert_universal_profile_contract() -> None:
         "Мастер профиля / checklist",
         "def _iter_docx_paragraphs",
         "bool(self.placeholders)",
-        "doc_data[\"template\"] = arcname.as_posix()",
         "Неизвестный документ профиля",
         "Папка результата указывает на файл",
         '"\\\\" in normalized',
@@ -686,6 +688,74 @@ def _assert_universal_profile_contract() -> None:
         raise SystemExit("Universal mapper callbacks escaped method scope")
     if "Дополнить документ" + " мягкими пунктами" in source:
         raise SystemExit("Completion popup title regressed to soft-points wording")
+
+
+
+def _assert_medpack_export_contract() -> None:
+    """Exercise portable medpack export instead of locking implementation text."""
+    from universal_profiles import DocumentPack, DocumentTemplateSpec
+    from universal_template_engine import PACK_MANIFEST_NAME, export_document_pack_zip
+
+    with tempfile.TemporaryDirectory(prefix="dokkomplekt-release-medpack-") as temp_dir:
+        root = Path(temp_dir)
+        template = root / "doctor-template.docx"
+        with zipfile.ZipFile(template, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(
+                "[Content_Types].xml",
+                "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"/>",
+            )
+
+        pack = DocumentPack(
+            pack_id="release.gate",
+            name="Release gate",
+            documents=(
+                DocumentTemplateSpec(
+                    id="doctor-document",
+                    button_label="Документ врача",
+                    template=template.name,
+                ),
+            ),
+        )
+        target = root / "profile.medpack.zip"
+        exported = export_document_pack_zip(pack, target, template_base_dir=root)
+        if exported != target or not target.is_file():
+            raise SystemExit("Medpack export contract failed: archive was not created")
+
+        with zipfile.ZipFile(target, "r") as zf:
+            names = set(zf.namelist())
+            expected_template = "templates/doctor-template.docx"
+            if PACK_MANIFEST_NAME not in names or expected_template not in names:
+                raise SystemExit("Medpack export contract failed: archive is not self-contained")
+            manifest = json.loads(zf.read(PACK_MANIFEST_NAME).decode("utf-8"))
+        documents = manifest.get("documents") if isinstance(manifest, dict) else None
+        if not isinstance(documents, list) or len(documents) != 1:
+            raise SystemExit("Medpack export contract failed: manifest document list is invalid")
+        first_document = documents[0]
+        if not isinstance(first_document, dict) or first_document.get("template") != expected_template:
+            raise SystemExit("Medpack export contract failed: manifest template path is not portable")
+
+        dangling = DocumentPack(
+            pack_id="release.gate.dangling",
+            name="Release gate dangling",
+            documents=(
+                DocumentTemplateSpec(
+                    id="missing-document",
+                    button_label="Отсутствующий документ",
+                    template="missing.docx",
+                ),
+            ),
+        )
+        dangling_target = root / "dangling.medpack.zip"
+        try:
+            export_document_pack_zip(dangling, dangling_target, template_base_dir=root)
+        except ValueError as exc:
+            if "не все Word-шаблоны доступны" not in str(exc):
+                raise SystemExit("Medpack export contract failed with an unexpected error") from exc
+        else:
+            raise SystemExit("Medpack export contract failed: dangling template was exported")
+        temp_target = dangling_target.with_name(dangling_target.name + ".tmp")
+        if dangling_target.exists() or temp_target.exists():
+            raise SystemExit("Medpack export contract failed: dangling export left partial output")
 
 
 
@@ -906,6 +976,7 @@ def main() -> None:
     _assert_tk_widget_padding_contract()
     _assert_audit_hardening_contract()
     _assert_universal_profile_contract()
+    _assert_medpack_export_contract()
     from layout_checklist import assert_block03_first_run_contract
     assert_block03_first_run_contract()
     from layout_checklist import assert_template_button_review_contract
