@@ -329,7 +329,7 @@ assert "Custom-дневники не созданы" in universal_flow_source
 assert "Не указана дата выписки для дневников" in universal_flow_source
 execution_source = Path("actions_creation_execution.py").read_text(encoding="utf-8")
 assert "Ничего не создано" in execution_source
-assert "Создание остановлено без файлов" in execution_source
+assert "Создание отменено: готовые документы не изменены" in execution_source
 
 # 13) Medpack requirement flags must not classify ordinary phrase «дневной стационар» as diary.
 main_docs_source = Path("universal_main_documents.py").read_text(encoding="utf-8")
