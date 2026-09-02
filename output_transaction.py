@@ -67,26 +67,52 @@ class OutputTransaction:
         except OSError:
             return False
 
-    @staticmethod
-    def _move_no_replace(source: Path, target: Path) -> None:
+    @classmethod
+    def _move_no_replace(cls, source: Path, target: Path) -> None:
         """Move one file while atomically refusing an existing destination.
 
         Windows ``os.rename`` is no-clobber. POSIX ``rename`` is not, so on
         POSIX we create a hard link first (which is atomic and fails with
-        ``EEXIST``), then remove the staging name. Stage and final paths are
-        siblings on the same filesystem by construction.
+        ``EEXIST``), then remove the staging name. If removing the staging name
+        fails, cleanup atomically claims the public target before checking its
+        fingerprint; it never unlinks a pathname that another process may have
+        replaced meanwhile. Stage and final paths are siblings on the same
+        filesystem by construction.
         """
         if os.name == "nt":
             os.rename(source, target)
             return
+        expected_signature = cls._owned_file_signature(source)
         os.link(source, target, follow_symlinks=False)
         try:
             source.unlink()
         except Exception:
-            try:
-                target.unlink()
-            except OSError as cleanup_exc:
-                record_soft_exception("output_transaction.no_replace_link_cleanup", cleanup_exc, detail=str(target))
+            claim = cls._claim_current_path(target)
+            if claim is not None:
+                claim_dir, claimed = claim
+                try:
+                    if cls._matches_owned_signature(claimed, expected_signature):
+                        claimed.unlink()
+                    else:
+                        restored = cls._restore_claimed_no_clobber(claimed, target)
+                        record_soft_exception(
+                            "output_transaction.no_replace_link_cleanup_conflict",
+                            RuntimeError(
+                                "Target changed while cleaning up a failed POSIX link-move; "
+                                + ("foreign target restored." if restored else f"foreign target preserved at {claimed}.")
+                            ),
+                            detail=str(target),
+                        )
+                finally:
+                    try:
+                        claim_dir.rmdir()
+                    except OSError as cleanup_exc:
+                        if not claimed.exists():
+                            record_soft_exception(
+                                "output_transaction.no_replace_claim_dir_cleanup",
+                                cleanup_exc,
+                                detail=str(claim_dir),
+                            )
             raise
 
     @staticmethod

@@ -111,3 +111,34 @@ def test_rollback_claim_survives_public_name_swap_after_ownership_check(monkeypa
     assert OutputTransaction._remove_owned_committed(target, signature) is True
     assert target.read_text(encoding="utf-8") == "FOREIGN"
     assert not list(final.glob(".dokkomplekt-rollback-claim-*"))
+
+
+def test_posix_failed_link_move_cleanup_preserves_replaced_foreign_target(monkeypatch, tmp_path: Path) -> None:
+    import output_transaction as module
+    from output_transaction import OutputTransaction
+
+    if module.os.name == "nt":
+        pytest.skip("POSIX hard-link move path only")
+
+    source = tmp_path / "source.docx"
+    target = tmp_path / "target.docx"
+    foreign = tmp_path / "foreign.docx"
+    source.write_text("OURS", encoding="utf-8")
+    foreign.write_text("FOREIGN", encoding="utf-8")
+    real_unlink = Path.unlink
+    fired = {"value": False}
+
+    def fail_source_unlink_after_foreign_swap(self: Path, *args, **kwargs):
+        if self == source and not fired["value"]:
+            fired["value"] = True
+            module.os.replace(foreign, target)
+            raise OSError("simulated source unlink failure")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_source_unlink_after_foreign_swap)
+    with pytest.raises(OSError, match="simulated source unlink failure"):
+        OutputTransaction._move_no_replace(source, target)
+
+    assert source.read_text(encoding="utf-8") == "OURS"
+    assert target.read_text(encoding="utf-8") == "FOREIGN"
+    assert not list(tmp_path.glob(".dokkomplekt-rollback-claim-*"))
