@@ -167,6 +167,7 @@ class _DesktopPollHarness(SettingsMixin, DesktopIntakeMixin):
         self._desktop_intake_folder = str(folder)
         self._desktop_intake_prompt_version = "v2"
         self._desktop_intake_seen_signatures: set[str] = set()
+        self._desktop_intake_deferred_signatures: set[str] = set()
         self._desktop_intake_poll_job = None
         self._desktop_intake_popup_open = False
         self._desktop_intake_last_popup_opened = False
@@ -175,7 +176,7 @@ class _DesktopPollHarness(SettingsMixin, DesktopIntakeMixin):
     def _open_desktop_intake_popup(self, primary_path: str | Path) -> bool:
         self.opened_paths.append(Path(primary_path))
         self._desktop_intake_last_popup_opened = True
-        self._desktop_intake_popup_outcome = "ignored"
+        self._desktop_intake_popup_outcome = "deferred"
         return False
 
 
@@ -223,8 +224,13 @@ def _assert_desktop_path_and_polling_hardening(tmp: Path) -> None:
     poller = _DesktopPollHarness(tmp / "poll_settings" / "settings.json", intake, enabled=True)
     poller._poll_desktop_intake_folder()
     assert poller.opened_paths == [primary], poller.opened_paths
-    assert poller._desktop_intake_seen_signatures, "Closed/cancelled popup must not reopen forever for the same file"
-    assert scan_primary_candidates(intake, poller._desktop_intake_seen_signatures) == ()
+    assert not poller._desktop_intake_seen_signatures, "Cancel/defer must not mark the primary as successfully processed"
+    assert poller._desktop_intake_deferred_signatures, "Cancelled popup must be suppressed only for the current GUI session"
+    session_suppressed = poller._desktop_intake_seen_signatures | poller._desktop_intake_deferred_signatures
+    assert scan_primary_candidates(intake, session_suppressed) == ()
+    retry_candidates = scan_primary_candidates(intake, poller._desktop_intake_seen_signatures)
+    assert retry_candidates and retry_candidates[0].path == primary, "A later launch must offer the deferred primary again"
+    assert primary.exists(), "Cancel/defer must leave the source primary document untouched"
     assert poller.root.after_calls, "Enabled poller must reschedule itself"
 
     disabled = _DesktopPollHarness(tmp / "disabled_settings" / "settings.json", intake, enabled=False)
@@ -234,7 +240,7 @@ def _assert_desktop_path_and_polling_hardening(tmp: Path) -> None:
     fresh = intake / "fresh.docx"
     fresh.write_bytes(b"not a complete docx yet")
     with patch("desktop_intake.is_likely_primary_document", side_effect=AssertionError("fresh file should not be opened yet")):
-        assert scan_primary_candidates(intake, set(poller._desktop_intake_seen_signatures)) == ()
+        assert scan_primary_candidates(intake, set(session_suppressed)) == ()
 
     missing = intake / "missing.docx"
     before_children = {child.name for child in intake.iterdir()}
