@@ -459,7 +459,7 @@ def _assert_followup_p0_regression_contract() -> None:
     desktop = (ROOT / "desktop_intake_mixin.py").read_text(encoding="utf-8")
     if 'for kind in ["discharge", "primary", "commission"' in desktop:
         raise SystemExit("Desktop-intake popup must show only doctor-created block-03 buttons, not legacy built-ins")
-    if "custom_documents_for_main_ui" not in desktop or "Отметьте хотя бы одну кнопку из блока 03" not in desktop:
+    if "profile_choices_for_desktop_intake" not in desktop or "Отметьте хотя бы одну кнопку из блока 03" not in desktop:
         raise SystemExit("Desktop-intake block-03 list contract is missing")
     if "_ensure_patient_folder_naming_configured" not in desktop:
         raise SystemExit("Desktop-intake must ask folder naming before moving/creating patient folders")
