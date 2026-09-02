@@ -603,7 +603,7 @@ dnd_cp1251_epi.write_bytes("ЭПИ: Пациент контактен".encode("c
 dnd_classifier = _main_module.CombinedMedicalDiaryApp.__new__(_main_module.CombinedMedicalDiaryApp)
 assert dnd_classifier._classify_dropped_file(str(dnd_cp1251_epi)) == "epi"
 
-# --- Diary batch hardening: clear validation, dedupe and safe output fallback ---
+# --- Diary batch hardening: clear validation, sequence preservation and safe output fallback ---
 from diary_filler import read_statuses_from_files
 
 dupe_status_a = OUT / "dupe_status_a.docx"
@@ -613,7 +613,8 @@ for dupe_path in [dupe_status_a, dupe_status_b]:
     dupe_doc.add_paragraph("Пациент спокоен, жалоб не предъявляет, контакт доступен, сон достаточный.")
     dupe_doc.save(dupe_path)
 deduped_statuses = read_statuses_from_files([dupe_status_a, dupe_status_b])
-assert len(deduped_statuses) == 1, deduped_statuses
+assert len(deduped_statuses) == 2, deduped_statuses
+assert deduped_statuses[0] == deduped_statuses[1], deduped_statuses
 
 bad_status_txt = OUT / "bad_status.txt"
 bad_status_txt.write_text("Пациент спокоен", encoding="utf-8")
