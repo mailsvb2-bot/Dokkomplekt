@@ -188,9 +188,11 @@ def build_patient_folder_name(
     discharge_date: str = "",
     settings: object | None = None,
     fallback: str = "",
+    strict: bool = False,
 ) -> str:
     cfg = normalize_folder_naming_settings(settings)
     parts: list[str] = []
+    missing: list[str] = []
     for key in cfg["parts"]:
         if key == "full_fio":
             value = _fio_full(fio)
@@ -205,6 +207,8 @@ def build_patient_folder_name(
         elif key == "admission_discharge_dates":
             first = _date_label(admission_date, cfg["date_format"])
             second = _date_label(discharge_date, cfg["date_format"])
+            if strict and (not first or not second):
+                missing.append(key)
             value = f"{first}-{second}" if first and second else first or second
         elif key == "admission_month":
             value = _month_year_label(admission_date)
@@ -213,8 +217,13 @@ def build_patient_folder_name(
         else:
             value = ""
         value = " ".join(str(value or "").split()).strip(" _-–—")
+        if strict and not value and key not in missing:
+            missing.append(key)
         if value and value not in parts:
             parts.append(value)
+    if strict and missing:
+        labels = dict(FOLDER_NAMING_OPTIONS)
+        raise ValueError("Для выбранного правила имени папки не хватает данных: " + ", ".join(labels.get(key, key) for key in missing))
     name = safe_filename(" ".join(parts)).strip(" .")
     if name:
         return name
@@ -278,6 +287,7 @@ def build_patient_folder_name_from_info(
     settings: object | None = None,
     discharge_date: str = "",
     fallback: str = "",
+    strict: bool = False,
 ) -> str:
     """Build the patient subfolder name from parsed primary data and doctor settings.
 
@@ -293,6 +303,7 @@ def build_patient_folder_name_from_info(
         discharge_date=discharge_date,
         settings=settings,
         fallback=fallback or getattr(info, "folder_name", "") or "Пациент",
+        strict=strict,
     )
 
 def assert_desktop_patient_folder_lock() -> None:

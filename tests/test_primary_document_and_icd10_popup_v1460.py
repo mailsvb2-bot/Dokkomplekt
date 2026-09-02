@@ -65,7 +65,7 @@ def test_required_fields_popup_detects_dynamic_diagnosis_keys():
     assert _is_diagnosis_field(SimpleNamespace(key="diagnosis", label="Диагноз"))
     assert _is_diagnosis_field(SimpleNamespace(key="patient.diagnosis", label="Клинический диагноз"))
     assert _is_diagnosis_field(SimpleNamespace(key="diagnosis.primary", label="Основной диагноз"))
-    assert _is_diagnosis_field(SimpleNamespace(key="custom_field", label="Диагноз по МКБ-10"))
+    assert not _is_diagnosis_field(SimpleNamespace(key="custom_field", label="Диагноз по МКБ-10"))
     assert not _is_diagnosis_field(SimpleNamespace(key="case_number", label="Номер истории болезни"))
 
 

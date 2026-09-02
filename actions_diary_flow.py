@@ -87,7 +87,7 @@ class ActionsDiaryFlowMixin:
             treatment_correction=treatment_correction,
             birth_date=str(getattr(parsed_for_name, "birth", "") or getattr(getattr(self, "data", None), "birth", "") or ""),
             complaints=str(getattr(parsed_for_name, "complaints", "") or getattr(getattr(self, "data", None), "complaints", "") or ""),
-            treatment=str(getattr(parsed_for_name, "treatment_plan", "") or getattr(getattr(self, "data", None), "treatment_plan", "") or getattr(getattr(self, "assigned_treatment_var", None), "get", lambda: "")() or ""),
+            treatment=str(getattr(getattr(self, "assigned_treatment_var", None), "get", lambda: "")() or getattr(getattr(self, "data", None), "treatment_plan", "") or getattr(parsed_for_name, "treatment_plan", "") or ""),
             profile_status=str(getattr(parsed_for_name, "mental_status", "") or getattr(getattr(self, "data", None), "mental_status", "") or ""),
             sick_leave_from=current_semantic_date(self, "expert_sick_leave_from"),
         )

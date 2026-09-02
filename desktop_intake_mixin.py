@@ -4,6 +4,7 @@ from medical_date_state import current_semantic_date
 
 from diagnostic_logging import record_soft_exception
 from pathlib import Path
+import os
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -31,6 +32,7 @@ class DesktopIntakeMixin:
         self._desktop_intake_folder = str(settings["folder"])
         self._desktop_intake_prompt_version = str(settings.get("prompt_version", "") or "")
         self._desktop_intake_seen_signatures: set[str] = set(settings.get("seen_signatures", ()))
+        self._desktop_intake_deferred_signatures: set[str] = set()
         self._desktop_intake_poll_job = None
         self._desktop_intake_popup_open = False
         self._desktop_intake_last_popup_opened = False
@@ -43,7 +45,7 @@ class DesktopIntakeMixin:
             "enabled": bool(getattr(self, "_desktop_intake_enabled", False)),
             "folder": str(getattr(self, "_desktop_intake_folder", "") or ""),
             "prompt_version": str(getattr(self, "_desktop_intake_prompt_version", "") or ""),
-            "seen_signatures": sorted(getattr(self, "_desktop_intake_seen_signatures", set()))[-300:],
+            "seen_signatures": sorted(getattr(self, "_desktop_intake_seen_signatures", set())),
         }
 
     def _persist_desktop_intake_settings(self) -> None:
@@ -165,6 +167,12 @@ class DesktopIntakeMixin:
             # diagnostic line, not a blocking popup, because the in-process
             # watcher still handles the folder while the UI is open.
             self._log(f"\nℹ Фоновый watcher не установлен автоматически: {message}\n")
+            if os.name == "nt" and not os.environ.get("CI"):
+                messagebox.showwarning(
+                    "Фоновый watcher не запущен",
+                    "Папка будет обрабатываться, пока программа открыта, но запуск при закрытом окне сейчас не настроен.\n\n" + str(message),
+                    parent=getattr(self, "root", None),
+                )
             return False
         except Exception as exc:
             record_soft_exception("desktop_intake_mixin.install_background_agent", exc)
@@ -197,7 +205,8 @@ class DesktopIntakeMixin:
                 self._desktop_intake_poll_job = None
                 return
             if not getattr(self, "_desktop_intake_popup_open", False):
-                candidates = scan_primary_candidates(self._desktop_intake_folder, self._desktop_intake_seen_signatures)
+                suppressed = set(self._desktop_intake_seen_signatures) | set(getattr(self, "_desktop_intake_deferred_signatures", set()))
+                candidates = scan_primary_candidates(self._desktop_intake_folder, suppressed)
                 if candidates:
                     candidate = candidates[0]
                     self._desktop_intake_last_popup_opened = False
@@ -208,10 +217,17 @@ class DesktopIntakeMixin:
                     # "setup_needed" is deliberately not terminal: if the doctor
                     # must first create block-03 buttons, the same primary DOCX
                     # should be offered again after setup, not silently disappear.
-                    terminal_close = outcome in {"processed", "ignored"}
+                    terminal_close = outcome in {"processed", "processed_source_retained", "ignored_explicitly"}
                     if processed or terminal_close:
                         mark_seen(self._desktop_intake_seen_signatures, candidate)
                         self._persist_desktop_intake_settings()
+                    elif outcome == "deferred":
+                        # "Отмена" means not now, not never.  Suppress only for
+                        # this GUI session so the next launch offers the file again.
+                        from desktop_intake import signature_key
+                        self._desktop_intake_deferred_signatures.add(
+                            signature_key(candidate.path, candidate.signature[0], candidate.signature[1])
+                        )
         except Exception as exc:
             record_soft_exception("desktop_intake_mixin:83", exc)
         finally:
@@ -344,6 +360,7 @@ class DesktopIntakeMixin:
             settings=settings,
             discharge_date=current_semantic_date(self, "discharge_date"),
             fallback=Path(primary).stem,
+            strict=True,
         )
         patient_dir, effective_primary = prepare_patient_work_folder(
             self._desktop_intake_folder,
@@ -379,6 +396,10 @@ class DesktopIntakeMixin:
         processed = False
         prepared_primary: Path | None = None
         attempted_creation = False
+        # Intake is an isolated workflow.  Preserve the doctor's main-window
+        # selections and diary frequency exactly, even after a successful intake.
+        selection_snapshot = {kind: bool(var.get()) for kind, var in getattr(self, "output_vars", {}).items()}
+        diary_frequency_snapshot = str(getattr(getattr(self, "diary_frequency_mode_var", None), "get", lambda: "daily")() or "daily")
         try:
             self._activate_window_for_desktop_intake()
             popup = tk.Toplevel(self.root)
@@ -393,21 +414,22 @@ class DesktopIntakeMixin:
             for col in range(2):
                 body.grid_columnconfigure(col, weight=1)
             local_vars: dict[str, tk.BooleanVar] = {}
-            entries: list[tuple[str, str]] = []
+            entries: list[tuple[str, str, bool, str]] = []
             try:
+                from universal_main_documents import profile_choices_for_desktop_intake
                 from layout_checklist import _doctor_buttons_setup_completed
-                from universal_main_documents import custom_documents_for_main_ui
                 pack = self._load_or_create_universal_pack()
-                # Keep this popup exactly in sync with visible block 03 buttons.
+                # Keep this popup in sync with block 03 while making a missing
+                # template visibly broken rather than deceptively selectable.
                 if _doctor_buttons_setup_completed(pack):
-                    for doc in custom_documents_for_main_ui(pack, base_dir=self._universal_profile_path().parent):
-                        entries.append((doc.kind, doc.label))
+                    for choice in profile_choices_for_desktop_intake(pack, base_dir=self._universal_profile_path().parent):
+                        entries.append((choice.kind, choice.label, choice.available, choice.problem))
             except Exception as exc:
                 record_soft_exception("desktop_intake_mixin:154", exc)
             try:
                 diary_ready = bool(getattr(self, "status_files", None) or getattr(self, "diary_texts_dir", "") or getattr(self, "diary_files", None) or getattr(self, "diary_template_dir", ""))
-                if diary_ready and not any(kind == DIARY_KIND for kind, _label in entries):
-                    entries.append((DIARY_KIND, DIARY_LABEL))
+                if diary_ready and not any(kind == DIARY_KIND for kind, _label, _available, _problem in entries):
+                    entries.append((DIARY_KIND, DIARY_LABEL, True, ""))
             except Exception as exc:
                 record_soft_exception("desktop_intake_mixin:add_diary_entry", exc)
             if not entries:
@@ -417,7 +439,8 @@ class DesktopIntakeMixin:
                 tk.Label(empty_state, text="В блоке 03 ещё нет созданных врачом кнопок. Сначала загрузите Word-шаблоны — программа создаст кнопки из названий документов.", bg=PANEL, fg=WARN, font=self._font(10, "bold"), wraplength=690, justify="left").grid(row=0, column=0, sticky="ew", pady=(0, 8))
                 tk.Button(empty_state, text="Создать свои кнопки", command=lambda: (setattr(self, "_desktop_intake_popup_outcome", "setup_needed"), self._close_desktop_intake_popup(popup), self._open_first_run_create_buttons_popup()), bg=ACCENT_2, fg="#03101f", relief="flat", font=self._font(10, "bold"), padx=14, pady=8).grid(row=1, column=0, sticky="ew")
             tools_row = 0
-            if entries:
+            available_entries = [entry for entry in entries if entry[2]]
+            if available_entries:
                 tools = tk.Frame(body, bg=PANEL)
                 tools.grid(row=0, column=0, columnspan=2, sticky="ew", padx=6, pady=(0, 8))
                 tools.grid_columnconfigure(0, weight=1)
@@ -431,20 +454,24 @@ class DesktopIntakeMixin:
                 tk.Button(tools, text="Выбрать всё", command=select_all_docs, bg=FIELD, fg=TEXT, relief="flat", font=self._font(9, "bold"), padx=8, pady=6).grid(row=0, column=0, sticky="ew", padx=(0, 6))
                 tk.Button(tools, text="Снять всё", command=clear_all_docs, bg=PANEL_3, fg=TEXT, relief="flat", font=self._font(9), padx=8, pady=6).grid(row=0, column=1, sticky="ew", padx=(6, 0))
                 tools_row = 1
-            for idx, (kind, label) in enumerate(entries):
+            for idx, (kind, label, available, problem) in enumerate(entries):
                 var = tk.BooleanVar(value=False)
-                local_vars[kind] = var
+                if available:
+                    local_vars[kind] = var
+                display_label = label if available else f"⚠ {label} — {problem or 'Word-шаблон недоступен'}"
                 check = tk.Checkbutton(
                     body,
-                    text=label,
+                    text=display_label,
                     variable=var,
                     bg=PANEL,
-                    fg=TEXT,
+                    fg=TEXT if available else WARN,
+                    disabledforeground=WARN,
                     selectcolor=FIELD,
                     activebackground=PANEL,
                     activeforeground=TEXT,
                     font=self._font(10),
                     anchor="w",
+                    state="normal" if available else "disabled",
                 )
                 check.grid(row=tools_row + idx // 2, column=idx % 2, sticky="ew", padx=6, pady=4)
                 check.bind("<MouseWheel>", intake_wheel, add="+")
@@ -479,14 +506,22 @@ class DesktopIntakeMixin:
                 if not success:
                     self._desktop_intake_popup_outcome = "retry_pending"
                     return
+                source_removed = False
                 try:
                     primary.unlink()
-                except FileNotFoundError as exc:
-                    record_soft_exception("desktop_intake_mixin.commit_source_already_absent", exc, detail=str(primary))
+                    source_removed = True
+                except FileNotFoundError:
+                    source_removed = True
                 except OSError as exc:
                     record_soft_exception("desktop_intake_mixin.commit_remove_source", exc, detail=str(primary))
+                    messagebox.showwarning(
+                        "Документы созданы, исходник занят",
+                        "Документы успешно созданы, но исходный Word-файл не удалось убрать из папки «Выписанные пациенты». "
+                        "Закройте его в Word и удалите/переместите вручную. Повторно документы для него создаваться не будут.\n\n" + str(primary),
+                        parent=popup,
+                    )
                 processed = True
-                self._desktop_intake_popup_outcome = "processed"
+                self._desktop_intake_popup_outcome = "processed" if source_removed else "processed_source_retained"
                 self._close_desktop_intake_popup(popup)
 
             buttons = tk.Frame(popup, bg=DEEP)
@@ -503,8 +538,8 @@ class DesktopIntakeMixin:
                     # A failed/cancelled creation is not an ignore decision.
                     # Keep the top-level source eligible for a future retry.
                     self._desktop_intake_popup_outcome = "retry_pending"
-                elif outcome not in {"processed", "setup_needed"}:
-                    self._desktop_intake_popup_outcome = "ignored"
+                elif outcome not in {"processed", "processed_source_retained", "setup_needed"}:
+                    self._desktop_intake_popup_outcome = "deferred"
                 self._close_desktop_intake_popup(popup)
             popup.protocol("WM_DELETE_WINDOW", on_close)
             popup.transient(self.root)
@@ -514,6 +549,22 @@ class DesktopIntakeMixin:
             self._show_error("Папка выписанных пациентов", exc)
         finally:
             self._desktop_intake_popup_open = False
+            # Restore the main-window checklist and rhythm; intake choices are
+            # patient-local and must never leak into the next manual workflow.
+            for kind, selected in selection_snapshot.items():
+                var = getattr(self, "output_vars", {}).get(kind)
+                if var is not None and hasattr(var, "set"):
+                    var.set(selected)
+            for kind, var in getattr(self, "output_vars", {}).items():
+                if kind not in selection_snapshot and hasattr(var, "set"):
+                    var.set(False)
+            frequency_var = getattr(self, "diary_frequency_mode_var", None)
+            if frequency_var is not None and hasattr(frequency_var, "set"):
+                frequency_var.set(diary_frequency_snapshot)
+            try:
+                self._update_selected_outputs_status()
+            except Exception as exc:
+                record_soft_exception("desktop_intake_mixin.restore_main_selection", exc)
         return processed
 
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import builtins
 from datetime import date, timedelta
 from typing import Iterable
 
@@ -13,9 +12,6 @@ def is_fixed_holiday(day: date) -> bool:
 
 def is_non_working_day(day: date) -> bool:
     return day.weekday() >= 5 or is_fixed_holiday(day)
-
-
-builtins.is_non_working_day = is_non_working_day
 
 
 def next_working_day(day: date, *, used: Iterable[date] = ()) -> date:

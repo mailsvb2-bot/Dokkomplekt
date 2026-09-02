@@ -145,7 +145,7 @@ def test_desktop_intake_marks_seen_after_explicit_ignored_popup(tmp_path: Path) 
 
     def ignored_popup(_primary_path):
         app._desktop_intake_last_popup_opened = True
-        app._desktop_intake_popup_outcome = "ignored"
+        app._desktop_intake_popup_outcome = "ignored_explicitly"
         return False
 
     app._open_desktop_intake_popup = ignored_popup

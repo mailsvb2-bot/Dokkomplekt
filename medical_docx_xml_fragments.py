@@ -22,7 +22,7 @@ def is_supported_word_file(path: str | Path) -> bool:
 
 
 def supported_word_filetypes() -> list[tuple[str, str]]:
-    return [("Word", "*.docx *.docm *.doc"), ("All files", "*.*")]
+    return [("Word DOCX/DOCM; старый DOC требует Microsoft Word", "*.docx *.docm *.doc"), ("All files", "*.*")]
 
 
 def existing_word_file(path: str | Path | None, label: str) -> Path:

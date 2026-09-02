@@ -28,10 +28,9 @@ def _missing_large_docstrings() -> list[str]:
 def main() -> None:
     from architecture_contracts import TOTAL_PYTHON_FILE_BUDGET, LAYER_FILE_BUDGETS
 
-    # 201 = 200 historical budget + icd10_full_data.py, the loader for the
-    # bundled full ICD-10 catalog (resources/icd10_full_non_f.tsv). Keep this
-    # anchor in sync with architecture_contracts.TOTAL_PYTHON_FILE_BUDGET.
-    assert TOTAL_PYTHON_FILE_BUDGET == 201
+    # 202 = historical budget + full ICD-10 data + the dedicated transactional
+    # output boundary. Keep this anchor in sync with architecture_contracts.
+    assert TOTAL_PYTHON_FILE_BUDGET == 202
     assert LAYER_FILE_BUDGETS["ui_actions"] >= 50
     assert LAYER_FILE_BUDGETS["release_quality"] >= 40
 

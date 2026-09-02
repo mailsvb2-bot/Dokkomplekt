@@ -24,6 +24,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import uuid
 from typing import Iterable
 
 from diagnostic_logging import record_soft_exception
@@ -43,6 +44,7 @@ POLL_SECONDS = 2.5
 LAUNCH_COOLDOWN_SECONDS = 20.0
 LOCK_STALE_SECONDS = 120.0
 GUI_ACTIVE_SECONDS = 45.0
+GUI_LEGACY_LIVE_PID_MAX_STALE_SECONDS = 300.0
 PENDING_RETRY_SECONDS = 75.0
 MAX_LOG_BYTES = 512 * 1024
 STATE_FILE_NAME = "desktop_intake_agent_state.json"
@@ -233,7 +235,12 @@ def _safe_int(value: object, default: int = 0) -> int:
 
 
 def _gui_lock_payload() -> dict:
-    return {"version": AGENT_VERSION, "pid": os.getpid(), "updated_at": time.time()}
+    return {
+        "version": AGENT_VERSION,
+        "pid": os.getpid(),
+        "process_started": _process_start_identity(os.getpid()),
+        "updated_at": time.time(),
+    }
 
 
 def write_gui_runtime_lock() -> None:
@@ -267,7 +274,20 @@ def is_gui_runtime_active(now: float | None = None) -> bool:
         return False
     updated_at = _safe_float(payload.get("updated_at", 0.0), 0.0)
     current = time.time() if now is None else now
-    if current - updated_at <= GUI_ACTIVE_SECONDS:
+    pid = _safe_int(payload.get("pid"), 0)
+    age = max(0.0, current - updated_at)
+    if pid > 0 and _pid_is_running(pid):
+        stored_identity = str(payload.get("process_started", "") or "").strip()
+        live_identity = _process_start_identity(pid)
+        if stored_identity and live_identity:
+            if stored_identity == live_identity:
+                return True
+        elif age <= GUI_LEGACY_LIVE_PID_MAX_STALE_SECONDS:
+            # Legacy locks cannot prove PID ownership.  Keep a bounded grace
+            # period for a temporarily blocked GUI, but never suppress intake
+            # forever after Windows reuses a crashed GUI's PID.
+            return True
+    if pid <= 0 and age <= GUI_ACTIVE_SECONDS:
         return True
     with suppress(OSError):
         _gui_lock_path().unlink()
@@ -603,7 +623,7 @@ def _safe_float(value: object, default: float = 0.0) -> float:
 
 
 def _save_state(seen: set[str], *, last_launch: float, pending: dict | None = None) -> None:
-    payload = {"version": AGENT_VERSION, "seen_signatures": sorted(seen)[-300:], "last_launch": last_launch}
+    payload = {"version": AGENT_VERSION, "seen_signatures": sorted(seen), "last_launch": last_launch}
     if pending:
         payload["pending"] = pending
     _save_json(_state_path(), payload)
@@ -687,13 +707,17 @@ def _resolve_pending_state(state: dict, seen: set[str], folder: Path | None = No
             return pending, False
         _write_log(f"pending launch expired while intake folder unavailable: {_safe_signature_ref(signature)}")
         return {}, True
-    if not _signature_present_in_folder(folder, signature):
-        seen.add(signature)
-        _write_log(f"pending launch confirmed by moved/removed file: {_safe_signature_ref(signature)}")
+    if _signature_present_in_folder(folder, signature):
+        if time.time() - launched_at < PENDING_RETRY_SECONDS:
+            return pending, False
+        _write_log(f"pending launch expired without GUI confirmation: {_safe_signature_ref(signature)}")
         return {}, True
+    # Absence from a scan is not proof of processing: the file may be locked,
+    # temporarily unreadable or mid-sync.  Only the GUI's persisted seen ledger
+    # (or the legacy explicit-path migration above) may finalize a pending item.
     if time.time() - launched_at < PENDING_RETRY_SECONDS:
         return pending, False
-    _write_log(f"pending launch expired without processing: {_safe_signature_ref(signature)}")
+    _write_log(f"pending launch expired without proof of processing: {_safe_signature_ref(signature)}")
     return {}, True
 
 
@@ -704,6 +728,74 @@ def _lock_owner_pid(path: Path) -> int | None:
         return int(match.group(1)) if match else None
     except (OSError, ValueError):
         return None
+
+
+def _lock_owner_token(path: Path) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        match = re.search(r"(?m)^token=([0-9a-f]{32})\s*$", text)
+        return match.group(1) if match else ""
+    except OSError:
+        return ""
+
+
+def _lock_owner_process_identity(path: Path) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        match = re.search(r"(?m)^process_started=([^\r\n]+)\s*$", text)
+        return match.group(1).strip() if match else ""
+    except OSError:
+        return ""
+
+
+def _lock_age_seconds(path: Path, now: float | None = None) -> float:
+    current = time.time() if now is None else now
+    try:
+        return max(0.0, current - path.stat().st_mtime)
+    except OSError:
+        return float("inf")
+
+
+def _process_start_identity(pid: int) -> str:
+    """Return a stable process-start identity for PID reuse detection."""
+    if pid <= 0:
+        return ""
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            process_query_limited_information = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(process_query_limited_information, False, pid)
+            if not handle:
+                return ""
+            try:
+                creation = wintypes.FILETIME()
+                exit_time = wintypes.FILETIME()
+                kernel = wintypes.FILETIME()
+                user = wintypes.FILETIME()
+                if not ctypes.windll.kernel32.GetProcessTimes(
+                    handle, ctypes.byref(creation), ctypes.byref(exit_time), ctypes.byref(kernel), ctypes.byref(user)
+                ):
+                    return ""
+                value = (int(creation.dwHighDateTime) << 32) | int(creation.dwLowDateTime)
+                return f"win:{value}"
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+        except Exception as exc:
+            record_soft_exception("desktop_intake_agent.process_identity_windows", exc, detail=str(pid))
+            return ""
+    stat_path = Path(f"/proc/{pid}/stat")
+    try:
+        raw = stat_path.read_text(encoding="utf-8", errors="ignore")
+        _prefix, separator, tail = raw.rpartition(") ")
+        fields = tail.split() if separator else []
+        # tail begins with field 3 (state), so process starttime (field 22)
+        # is index 19 here.  Parsing after the final ')' is safe when comm
+        # contains spaces.
+        return f"proc:{fields[19]}" if len(fields) > 19 else ""
+    except OSError:
+        return ""
 
 
 def _pid_is_running(pid: int) -> bool:
@@ -734,18 +826,32 @@ def _pid_is_running(pid: int) -> bool:
         return False
 
 
-def _agent_lock_has_live_owner() -> bool:
-    path = _lock_path()
+def _agent_lock_owner_is_current(path: Path) -> bool:
     pid = _lock_owner_pid(path) if path.exists() else None
-    return bool(pid and _pid_is_running(pid))
+    if not pid or not _pid_is_running(pid):
+        return False
+    stored_identity = _lock_owner_process_identity(path)
+    live_identity = _process_start_identity(pid)
+    if stored_identity and live_identity:
+        return stored_identity == live_identity
+    # Legacy locks (and transient identity-probe failures) may suppress a new
+    # watcher only while their heartbeat is fresh. Active legacy agents touch
+    # the lock every poll, so this preserves them without trusting a reused PID
+    # forever.
+    return _lock_age_seconds(path) <= LOCK_STALE_SECONDS
+
+
+def _agent_lock_has_live_owner() -> bool:
+    return _agent_lock_owner_is_current(_lock_path())
 
 
 def _lock_is_stale(path: Path) -> bool:
     try:
         pid = _lock_owner_pid(path)
-        if pid is not None and not _pid_is_running(pid):
-            return True
-        return time.time() - path.stat().st_mtime > LOCK_STALE_SECONDS
+        if pid is None:
+            # Legacy/corrupt locks without an owner may be reclaimed after timeout.
+            return _lock_age_seconds(path) > LOCK_STALE_SECONDS
+        return not _agent_lock_owner_is_current(path)
     except OSError:
         return True
 
@@ -756,9 +862,19 @@ def _acquire_agent_lock() -> int | None:
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
     for attempt in range(2):
         try:
+            token = uuid.uuid4().hex
             fd = os.open(str(path), flags)
-            os.write(fd, f"pid={os.getpid()}\nversion={AGENT_VERSION}\n".encode("utf-8"))
-            atexit.register(_release_agent_lock, fd, path)
+            process_started = _process_start_identity(os.getpid())
+            os.write(
+                fd,
+                (
+                    f"pid={os.getpid()}\n"
+                    f"version={AGENT_VERSION}\n"
+                    f"process_started={process_started}\n"
+                    f"token={token}\n"
+                ).encode("utf-8"),
+            )
+            atexit.register(_release_agent_lock, fd, path, token)
             return fd
         except FileExistsError:
             if attempt == 0 and _lock_is_stale(path):
@@ -777,17 +893,26 @@ def _acquire_agent_lock() -> int | None:
 def _touch_agent_lock(fd: int | None) -> None:
     if fd is None:
         return
+    path = _lock_path()
     with suppress(Exception):
-        os.utime(_lock_path(), None)
+        if _lock_owner_pid(path) == os.getpid():
+            os.utime(path, None)
 
 
-def _release_agent_lock(fd: int | None, path: Path | None = None) -> None:
+def _release_agent_lock(fd: int | None, path: Path | None = None, token: str = "") -> None:
     if fd is not None:
         with suppress(OSError):
             os.close(fd)
-    if path is not None:
-        with suppress(OSError):
-            path.unlink()
+    if path is None:
+        return
+    try:
+        if _lock_owner_pid(path) != os.getpid():
+            return
+        if token and _lock_owner_token(path) != token:
+            return
+        path.unlink()
+    except OSError:
+        return
 
 
 def run_forever() -> None:

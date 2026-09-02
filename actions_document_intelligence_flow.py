@@ -47,6 +47,17 @@ class ActionsDocumentIntelligenceFlowMixin:
             dedup.setdefault(item.field_id, item)
         return tuple(dedup.values())
 
+    def _prepare_custom_document_output_format(self, selected_custom_ids: List[str]) -> str:
+        """Choose the regular custom-document format once for the whole transaction."""
+        self._planned_custom_output_format = "docx"
+        if not selected_custom_ids:
+            return "docx"
+        current_pack = self._load_or_create_universal_pack()
+        _diary_ids, regular_ids = self._split_custom_diary_document_ids(current_pack, selected_custom_ids)
+        if regular_ids:
+            self._planned_custom_output_format = self._ask_custom_document_output_format()
+        return self._planned_custom_output_format
+
     def _ask_custom_document_output_format(self) -> str:
         try:
             from tkinter import messagebox
@@ -66,7 +77,9 @@ class ActionsDocumentIntelligenceFlowMixin:
         from medical_formatting import technical_report_path
         from universal_generation import render_documents_from_pack, save_generation_report
 
-        output_format = self._ask_custom_document_output_format()
+        output_format = str(getattr(self, "_planned_custom_output_format", "") or "").strip().lower()
+        if output_format not in {"docx", "pdf"}:
+            output_format = self._ask_custom_document_output_format()
         result = render_documents_from_pack(
             pack=current_pack,
             case=case,
@@ -91,7 +104,7 @@ class ActionsDocumentIntelligenceFlowMixin:
             record_soft_exception("actions_document_intelligence.post_render_fill", exc)
         if output_format == "pdf" and created_paths:
             created_paths = self._export_custom_documents_to_pdf(created_paths)
-        report_path = save_generation_report(result, technical_report_path(out_dir, "custom_profile_generation_report.txt"))
+        report_path = save_generation_report(result, technical_report_path(out_dir, "custom_profile_generation_report.txt")) if self._diagnostic_reports_enabled() else None
         if result.skipped_documents:
             self._log("\n⚠ Custom-документы профиля пропущены:\n")
             for item in result.skipped_documents:
@@ -104,9 +117,9 @@ class ActionsDocumentIntelligenceFlowMixin:
             self._log("\n✅ Созданы custom-документы профиля:\n")
             for path in created_paths:
                 self._log(f"- {path}\n")
-        elif result.skipped_documents:
-            raise ValueError("Custom-документы профиля не созданы: " + "; ".join(str(item) for item in result.skipped_documents[:5]))
-        if self._diagnostic_reports_enabled():
+        if result.skipped_documents:
+            raise ValueError("Неполный комплект custom-документов запрещён: " + "; ".join(str(item) for item in result.skipped_documents[:5]))
+        if self._diagnostic_reports_enabled() and report_path is not None:
             self._log(f"Технический отчёт custom-профиля: {report_path}\n")
         return created_paths
 

@@ -273,20 +273,16 @@ def _looks_like_icd10_diagnosis(value: str) -> bool:
     """Accept any ICD-10 class letter, not only the legacy F-class."""
     return bool(_ICD10_ANY_CODE_RE.search(str(value or "")))
 
-def _custom_ids_text(selected_custom: Sequence[str]) -> str:
-    return " ".join(str(item or "").strip().lower().replace("ё", "е") for item in selected_custom or ())
-
-
 def _treatment_required(selected_medical: Sequence[str], selected_custom: Sequence[str] = ()) -> bool:
-    custom_text = _custom_ids_text(selected_custom)
-    custom_needs = any(marker in custom_text for marker in ("discharge", "epicrisis", "rvk", "commission", "vk_mse", "mse", "treatment"))
-    return bool(set(selected_medical) & {"primary", "discharge", "commission", "vk_mse", "sick_leave_vk"}) or custom_needs
+    # Custom-document requirements are applied later from explicit semantic
+    # fields/role metadata. Human ids/names must never influence this decision.
+    _ = selected_custom
+    return bool(set(selected_medical) & {"primary", "discharge", "commission", "vk_mse", "sick_leave_vk"})
 
 
 def _discharge_required(selected_medical: Sequence[str], selected_diaries: bool, selected_custom: Sequence[str] = ()) -> bool:
-    custom_text = _custom_ids_text(selected_custom)
-    custom_needs = any(marker in custom_text for marker in ("daily_diary", "diary", "discharge", "epicrisis", "rvk", "discharge_date"))
-    return selected_diaries or bool(set(selected_medical) & {"discharge", "rvk"}) or custom_needs
+    _ = selected_custom
+    return selected_diaries or bool(set(selected_medical) & {"discharge", "rvk"})
 
 
 def selected_output_labels(selected_medical: Sequence[str], selected_diaries: bool, selected_custom: Sequence[str] = ()) -> tuple[str, ...]:
@@ -326,10 +322,10 @@ def build_patient_case_review(
     diagnosis = _clean(data.diagnosis)
     treatment = _clean(data.treatment_plan)
 
-    medical_or_diary = bool(selected_medical or selected_diaries or selected_custom)
-    needs_case = bool(selected_medical or selected_custom)
-    needs_discharge = _discharge_required(selected_medical, selected_diaries, selected_custom)
-    needs_treatment = _treatment_required(selected_medical, selected_custom)
+    medical_or_diary = bool(selected_medical or selected_diaries)
+    needs_case = bool(selected_medical)
+    needs_discharge = _discharge_required(selected_medical, selected_diaries, ())
+    needs_treatment = _treatment_required(selected_medical, ())
 
     fields.append(PatientCaseField("fio", "ФИО пациента в документах", fio, _manual_status(fio, False, required=medical_or_diary), "из первичного документа", required=medical_or_diary))
     fields.append(PatientCaseField("output_fio", "Имя пациента для файлов", output_fio, _manual_status(output_fio, manual_patient_name, required=medical_or_diary), "UI/карточка пациента", required=medical_or_diary))
@@ -337,8 +333,8 @@ def build_patient_case_review(
     fields.append(PatientCaseField("birth", "Дата/год рождения", birth, _manual_status(birth, False, required=False), "из первичного документа", required=False))
     fields.append(PatientCaseField("admission_date", "Дата поступления", admission_date, _date_status(admission_date, manual_admission_date, required=medical_or_diary), "заголовок/первичный документ/UI", required=medical_or_diary))
     fields.append(PatientCaseField("discharge_date", "Дата выписки", discharge_date, _date_status(discharge_date, manual_discharge_date, required=needs_discharge), "UI/popup", required=needs_discharge))
-    diagnosis_required = bool(selected_medical or selected_diaries or selected_custom)
-    diagnosis_requires_icd10 = bool(selected_medical or selected_custom)
+    diagnosis_required = bool(selected_medical or selected_diaries)
+    diagnosis_requires_icd10 = bool(selected_medical)
     fields.append(PatientCaseField(
         "diagnosis",
         "Диагноз",
@@ -350,7 +346,7 @@ def build_patient_case_review(
     fields.append(PatientCaseField("treatment", "Лечение", treatment, _manual_status(treatment, manual_treatment, required=needs_treatment), "первичный документ или popup", required=needs_treatment))
 
     warnings = list(data.warnings or [])
-    if diagnosis and not _looks_like_icd10_diagnosis(diagnosis) and (selected_medical or selected_custom):
+    if diagnosis and not _looks_like_icd10_diagnosis(diagnosis) and selected_medical:
         warnings.append("Диагноз найден без явного шифра МКБ-10 — выберите диагноз из справочника или укажите код вручную.")
     return PatientCaseReview(tuple(fields), selected_labels, output_dir=str(output_dir or ""), primary_path=str(primary_path or ""), warnings=tuple(warnings))
 
@@ -406,6 +402,9 @@ def augment_patient_case_review_with_custom_flags(
                 return
         fields.append(PatientCaseField(key, label, value, status(value, manual=manual, required=True, date=date, icd10=icd10), source, True))
 
+    upsert("fio", "ФИО пациента в документах", review.value("fio"), required=bool(custom_flags.get("requires_fio")), source="custom-кнопка профиля")
+    upsert("output_fio", "Имя пациента для файлов", review.value("output_fio"), required=bool(custom_flags.get("requires_fio")), source="custom-кнопка профиля")
+    upsert("admission_date", "Дата поступления", review.value("admission_date"), required=bool(custom_flags.get("requires_admission_date")), source="custom-кнопка профиля", date=True)
     upsert("case_number", "Номер истории болезни", case_number, required=bool(custom_flags.get("requires_case_number")), source="custom-кнопка профиля", manual=manual_case_number)
     upsert("diagnosis", "Диагноз", diagnosis, required=bool(custom_flags.get("requires_diagnosis")), source="custom-кнопка профиля", manual=manual_diagnosis, icd10=True)
     upsert("treatment", "Лечение", treatment, required=bool(custom_flags.get("requires_treatment")), source="custom-кнопка профиля", manual=manual_treatment)

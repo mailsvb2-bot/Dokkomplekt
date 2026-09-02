@@ -515,7 +515,7 @@ _DOCUMENT_TITLE_STOPWORDS = (
 )
 
 
-def recognize_document_title_from_template(template_path: str | Path, *, max_blocks: int = 14) -> str:
+def recognize_document_title_from_template(template_path: str | Path, *, max_blocks: int = 40) -> str:
     """Return a human document title from the visible upper DOCX area.
 
     Critical production rule: block-03 buttons are created from the document

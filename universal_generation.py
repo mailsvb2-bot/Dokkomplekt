@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Sequence
 
+from diagnostic_logging import record_soft_exception
 from document_output_format import export_docx_to_pdf, normalize_output_format
 from medical_formatting import redact_technical_text, technical_ref
 from universal_fields import PatientCase, normalize_field_id
@@ -288,6 +289,11 @@ def render_documents_from_pack(
         docx_path = _available_batch_path(output_root / rendered_name, reserved_output_names, reserved_output_paths)
         plans.append((document, template_path, docx_path))
 
+    # Strict multi-document creation is all-or-nothing.  Do not render the good
+    # subset when one selected id/template/required field is invalid.
+    if strict and skipped:
+        return PackGenerationResult((), (), tuple(skipped), ())
+
     def render_one(plan: tuple[DocumentTemplateSpec, Path, Path]) -> RenderResult:
         document, template_path, docx_path = plan
         return render_template_to_docx(
@@ -300,16 +306,24 @@ def render_documents_from_pack(
             spellcheck_enabled=spellcheck_enabled,
         )
 
-    if len(plans) >= 4:
-        # Keep the pool deliberately small. Profiling shows five workers gives
-        # useful Windows ZIP/XML overlap without turning batch creation into an
-        # unbounded CPU/disk fan-out. Futures are consumed in document order.
-        with ThreadPoolExecutor(max_workers=min(5, len(plans)), thread_name_prefix="dokkomplekt-render") as executor:
-            futures = [executor.submit(render_one, plan) for plan in plans]
-            render_pairs = [(plan, future.result()) for plan, future in zip(plans, futures, strict=True)]
-    else:
-        render_pairs = [(plan, render_one(plan)) for plan in plans]
+    try:
+        if len(plans) >= 4:
+            # Futures may finish out of order, but no partial files survive a
+            # sibling failure: every planned path is rolled back below.
+            with ThreadPoolExecutor(max_workers=min(5, len(plans)), thread_name_prefix="dokkomplekt-render") as executor:
+                futures = [executor.submit(render_one, plan) for plan in plans]
+                render_pairs = [(plan, future.result()) for plan, future in zip(plans, futures, strict=True)]
+        else:
+            render_pairs = [(plan, render_one(plan)) for plan in plans]
+    except Exception:
+        for _document, _template_path, planned_path in plans:
+            try:
+                planned_path.unlink()
+            except OSError as cleanup_exc:
+                record_soft_exception("universal_generation.rollback_render", cleanup_exc, detail=str(planned_path))
+        raise
 
+    pdf_failure = ""
     for plan, result in render_pairs:
         document, _template_path, _docx_path = plan
         renders.append(result)
@@ -318,10 +332,19 @@ def render_documents_from_pack(
             try:
                 final_path = export_docx_to_pdf(final_path)
             except Exception as exc:
-                warnings.append(f"{document.button_label}: PDF export failed, Word file kept: {exc}")
+                pdf_failure = f"{document.button_label}: не удалось создать PDF: {exc}"
+                break
         created.append(str(final_path))
         if result.missing_fields:
             warnings.append(f"{document.button_label}: placeholders без значения: {', '.join(result.missing_fields)}")
+    if pdf_failure:
+        for _document, _template_path, planned_path in plans:
+            for candidate in (planned_path, planned_path.with_suffix(".pdf")):
+                try:
+                    candidate.unlink()
+                except OSError as cleanup_exc:
+                    record_soft_exception("universal_generation.rollback_pdf", cleanup_exc, detail=str(candidate))
+        return PackGenerationResult((), tuple(renders), tuple([*skipped, pdf_failure]), tuple(dict.fromkeys(warnings)))
     return PackGenerationResult(tuple(created), tuple(renders), tuple(skipped), tuple(dict.fromkeys(warnings)))
 
 
