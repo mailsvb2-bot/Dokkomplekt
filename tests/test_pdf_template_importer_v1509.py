@@ -34,7 +34,8 @@ def test_pdf_importer_creates_profile_owned_docx_template(monkeypatch, tmp_path)
     assert document.template.endswith(".docx")
     assert "custom.invoice_number" in document.required_fields
     assert "custom.amount" in document.required_fields
-    assert (profile_dir / "templates" / document.template).exists()
+    assert document.template.startswith("templates/")
+    assert (profile_dir / document.template).exists()
     assert list((profile_dir / "templates").glob("*.pdf")) == []
 
 

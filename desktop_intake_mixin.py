@@ -94,6 +94,31 @@ class DesktopIntakeMixin:
             record_soft_exception("desktop_intake_mixin.gui_runtime_lock_after", exc)
 
     def _close_app_with_runtime_lock_release(self) -> None:
+        for attr in ("_desktop_intake_poll_job", "_desktop_intake_gui_lock_job"):
+            job = getattr(self, attr, None)
+            if job is None:
+                continue
+            try:
+                self.root.after_cancel(job)
+            except Exception as exc:
+                record_soft_exception("desktop_intake_mixin.cancel_after_on_close", exc, detail=attr)
+            setattr(self, attr, None)
+        self._desktop_intake_enabled = False
+        # Tk stores callbacks as Tcl commands.  Destroying the interpreter while
+        # unrelated after()/after_idle() jobs are still queued produces noisy
+        # "invalid command name ..." errors on shutdown and can leak callbacks
+        # into the next live-GUI test/session.  At application shutdown every
+        # pending UI callback is obsolete, so cancel the interpreter queue as one
+        # lifecycle unit before destroying the root window.
+        try:
+            pending = tuple(self.root.tk.call("after", "info") or ())
+            for job in pending:
+                try:
+                    self.root.after_cancel(job)
+                except Exception as exc:
+                    record_soft_exception("desktop_intake_mixin.cancel_pending_after", exc, detail=str(job))
+        except Exception as exc:
+            record_soft_exception("desktop_intake_mixin.enumerate_pending_after", exc)
         try:
             from desktop_intake_agent import release_gui_runtime_lock
             release_gui_runtime_lock()

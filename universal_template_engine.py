@@ -56,16 +56,16 @@ class TemplateValidationResult:
     unknown_fields: tuple[str, ...] = ()
     missing_required_placeholders: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
+    visible_fields: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
-        # A template with zero placeholders looks valid syntactically, but cannot
-        # be filled by the universal renderer. Treat it as blocked, not merely a
-        # warning, so doctors do not add inert templates to a paid profile.
-        return bool(self.placeholders) and not self.unknown_fields and not self.missing_required_placeholders
+        # Doctors may use either technical placeholders or ordinary visible Word
+        # blanks such as ``ФИО: ______`` / an empty neighbouring table cell.
+        return bool(self.placeholders or self.visible_fields) and not self.unknown_fields and not self.missing_required_placeholders
 
     def field_ids(self) -> tuple[str, ...]:
-        return tuple(dict.fromkeys(item.field_id for item in self.placeholders))
+        return tuple(dict.fromkeys([*(item.field_id for item in self.placeholders), *self.visible_fields]))
 
     def to_dict(self) -> dict:
         return {
@@ -74,6 +74,7 @@ class TemplateValidationResult:
             "unknown_fields": list(self.unknown_fields),
             "missing_required_placeholders": list(self.missing_required_placeholders),
             "warnings": list(self.warnings),
+            "visible_fields": list(self.visible_fields),
             "ok": self.ok,
         }
 
@@ -106,11 +107,14 @@ class PackValidationResult:
             lines.append("Шаблоны:")
             for result in self.template_results:
                 state = "OK" if result.ok else "ошибка"
-                lines.append(f"• {Path(result.template_path).name}: {state}, placeholders={len(result.placeholders)}")
+                lines.append(
+                    f"• {Path(result.template_path).name}: {state}, "
+                    f"placeholders={len(result.placeholders)}, visible_fields={len(result.visible_fields)}"
+                )
                 for unknown in result.unknown_fields:
                     lines.append(f"  - неизвестное поле: {unknown}")
                 for missing in result.missing_required_placeholders:
-                    lines.append(f"  - нет обязательного placeholder: {missing}")
+                    lines.append(f"  - нет обязательного заполняемого поля: {missing}")
         return "\n".join(lines)
 
     def to_dict(self) -> dict:
@@ -219,25 +223,43 @@ def validate_template(
     category: str = "",
     button_label: str = "",
 ) -> TemplateValidationResult:
-    """Validate placeholders in a user-supplied DOCX template."""
+    """Validate technical placeholders and ordinary visible Word blanks."""
 
     registry = registry or default_field_registry()
     placeholders = extract_template_placeholders(template_path, role_id=role_id, category=category, button_label=button_label)
+    from document_intelligence.form_fill import visible_fill_field_ids
+
+    visible_fields = visible_fill_field_ids(
+        template_path,
+        role_id=role_id,
+        category=category,
+        button_label=button_label,
+    )
     known = set(registry.ids()) | {"document.id", "document.label", "document.category", "document.description"}
     unknown = sorted({item.field_id for item in placeholders if item.field_id not in known and not item.field_id.startswith("custom.")})
     placeholder_fields = {item.field_id for item in placeholders}
+    fillable_fields = placeholder_fields | set(visible_fields)
     missing_required = sorted({
         normalize_field_id_for_context(field_id, role_id=role_id, category=category, document_label=button_label)
         for field_id in required_fields
-        if normalize_field_id_for_context(field_id, role_id=role_id, category=category, document_label=button_label) not in placeholder_fields
+        if normalize_field_id_for_context(field_id, role_id=role_id, category=category, document_label=button_label) not in fillable_fields
     })
     warnings: list[str] = []
-    if not placeholders:
-        warnings.append("В шаблоне нет placeholders вида {{patient.fio}} — такой шаблон нельзя заполнить универсальным движком.")
+    if not placeholders and visible_fields:
+        warnings.append("Шаблон будет заполняться по обычным видимым полям Word без технических {{...}} меток.")
+    elif not placeholders and not visible_fields:
+        warnings.append("В шаблоне не найдено ни {{...}} меток, ни видимых полей вида «ФИО: ______» / пустой соседней ячейки.")
     duplicate_fields = [field_id for field_id in placeholder_fields if sum(1 for item in placeholders if item.field_id == field_id) > 1]
     if duplicate_fields:
         warnings.append("Повторяющиеся поля в шаблоне: " + ", ".join(sorted(set(duplicate_fields))))
-    return TemplateValidationResult(str(Path(template_path).expanduser()), placeholders, tuple(unknown), tuple(missing_required), tuple(warnings))
+    return TemplateValidationResult(
+        str(Path(template_path).expanduser()),
+        placeholders,
+        tuple(unknown),
+        tuple(missing_required),
+        tuple(warnings),
+        tuple(visible_fields),
+    )
 
 
 def infer_document_spec_from_template(
@@ -277,11 +299,24 @@ def infer_document_spec_from_template(
         source_language = "auto"
         label_source = "manual" if button_label else "template_title"
     placeholders = extract_template_placeholders(path, role_id=role_id, category=category, button_label=label)
+    from document_intelligence.form_fill import visible_fill_field_ids
+
+    visible_fields = visible_fill_field_ids(
+        path,
+        role_id=role_id,
+        category=category,
+        button_label=label,
+    )
     semantic_fields = tuple(
         dict.fromkeys(
-            item.field_id
-            for item in placeholders
-            if not item.field_id.startswith("document.") and (item.field_id in registry or item.field_id.startswith("custom."))
+            [
+                *(
+                    item.field_id
+                    for item in placeholders
+                    if not item.field_id.startswith("document.") and (item.field_id in registry or item.field_id.startswith("custom."))
+                ),
+                *(field_id for field_id in visible_fields if field_id in registry or field_id.startswith("custom.")),
+            ]
         )
     )
     doc_id = _safe_document_id(document_id or path.stem or label)
@@ -293,7 +328,13 @@ def infer_document_spec_from_template(
         required_fields=semantic_fields,
         optional_fields=(),
         category=category or "medical",
-        description="Создано автоматически по placeholders в пользовательском DOCX-шаблоне.",
+        description=(
+            "Создано автоматически по техническим меткам и видимым полям пользовательского DOCX-шаблона."
+            if placeholders and visible_fields
+            else "Создано автоматически по placeholders в пользовательском DOCX-шаблоне."
+            if placeholders
+            else "Создано автоматически по обычным видимым полям пользовательского DOCX-шаблона."
+        ),
         role_id=role_id,
         button_language=button_language,
         source_language=source_language,
@@ -419,7 +460,7 @@ def render_template_to_docx(
     output_language: str = "auto",
     spellcheck_enabled: bool = True,
 ) -> RenderResult:
-    """Render a custom DOCX template using explicit ``{{field.id}}`` placeholders."""
+    """Render a custom DOCX template using placeholders and visible Word blanks."""
 
     template = _existing_docx(template_path, "шаблон документа")
     from medical_docx_xml_fragments import ensure_docx_compatible
@@ -442,6 +483,25 @@ def render_template_to_docx(
     output = Path(output_path).expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output))
+    try:
+        from document_intelligence.form_fill import fill_docx_visible_fields
+
+        visible_filled = fill_docx_visible_fields(
+            output,
+            context,
+            role_id=document.role_id,
+            category=document.category,
+            button_label=document.button_label,
+        )
+        replaced.update(visible_filled)
+    except Exception as exc:
+        record_soft_exception("universal_template_engine.visible_field_fill", exc, detail=str(output))
+        if strict:
+            try:
+                output.unlink()
+            except OSError as cleanup_exc:
+                record_soft_exception("universal_template_engine.visible_field_fill_cleanup", cleanup_exc, detail=str(output))
+            raise
     return RenderResult(str(output), tuple(sorted(replaced)), tuple(sorted(missing_seen)), ())
 
 
@@ -500,12 +560,12 @@ def attach_template_to_pack(
     )
     if category != "diaries" and not final_validation.ok:
         reasons: list[str] = []
-        if not final_validation.placeholders:
-            reasons.append("нет placeholders")
+        if not final_validation.placeholders and not final_validation.visible_fields:
+            reasons.append("нет ни placeholders, ни обычных видимых полей Word")
         if final_validation.unknown_fields:
             reasons.append("неизвестные поля: " + ", ".join(final_validation.unknown_fields))
         if final_validation.missing_required_placeholders:
-            reasons.append("нет обязательных placeholders: " + ", ".join(final_validation.missing_required_placeholders))
+            reasons.append("нет обязательных заполняемых полей: " + ", ".join(final_validation.missing_required_placeholders))
         raise ValueError("Шаблон не прошёл финальную семантическую проверку: " + "; ".join(reasons or ["ошибка шаблона"]))
 
     target_name = source.with_suffix(".docx").name if source.suffix.lower() == ".docm" else source.name

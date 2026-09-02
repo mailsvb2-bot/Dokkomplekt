@@ -252,6 +252,16 @@ class WatermarkBatchResult:
         return sum(1 for item in self.results if item.changed)
 
 
+@dataclass(frozen=True)
+class UsageReservation:
+    """One fail-closed usage reservation held while output is still staged."""
+
+    token: str
+    count: int
+    month: str
+    trial: bool
+
+
 class ProductAccessManager:
     def __init__(self, storage_dir: str | Path | None = None, now: datetime | None = None):
         self.storage_dir = Path(storage_dir) if storage_dir else self.default_storage_dir()
@@ -260,6 +270,7 @@ class ProductAccessManager:
         self.state_path = self.storage_dir / "product_access_state.json"
         self.state_guard_path = self.storage_dir / "product_access_guard.json"
         self.license_path = Path(os.getenv("DOKKOMPLEKT_LICENSE_FILE") or self.storage_dir / "license.json")
+        self._live_usage_reservations: set[str] = set()
 
     @staticmethod
     def default_storage_dir() -> Path:
@@ -556,15 +567,61 @@ class ProductAccessManager:
         delta = max(0, int(count or 0))
         if not delta:
             return
+        state = self.current_state()
         payload = self._ensure_trial_started(self._load_state_payload())
         usage = payload.get("usage_by_month") if isinstance(payload.get("usage_by_month"), dict) else {}
         key = month_key(self._now())
         usage[key] = int(usage.get(key, 0) or 0) + delta
         payload["usage_by_month"] = usage
-        if self.current_state().plan == "trial":
+        if state.plan == "trial":
             payload["trial_created_total"] = int(payload.get("trial_created_total", 0) or 0) + delta
         payload["updated_at"] = iso(self._now())
         self._save_state_payload(payload)
+
+    def reserve_created_documents(self, count: int) -> UsageReservation | None:
+        """Charge staged output exactly once and return a rollback reservation.
+
+        The charge is intentionally fail-closed before the filesystem commit.
+        A known commit failure releases it; an ambiguous process crash keeps the
+        charge rather than allowing documents to escape without accounting.
+        """
+
+        delta = max(0, int(count or 0))
+        if not delta:
+            return None
+        state = self.current_state()
+        reservation = UsageReservation(uuid.uuid4().hex, delta, month_key(self._now()), state.plan == "trial")
+        payload = self._ensure_trial_started(self._load_state_payload())
+        usage = payload.get("usage_by_month") if isinstance(payload.get("usage_by_month"), dict) else {}
+        usage[reservation.month] = int(usage.get(reservation.month, 0) or 0) + reservation.count
+        payload["usage_by_month"] = usage
+        if reservation.trial:
+            payload["trial_created_total"] = int(payload.get("trial_created_total", 0) or 0) + reservation.count
+        payload["updated_at"] = iso(self._now())
+        self._save_state_payload(payload)
+        self._live_usage_reservations.add(reservation.token)
+        return reservation
+
+    def finalize_created_documents(self, reservation: UsageReservation | None) -> None:
+        if reservation is not None:
+            self._live_usage_reservations.discard(reservation.token)
+
+    def release_created_documents(self, reservation: UsageReservation | None) -> None:
+        if reservation is None or reservation.token not in self._live_usage_reservations:
+            return
+        payload = self._ensure_trial_started(self._load_state_payload())
+        usage = payload.get("usage_by_month") if isinstance(payload.get("usage_by_month"), dict) else {}
+        current = int(usage.get(reservation.month, 0) or 0)
+        usage[reservation.month] = max(0, current - reservation.count)
+        payload["usage_by_month"] = usage
+        if reservation.trial:
+            payload["trial_created_total"] = max(
+                0,
+                int(payload.get("trial_created_total", 0) or 0) - reservation.count,
+            )
+        payload["updated_at"] = iso(self._now())
+        self._save_state_payload(payload)
+        self._live_usage_reservations.discard(reservation.token)
 
     def current_watermark_text(self) -> str:
         return self.current_state().watermark_text()
@@ -644,6 +701,55 @@ class ProductAccessMixin:
     def _product_access_manager(self) -> ProductAccessManager:
         return ProductAccessManager()
 
+    def _apply_product_watermark_to_docx(self, created_files: Iterable[str | Path]) -> list[Path]:
+        paths = [Path(item) for item in created_files]
+        if not paths or not product_access_enforcement_enabled():
+            return paths
+        manager = self._product_access_manager()
+        watermark = manager.current_watermark_text()
+        docx_paths = [path for path in paths if path.suffix.lower() == ".docx"]
+        if watermark and docx_paths:
+            result = apply_watermark_to_files(docx_paths, watermark)
+            if result.errors:
+                self._discard_unlicensed_outputs(paths)
+                raise RuntimeError(
+                    "Документы не выданы: не удалось гарантированно применить водяной знак trial/demo:\n"
+                    + "\n".join(result.errors[:10])
+                )
+        return paths
+
+    def _apply_product_watermark_before_pdf_export(self, docx_files: Iterable[str | Path]) -> list[Path]:
+        """Watermark DOCX before PDF conversion so trial PDF is never unmarked."""
+
+        return self._apply_product_watermark_to_docx(docx_files)
+
+    def _reserve_product_access_for_staged_files(self, created_files: Iterable[str | Path]):
+        paths = [Path(item) for item in created_files]
+        if not paths or not product_access_enforcement_enabled():
+            return None
+        self._apply_product_watermark_to_docx(paths)
+        manager = self._product_access_manager()
+        try:
+            reservation = manager.reserve_created_documents(len(paths))
+        except Exception as exc:
+            self._discard_unlicensed_outputs(paths)
+            raise RuntimeError("Документы не выданы: не удалось надёжно зарезервировать счётчик лицензии.") from exc
+        return manager, reservation
+
+    @staticmethod
+    def _release_product_access_reservation(handle) -> None:
+        if not handle:
+            return
+        manager, reservation = handle
+        manager.release_created_documents(reservation)
+
+    @staticmethod
+    def _finalize_product_access_reservation(handle) -> None:
+        if not handle:
+            return
+        manager, reservation = handle
+        manager.finalize_created_documents(reservation)
+
     def _enforce_product_access_on_created_files(self, created_files: Iterable[str | Path]) -> list[Path]:
         paths = [Path(item) for item in created_files]
         if not paths or not product_access_enforcement_enabled():
@@ -651,7 +757,8 @@ class ProductAccessMixin:
         manager = self._product_access_manager()
         watermark = manager.current_watermark_text()
         if watermark:
-            result = apply_watermark_to_files(paths, watermark)
+            docx_paths = [path for path in paths if path.suffix.lower() == ".docx"]
+            result = apply_watermark_to_files(docx_paths, watermark)
             if result.errors:
                 self._discard_unlicensed_outputs(paths)
                 raise RuntimeError(
@@ -690,6 +797,8 @@ class ProductAccessMixin:
         return super().create_selected_outputs(print_after=print_after)
 
     def _created_files_from_results(self, created_medical: list[Path], created_custom: list[Path], diary_result):
+        """Preserve fail-closed enforcement for legacy/non-transactional callers."""
+
         created_files = super()._created_files_from_results(created_medical, created_custom, diary_result)
         return self._enforce_product_access_on_created_files(created_files)
 

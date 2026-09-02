@@ -92,17 +92,10 @@ class ActionsDocumentIntelligenceFlowMixin:
             output_format="docx",
         )
         created_paths = [Path(item) for item in result.created_files]
-        try:
-            from document_intelligence.form_fill import fill_docx_visible_fields
-
-            values = {field_id: value.value for field_id, value in case.values.items()}
-            for path in created_paths:
-                fill_docx_visible_fields(path, values)
-        except Exception as exc:
-            from diagnostic_logging import record_soft_exception
-
-            record_soft_exception("actions_document_intelligence.post_render_fill", exc)
         if output_format == "pdf" and created_paths:
+            watermark_before_pdf = getattr(self, "_apply_product_watermark_before_pdf_export", None)
+            if callable(watermark_before_pdf):
+                watermark_before_pdf(created_paths)
             created_paths = self._export_custom_documents_to_pdf(created_paths)
         report_path = save_generation_report(result, technical_report_path(out_dir, "custom_profile_generation_report.txt")) if self._diagnostic_reports_enabled() else None
         if result.skipped_documents:
@@ -130,7 +123,10 @@ class ActionsDocumentIntelligenceFlowMixin:
         errors: list[str] = []
         for path in paths:
             try:
-                exported.append(export_docx_to_pdf(path))
+                pdf_path = export_docx_to_pdf(path)
+                exported.append(pdf_path)
+                if pdf_path != path:
+                    path.unlink()
             except Exception as exc:
                 from diagnostic_logging import record_soft_exception
 
@@ -138,7 +134,7 @@ class ActionsDocumentIntelligenceFlowMixin:
                 errors.append(f"{path.name}: {exc}")
         if errors:
             raise RuntimeError(
-                "Выбран формат PDF, но PDF не удалось создать. Word-файлы сохранены как аварийные копии:\n"
+                "Выбран формат PDF, но PDF не удалось создать. Комплект не будет опубликован:\n"
                 + "\n".join(errors[:10])
             )
         return exported

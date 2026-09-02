@@ -44,6 +44,17 @@ def _doctor_buttons_setup_completed(pack) -> bool:
     return bool(principles.get(BLOCK03_DOCTOR_SETUP_FLAG)) and str(principles.get("doctor_button_review_contract_version", "")).strip() == DOCTOR_BUTTON_REVIEW_CONTRACT_VERSION
 
 
+def mark_doctor_buttons_setup_completed(pack) -> None:
+    """Persist the single canonical doctor-confirmation marker for block 03."""
+
+    principles = dict(getattr(pack, "workflow_principles", {}) or {})
+    principles[BLOCK03_DOCTOR_SETUP_FLAG] = True
+    principles["doctor_button_review_contract_version"] = DOCTOR_BUTTON_REVIEW_CONTRACT_VERSION
+    for legacy_flag in BLOCK03_LEGACY_SETUP_FLAGS:
+        principles[legacy_flag] = True
+    pack.workflow_principles = principles
+
+
 def assert_block03_first_run_contract() -> None:
     """Release lock: first launch block 03 must show one onboarding button only."""
 
@@ -69,6 +80,14 @@ def assert_block03_first_run_contract() -> None:
 
     if not _doctor_buttons_setup_completed(_ConfirmedPack()):
         raise AssertionError("Fresh doctor-confirmed profile must unlock block 03")
+
+    class _MarkablePack:
+        workflow_principles = {}
+
+    marked = _MarkablePack()
+    mark_doctor_buttons_setup_completed(marked)
+    if not _doctor_buttons_setup_completed(marked):
+        raise AssertionError("Canonical doctor-confirmation helper must unlock block 03")
 
 
 class LayoutChecklistMixin:

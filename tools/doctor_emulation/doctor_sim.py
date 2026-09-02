@@ -40,6 +40,13 @@ class DoctorSim:
         self.root_dir = Path(mkdtemp())
         self.intake = self.root_dir / "Выписанные пациенты"
         self.intake.mkdir()
+        # Live GUI emulation must never consume the developer's real trial or
+        # reuse real source/AppData state.  This is test isolation, not a runtime
+        # bypass: frozen builds ignore the test-disable flag.
+        os.environ["DOKKOMPLEKT_TEST_DISABLE_PRODUCT_ACCESS"] = "1"
+        os.environ["MEDICAL_AUTOFILL_PORTABLE_SOURCE_DATA"] = "0"
+        os.environ["APPDATA"] = str(self.root_dir / "appdata")
+        self.answers.setdefault(("askyesno", "Папка «Выписанные пациенты»"), False)
         self._patch_dialogs()
         # изолируем data root приложения
         import desktop_intake_agent as agent
@@ -154,9 +161,40 @@ class DoctorSim:
         out = Path(self.app._result_output_dir())
         return sorted(p for p in out.rglob("*.docx"))
 
+    def create_diaries(self):
+        """Create diaries through the same block-03 selection transaction as a doctor."""
+        from diary_constants import DIARY_KIND
+
+        # A repeated patient run opens the real modal duplicate-policy Toplevel.
+        # Drive that UI just like the doctor choosing the safe versioned output.
+        def drive_duplicate_dialog(attempt=0):
+            try:
+                for top in self.toplevels():
+                    if str(top.title()) == "Документы уже существуют":
+                        self.popups.append(("dialog", "Документы уже существуют → Создать новую версию"))
+                        self.click_button("Создать новую версию", top)
+                        return
+            except Exception:
+                return
+            if attempt < 80:
+                self.tk_root.after(25, lambda: drive_duplicate_dialog(attempt + 1))
+
+        if self.outputs():
+            self.tk_root.after(25, drive_duplicate_dialog)
+        diary_var = self.app.output_vars[DIARY_KIND]
+        diary_var.set(True)
+        self.app._on_output_toggle(DIARY_KIND)
+        if diary_var.get():
+            self.app.create_selected_outputs()
+        self.pump(0.4)
+
     def close(self):
         try:
-            self.tk_root.destroy()
+            closer = getattr(self.app, "_close_app_with_runtime_lock_release", None)
+            if callable(closer):
+                closer()
+            else:
+                self.tk_root.destroy()
         except Exception as exc:
             self.popups.append(("note", f"destroy: {exc}"))
         shutil.rmtree(self.root_dir, ignore_errors=True)
