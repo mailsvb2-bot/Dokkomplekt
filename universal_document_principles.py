@@ -24,9 +24,23 @@ def infer_document_principles_for_document(document: object, *, base_dir: str | 
 def missing_fields_from_principles(case: PatientCase, document: object, *, base_dir: str | Path | None = None):
     blueprint = infer_document_principles_for_document(document, base_dir=base_dir)
     result = []
+    role_id = str(getattr(document, "role_id", "") or "")
+    category = str(getattr(document, "category", "") or "")
+    button_label = str(getattr(document, "button_label", "") or "")
+    from dataclasses import replace
+    from document_intelligence.form_fill import visible_field_id
+
     for field in blueprint.fields:
-        if getattr(field, "required", True) and not case.get(field.field_id).strip():
-            result.append(field)
+        field_id = str(getattr(field, "field_id", "") or "").strip()
+        if getattr(field, "source", "") in {"visible_blank", "table_neighbor_blank"}:
+            field_id = visible_field_id(
+                str(getattr(field, "label", "") or ""),
+                role_id=role_id,
+                category=category,
+                button_label=button_label,
+            )
+        if getattr(field, "required", True) and field_id and not case.get(field_id).strip():
+            result.append(replace(field, field_id=field_id))
     return tuple(dict((field.field_id, field) for field in result).values())
 
 

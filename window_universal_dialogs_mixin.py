@@ -19,9 +19,12 @@ def _open_pdf_template_import_dialog(app, *, parent=None) -> None:
         pack = app._load_or_create_universal_pack()
         base_dir = app._universal_profile_path().parent
         from pdf_template_importer import import_pdf_templates_to_pack
+        from layout_checklist import mark_doctor_buttons_setup_completed
         from universal_profiles import save_document_pack
 
         labels = import_pdf_templates_to_pack(pack, source_paths, base_dir)
+        if labels:
+            mark_doctor_buttons_setup_completed(pack)
         save_document_pack(pack, app._universal_profile_path(), backup_reason="pdf_template_import")
         try:
             app._refresh_custom_profile_tiles()
@@ -29,7 +32,7 @@ def _open_pdf_template_import_dialog(app, *, parent=None) -> None:
             from diagnostic_logging import record_soft_exception
 
             record_soft_exception("window_universal_dialogs.pdf_import_refresh", exc)
-        messagebox.showinfo("PDF", "Imported PDF document buttons: " + (", ".join(labels) if labels else "none"), parent=target_parent)
+        messagebox.showinfo("PDF", "Добавлены кнопки из PDF: " + (", ".join(labels) if labels else "нет"), parent=target_parent)
     except Exception as exc:
         messagebox.showerror("PDF", str(exc), parent=target_parent)
 
@@ -38,8 +41,8 @@ def _open_template_setup_center_with_pdf(app, *, first_run: bool = False) -> Non
     parent = getattr(app, "root", None)
     try:
         use_pdf = messagebox.askyesno(
-            "PDF or Word",
-            "Add a PDF document example now?\n\nYes - select PDF.\nNo - open the usual Word template center.",
+            "PDF или Word",
+            "Добавить пример документа в PDF?\n\nДа — выбрать PDF.\nНет — открыть обычный центр Word-шаблонов.",
             parent=parent,
         )
     except Exception:

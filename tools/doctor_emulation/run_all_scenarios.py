@@ -1,8 +1,11 @@
 """Полная эмуляция пользовательских сценариев врача на живом Tkinter GUI.
 
 Запуск (вручную, вне pytest — сценарии тяжёлые):
-    xvfb-run -a python3 tools/doctor_emulation/run_all_scenarios.py         # все
-    xvfb-run -a python3 tools/doctor_emulation/run_all_scenarios.py s2      # один
+    xvfb-run -a python3 tools/doctor_emulation/run_all_scenarios.py s2      # один сценарий
+
+Полная матрица запускается GitHub Actions двумя свежими GUI-shard'ами
+(s1..s6 и s7..s12). Это соответствует реальным независимым запускам EXE и
+не заставляет один synthetic X/Tcl runtime переживать десяток отдельных roots.
 
 Каждый сценарий поднимает НАСТОЯЩЕЕ приложение, эмулирует ответы врача в
 диалогах и кликает по реальным виджетам (включая модальный intake-попап).
@@ -10,7 +13,6 @@
 """
 """Матрица сценариев врача. Каждый сценарий: (имя, функция) -> (ok, детали)."""
 import faulthandler, sys
-faulthandler.dump_traceback_later(60, exit=True)
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -34,6 +36,7 @@ def check(condition, message=""):
 def scenario(name):
     def deco(fn):
         def run():
+            print(f"[doctor-emulation] RUN {name}", flush=True)
             sim = None
             try:
                 import doctor_sim as _ds
@@ -55,6 +58,7 @@ def scenario(name):
                 RESULTS.append((name, False, f"{exc} | {' / '.join(tb)}{extra}", sim.popups if sim else []))
             finally:
                 if sim: sim.close()
+                print(f"[doctor-emulation] DONE {name}", flush=True)
         return run
     return deco
 
@@ -74,7 +78,7 @@ def s1():
     p = sim.root_dir/"p.docx"; make_docx(p, primary_lines())
     t = sim.root_dir/"тексты F32.docx"; make_docx(t, ["Фон выравнивается.","Активнее в режиме."])
     sim.drop(p); sim.app.status_files=[t]
-    sim.app.create_diaries(); sim.pump(0.5)
+    sim.create_diaries(); sim.pump(0.5)
     files = [f for f in sim.outputs() if "дневник" in f.name.lower()]
     check(files, f"нет дневников; ошибки: {sim.errors}")
     text = extract_docx_text(files[0])
@@ -123,11 +127,11 @@ def s2():
 
 @scenario("S3: клиническая схема дат (ответ 2)")
 def s3():
-    sim = DoctorSim(answers={("askstring","Как составлять дневники"): "2"})
+    sim = DoctorSim(answers={("askstring","Стиль дневников"): "2", ("askstring","Ритм заполнения дневников"): "1"})
     p = sim.root_dir/"p.docx"; make_docx(p, primary_lines(adm="01.05.2026", dis="30.05.2026"))
     t = sim.root_dir/"т.docx"; make_docx(t, ["Стабильно."])
     sim.drop(p); sim.app.status_files=[t]
-    sim.app.create_diaries(); sim.pump(0.5)
+    sim.create_diaries(); sim.pump(0.5)
     files=[f for f in sim.outputs() if "дневник" in f.name.lower()]
     check(files, sim.errors)
     text=extract_docx_text(files[0])
@@ -138,11 +142,11 @@ def s3():
 
 @scenario("S4: свои дни (ответ '3,5,9')")
 def s4():
-    sim = DoctorSim(answers={("askstring","Как составлять дневники"): "3,5,9"})
+    sim = DoctorSim(answers={("askstring","Стиль дневников"): "4", ("askstring","Свой стиль дневников"): "+3,+5,+9", ("askstring","Ритм заполнения дневников"): "1"})
     p = sim.root_dir/"p.docx"; make_docx(p, primary_lines(adm="01.05.2026", dis="30.05.2026"))
     t = sim.root_dir/"т.docx"; make_docx(t, ["Стабильно."])
     sim.drop(p); sim.app.status_files=[t]
-    sim.app.create_diaries(); sim.pump(0.5)
+    sim.create_diaries(); sim.pump(0.5)
     files=[f for f in sim.outputs() if "дневник" in f.name.lower()]
     check(files, sim.errors)
     text=extract_docx_text(files[0])
@@ -160,7 +164,7 @@ def s5():
     ])
     t = sim.root_dir/"т.docx"; make_docx(t, ["Ориентирована верно, спокойна, доступна контакту."])
     sim.drop(p); sim.app.status_files=[t]
-    sim.app.create_diaries(); sim.pump(0.5)
+    sim.create_diaries(); sim.pump(0.5)
     files=[f for f in sim.outputs() if "дневник" in f.name.lower()]
     check(files, sim.errors)
     text=extract_docx_text(files[0])
@@ -177,7 +181,7 @@ def s6():
     ])
     t = sim.root_dir/"т.docx"; make_docx(t, ["Стабильно."])
     sim.drop(p); sim.app.status_files=[t]
-    sim.app.create_diaries(); sim.pump(0.5)
+    sim.create_diaries(); sim.pump(0.5)
     files=[f for f in sim.outputs() if "дневник" in f.name.lower()]
     check(files, f"{sim.errors} | {sim.popups}")
     text=extract_docx_text(files[0])
@@ -194,7 +198,7 @@ def s7():
     sim.drop(p1)
     sim.answers["openfilenames"] = (str(tf),)
     sim.app.choose_status_files()
-    sim.app.create_diaries(); sim.pump(0.3)
+    sim.create_diaries(); sim.pump(0.3)
     p2 = sim.root_dir/"p2.docx"; make_docx(p2, [
         "Пациент: Сидоров Пётр Кузьмич, 1965 г.р.",
         "Дата поступления: 01.06.2026. Дата выписки: 08.06.2026.",
@@ -204,7 +208,7 @@ def s7():
     check(sim.app.patient_name_var.get() == "Сидоров Пётр Кузьмич", sim.app.patient_name_var.get())
     check(sim.app.discharge_date_var.get() == "08.06.2026", f"утечка выписки: {sim.app.discharge_date_var.get()!r}")
     check(sim.app.admission_date_var.get() == "01.06.2026")
-    sim.app.create_diaries(); sim.pump(0.3)
+    sim.create_diaries(); sim.pump(0.3)
     files=[f for f in sim.outputs() if "Сидоров" in f.name and "дневник" in f.name.lower()]
     check(files, f"{sim.errors} | {sim.popups[-3:]}")
     text=extract_docx_text(files[0])
@@ -214,14 +218,14 @@ def s7():
 
 @scenario("S8: почасовые дневники через переключатель")
 def s8():
-    sim = DoctorSim(answers={("askstring","Дневники по часам"): "2"})
+    sim = DoctorSim(answers={("askstring","Стиль дневников"): "3", ("askstring","Дневники по времени"): "2", ("askstring","Ритм заполнения дневников"): "1"})
     p = sim.root_dir/"p.docx"; make_docx(p, primary_lines(adm="05.05.2026 14:00", dis="07.05.2026"))
     t = sim.root_dir/"т.docx"; make_docx(t, ["Стабильно."])
     sim.drop(p)
     sim.answers["openfilenames"] = (str(t),)
     sim.app.choose_status_files()
     sim.app.diary_frequency_mode_var.set("hourly")
-    sim.app.create_diaries(); sim.pump(0.5)
+    sim.create_diaries(); sim.pump(0.5)
     files=[f for f in sim.outputs() if "дневник" in f.name.lower()]
     check(files, sim.errors)
     text=extract_docx_text(files[0])
@@ -236,12 +240,12 @@ def s9():
     sim.drop(p)
     sim.answers["openfilenames"] = (str(t),)
     sim.app.choose_status_files()
-    sim.app.create_diaries(); sim.pump(0.3)
+    sim.create_diaries(); sim.pump(0.3)
     n1 = len(sim.outputs())
     sim.drop(p)  # врач случайно бросил тот же файл ещё раз
     check(sim.app.patient_name_var.get() == "Орлова Мария Ивановна")
     check(sim.app.discharge_date_var.get() == "19.05.2026", sim.app.discharge_date_var.get())
-    sim.app.create_diaries(); sim.pump(0.3)
+    sim.create_diaries(); sim.pump(0.3)
     files=[f for f in sim.outputs() if "дневник" in f.name.lower()]
     check(files, sim.errors)
     return sim
@@ -254,7 +258,7 @@ def s10():
     sim.drop(p)
     sim.answers["openfilenames"] = (str(t),)
     sim.app.choose_status_files()
-    sim.app.create_diaries(); sim.pump(0.3)
+    sim.create_diaries(); sim.pump(0.3)
     files=[f for f in sim.outputs() if "дневник" in f.name.lower()]
     check(not files, "мастер отменён, но файлы созданы")
     # и никакого ERROR — только вежливое сообщение
@@ -263,7 +267,7 @@ def s10():
 
 @scenario("S11: документ врача с плейсхолдерами — данные подставлены")
 def s11():
-    sim = DoctorSim()
+    sim = DoctorSim(answers={("askyesno", "Формат результата"): False})
     p = sim.root_dir/"p.docx"; make_docx(p, primary_lines())
     sim.drop(p)
     # врач один раз создал кнопку из своего шаблона
@@ -290,12 +294,52 @@ def s11():
     check("{{patient.fio}}" not in text, "плейсхолдер не подставлен")
     return sim
 
+
+@scenario("S12: обычный Word врача без {{...}} — поля распознаны и заполнены")
+def s12():
+    sim = DoctorSim(answers={("askyesno", "Формат результата"): False})
+    p = sim.root_dir/"p.docx"; make_docx(p, primary_lines())
+    sim.drop(p)
+    tpl = sim.root_dir/"Обычный выписной эпикриз.docx"
+    doc = __import__("docx").Document()
+    doc.add_paragraph("ВЫПИСНОЙ ЭПИКРИЗ")
+    doc.add_paragraph("ФИО: ______")
+    doc.add_paragraph("Дата выписки: ______")
+    doc.add_paragraph("Диагноз: ______")
+    table = doc.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "Номер истории болезни"
+    table.cell(0, 1).text = ""
+    doc.save(tpl)
+    from universal_template_engine import attach_template_to_pack
+    pack = sim.app._load_or_create_universal_pack()
+    profile_dir = sim.app._universal_profile_path().parent
+    spec, _target = attach_template_to_pack(
+        pack, tpl, profile_dir, button_label="Обычный выписной эпикриз", role_id="discharge"
+    )
+    from universal_profiles import save_document_pack
+    save_document_pack(pack, sim.app._universal_profile_path())
+    created = sim.app._create_custom_documents_impl([str(spec.id)])
+    check(created, sim.errors)
+    text = extract_docx_text(created[0])
+    check("Орлова Мария Ивановна" in text, text[:220])
+    check("19.05.2026" in text and "F32.1" in text and "314/26" in text, text[:300])
+    check("______" not in text, "обычные поля Word остались незаполненными")
+    return sim
+
 for fn_name in list(globals()):
     pass
 import sys as _s
 only = _s.argv[1] if len(_s.argv)>1 else None
-runs = [v for k,v in sorted(globals().items()) if k.startswith("s") and callable(v) and k[1:].isdigit() and (only is None or k==only)]
-for r in runs: r()
+scenario_names = sorted(
+    [k for k,v in globals().items() if k.startswith("s") and callable(v) and k[1:].isdigit()],
+    key=lambda name: int(name[1:]),
+)
+if only not in scenario_names:
+    print("Укажите один сценарий: " + ", ".join(scenario_names))
+    raise SystemExit(2)
+
+faulthandler.dump_traceback_later(45, exit=True)
+globals()[only]()
 
 print("\n" + "="*72)
 for name, ok, detail, popups in RESULTS:
@@ -305,3 +349,5 @@ for name, ok, detail, popups in RESULTS:
     print(f"     попапов/кликов: {len(popups)}")
 fails = [r for r in RESULTS if not r[1]]
 print(f"\nИтог: {len(RESULTS)-len(fails)}/{len(RESULTS)} сценариев прошли")
+
+raise SystemExit(1 if fails else 0)

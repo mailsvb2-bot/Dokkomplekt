@@ -107,8 +107,8 @@ class SettingsMixin:
 
         Production-контракт: история пациентов, диагнозы, даты лечения, пути
         созданных документов и содержимое медицинских файлов никогда не
-        сохраняются в settings.json. На диск уходят только папки диалогов и
-        выбранный принтер.
+        сохраняются в settings.json. На диск уходят только технические
+        предпочтения интерфейса, включая активный профиль врача.
         """
         payload: dict = {}
         folders_raw = self._settings.get("folders")
@@ -124,6 +124,9 @@ class SettingsMixin:
         printer = str(self._settings.get("printer", "")).strip()
         if printer:
             payload["printer"] = printer
+        active_profile = str(self._settings.get("active_universal_profile", "")).strip()
+        if active_profile:
+            payload["active_universal_profile"] = active_profile
         language_raw = self._settings.get("language")
         if isinstance(language_raw, dict):
             language_payload = {}

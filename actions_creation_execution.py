@@ -158,12 +158,17 @@ class ActionsCreationExecutionMixin:
             )
             return []
 
-    def _created_files_from_results(self, created_medical: list[Path], created_custom: list[Path], diary_result) -> list[Path]:
+    def _raw_created_files_from_results(self, created_medical: list[Path], created_custom: list[Path], diary_result) -> list[Path]:
         created_files: list[Path] = list(created_medical)
         created_files.extend(created_custom)
         if diary_result is not None:
             created_files.extend(list(diary_result.created_files))
         return created_files
+
+    def _created_files_from_results(self, created_medical: list[Path], created_custom: list[Path], diary_result) -> list[Path]:
+        """Compatibility hook for callers outside the transactional creation path."""
+
+        return self._raw_created_files_from_results(created_medical, created_custom, diary_result)
 
 
     def _show_created_document_preview(self, created_files: list[Path]) -> None:
@@ -319,7 +324,7 @@ class ActionsCreationExecutionMixin:
             messagebox.showerror("Документы не созданы", f"Создание остановлено до изменения папки пациента:\n\n{exc}")
             return False
 
-        staged_files = self._created_files_from_results(created_medical, created_custom, diary_result)
+        staged_files = self._raw_created_files_from_results(created_medical, created_custom, diary_result)
         if errors or not staged_files:
             transaction.rollback()
             self._active_patient_output_dir = final_dir
@@ -338,10 +343,28 @@ class ActionsCreationExecutionMixin:
             self._set_status("Создание отменено: готовые документы не изменены")
             return False
 
+        access_reservation = None
+        reserve_access = getattr(self, "_reserve_product_access_for_staged_files", None)
+        if callable(reserve_access):
+            try:
+                access_reservation = reserve_access(staged_files)
+            except Exception as exc:
+                transaction.rollback()
+                self._active_patient_output_dir = final_dir
+                record_classified_error("reserve_product_access", exc, category=ErrorCategory.DOCX_RENDER)
+                messagebox.showerror("Документы не созданы", str(exc))
+                return False
+
         try:
             mapping = transaction.commit()
         except Exception as exc:
             transaction.rollback()
+            release_access = getattr(self, "_release_product_access_reservation", None)
+            if callable(release_access):
+                try:
+                    release_access(access_reservation)
+                except Exception as release_exc:
+                    record_soft_exception("actions_creation_execution.release_product_access_reservation", release_exc)
             self._active_patient_output_dir = final_dir
             record_classified_error("commit_output_transaction", exc, category=ErrorCategory.DOCX_RENDER)
             messagebox.showerror(
@@ -350,6 +373,15 @@ class ActionsCreationExecutionMixin:
                 "если безопасное восстановление невозможно, прежняя версия остаётся в резервной копии рядом с документами.\n\n" + str(exc),
             )
             return False
+
+        finalize_access = getattr(self, "_finalize_product_access_reservation", None)
+        if callable(finalize_access):
+            try:
+                finalize_access(access_reservation)
+            except Exception as exc:
+                # Usage was already charged fail-closed before commit.  A
+                # bookkeeping cleanup failure must not delete committed docs.
+                record_soft_exception("actions_creation_execution.finalize_product_access_reservation", exc)
 
         self._active_patient_output_dir = final_dir
 
@@ -369,7 +401,7 @@ class ActionsCreationExecutionMixin:
             diary_result.created_files = [committed_path(path) for path in diary_result.created_files]
             if getattr(diary_result, "report_path", None):
                 diary_result.report_path = committed_path(diary_result.report_path)
-        created_files = self._created_files_from_results(created_medical, created_custom, diary_result)
+        created_files = self._raw_created_files_from_results(created_medical, created_custom, diary_result)
         override_fields = tuple(getattr(self, "_missing_required_override_fields", ()) or ())
         details = {"print_after": "да" if print_after else "нет"}
         if override_fields:

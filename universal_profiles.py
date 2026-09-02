@@ -438,10 +438,13 @@ def profile_scope_label(pack: DocumentPack) -> str:
 def ensure_default_pack(path: str | Path) -> DocumentPack:
     candidate = Path(path).expanduser()
     if candidate.exists():
-        pack = _strip_builtin_documents(load_document_pack(candidate))
-        # Persist one-time cleanup so old seeded packs do not keep reappearing
-        # as if the program shipped ready-made medical templates.
-        save_document_pack(pack, candidate)
+        pack = load_document_pack(candidate)
+        before_cleanup = pack.to_dict()
+        pack = _strip_builtin_documents(pack)
+        # Persist only an actual one-time migration.  Merely opening/refreshing
+        # an already-clean profile must not rewrite it or create backup churn.
+        if pack.to_dict() != before_cleanup:
+            save_document_pack(pack, candidate, backup_reason="strip_legacy_builtin_documents")
         return pack
     pack = default_document_pack()
     save_document_pack(pack, candidate)

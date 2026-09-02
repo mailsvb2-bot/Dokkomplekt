@@ -75,13 +75,9 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
             record_soft_exception("window_setup_center.active_profile_dir", exc)
             return Path.home() / "MedicalDiaryAutofill" / "profiles"
     def _mark_buttons_created(pack) -> None:
-        principles = dict(getattr(pack, "workflow_principles", {}) or {})
-        # Strict v2 marker; legacy flags alone must not unlock first launch.
-        principles[BLOCK03_DOCTOR_SETUP_FLAG] = True
-        principles["doctor_button_review_contract_version"] = DOCTOR_BUTTON_REVIEW_CONTRACT_VERSION
-        for legacy_flag in BLOCK03_LEGACY_SETUP_FLAGS:
-            principles[legacy_flag] = True
-        pack.workflow_principles = principles
+        from layout_checklist import mark_doctor_buttons_setup_completed
+
+        mark_doctor_buttons_setup_completed(pack)
     def _save_pack(pack) -> None:
         from universal_profiles import save_document_pack
         save_document_pack(pack, self._universal_profile_path(), backup_reason="setup_center_save")
@@ -139,7 +135,8 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
     def show_tags_help() -> None:
         messagebox.showinfo(
             "Какие метки ставить в Word-шаблоне",
-            "Откройте свой Word-шаблон и поставьте в нужные места такие метки:\n\n"
+            "Обычные Word-поля вида «ФИО: ______» и пустые соседние ячейки таблицы программа заполняет сама.\n\n"
+            "Если нужна точная сложная разметка, можно дополнительно поставить технические метки:\n\n"
             "{{patient.fio}} — ФИО пациента\n"
             "{{case.number}} — номер истории болезни\n"
             "{{admission.date}} — дата поступления\n"
@@ -149,7 +146,7 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
             "{{patient.birth_date}} — дата рождения\n\n"
             "Пример в шаблоне:\n"
             "Пациент: {{patient.fio}}, история болезни № {{case.number}}.\n\n"
-            "После этого добавьте этот DOCX через кнопку «Добавить шаблон и кнопку».",
+            "Для простых бланков вручную добавлять {{...}} не требуется. После этого добавьте DOCX через кнопку «Добавить шаблон и кнопку».",
             parent=dialog,
         )
     def new_profile() -> None:
@@ -368,12 +365,12 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
                 )
                 if not is_diary and not pre_validation.ok:
                     reasons: list[str] = []
-                    if not pre_validation.placeholders:
-                        reasons.append("нет меток {{patient.fio}}, {{case.number}} и т.п.")
+                    if not pre_validation.placeholders and not pre_validation.visible_fields:
+                        reasons.append("не найдены ни метки {{patient.fio}}, ни обычные поля вида «ФИО: ______»")
                     if pre_validation.unknown_fields:
                         reasons.append("неизвестные поля: " + ", ".join(pre_validation.unknown_fields))
                     if pre_validation.missing_required_placeholders:
-                        reasons.append("нет обязательных меток: " + ", ".join(pre_validation.missing_required_placeholders))
+                        reasons.append("нет обязательных заполняемых полей: " + ", ".join(pre_validation.missing_required_placeholders))
                     warnings.append(f"«{label}» не добавлен: " + "; ".join(reasons or ["шаблон не прошёл проверку"]))
                     continue
                 spec, copied_to = attach_template_to_pack(
@@ -543,8 +540,8 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
                     )
                     if not is_diary and not pre_validation.ok:
                         details = []
-                        if not pre_validation.placeholders:
-                            details.append("нет меток {{patient.fio}}, {{case.number}} и т.п.")
+                        if not pre_validation.placeholders and not pre_validation.visible_fields:
+                            details.append("не найдены ни метки {{patient.fio}}, ни обычные поля вида «ФИО: ______»")
                         if pre_validation.unknown_fields:
                             details.append("неизвестные поля: " + ", ".join(pre_validation.unknown_fields))
                         raise ValueError("Шаблон не добавлен: " + "; ".join(details or ["проверка шаблона не пройдена"]))
@@ -567,8 +564,9 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
                     )
                     if not validation.ok and spec.category != "diaries":
                         raise ValueError(
-                            "Шаблон добавлять рано: в нём нет понятных меток для заполнения.\n\n"
-                            "Откройте Word-шаблон и поставьте метки вида {{patient.fio}}, {{case.number}}, {{diagnosis.main}}.\n"
+                            "Шаблон добавлять рано: в нём нет понятных мест для заполнения.\n\n"
+                            "Оставьте обычные поля вида «ФИО: ______» / пустые соседние ячейки таблицы "
+                            "или поставьте точные метки вида {{patient.fio}}, {{case.number}}, {{diagnosis.main}}.\n"
                             "Нажмите «Какие метки ставить?» — там есть шпаргалка."
                         )
                     if is_diary:

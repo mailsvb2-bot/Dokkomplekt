@@ -609,7 +609,7 @@ def _assert_universal_profile_contract() -> None:
         "Создать custom DOCX",
         "Мастер профиля / checklist",
         "def _iter_docx_paragraphs",
-        "bool(self.placeholders)",
+        "bool(self.placeholders or self.visible_fields)",
         "Неизвестный документ профиля",
         "Папка результата указывает на файл",
         '"\\\\" in normalized',

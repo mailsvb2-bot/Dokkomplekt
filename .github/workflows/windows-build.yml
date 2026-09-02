@@ -66,6 +66,44 @@ jobs:
             regression-contour.log
           if-no-files-found: ignore
 
+  live-doctor-gui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    env:
+      DOKKOMPLEKT_TEST_DISABLE_PRODUCT_ACCESS: '1'
+      MEDICAL_AUTOFILL_PORTABLE_SOURCE_DATA: '0'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install GUI-test dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements_dev.txt
+          sudo apt-get update
+          sudo apt-get install -y xvfb python3-tk
+      - name: Run live doctor GUI shard
+        shell: bash
+        run: |
+          if [ "${{ matrix.shard }}" = "1" ]; then
+            scenarios="s1 s2 s3 s4 s5 s6"
+          else
+            scenarios="s7 s8 s9 s10 s11 s12"
+          fi
+          for scenario in $scenarios; do
+            echo "==> $scenario"
+            xvfb-run -a python -u tools/doctor_emulation/run_all_scenarios.py "$scenario"
+          done
+
+
   build:
     runs-on: windows-latest
     timeout-minutes: 30

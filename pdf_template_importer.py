@@ -28,39 +28,60 @@ def import_pdf_templates_to_pack(
     templates_dir.mkdir(parents=True, exist_ok=True)
     existing_labels = {str(document.button_label or "").casefold() for document in pack.documents}
     imported: list[str] = []
-    for raw_path in pdf_paths:
-        source = Path(raw_path).expanduser()
-        if source.suffix.lower() != ".pdf":
-            raise ValueError(f"Unsupported source format: {source.name}")
-        pdf_text = read_pdf_text(source)
-        if not pdf_text.has_text:
-            details = "; ".join(pdf_text.warnings) or "no extractable text"
-            raise ValueError(f"PDF has no extractable text: {source.name}; {details}")
-        blueprint = DocumentIntelligenceCore().analyze_source(DocumentSource(str(source), user_label=source.stem))
-        label = unique_button_label(blueprint.title or source.stem, existing_labels)
-        target = _available_path(templates_dir / (_safe_stem(label or source.stem) + ".docx"))
-        conversion_mode = _write_pdf_template(source, target, pdf_text.text)
-        spec = DocumentTemplateSpec(
-            id=stable_document_id("pdf", label, source),
-            button_label=label,
-            template=target.name,
-            output_name="{{patient.fio}} " + label + ".docx",
-            required_fields=blueprint.required_field_ids,
-            optional_fields=(),
-            category=blueprint.domain or "custom",
-            description=(
-                "Converted from a user-owned PDF through Microsoft Word with layout preservation."
-                if conversion_mode == "word"
-                else "Reconstructed from extractable PDF text; complex PDF layout may require manual adjustment."
-            ),
-            role_id="pdf_source",
-            button_language="auto",
-            source_language="auto",
-            button_label_source="pdf_document_intelligence",
-        )
-        pack.add_document(spec)
-        existing_labels.add(label.casefold())
-        imported.append(label)
+    original_documents = tuple(pack.documents)
+    created_targets: list[Path] = []
+    pending_specs: list[DocumentTemplateSpec] = []
+    try:
+        for raw_path in pdf_paths:
+            source = Path(raw_path).expanduser()
+            if source.suffix.lower() != ".pdf":
+                raise ValueError(f"Unsupported source format: {source.name}")
+            pdf_text = read_pdf_text(source)
+            if not pdf_text.has_text:
+                details = "; ".join(pdf_text.warnings) or "no extractable text"
+                raise ValueError(f"PDF has no extractable text: {source.name}; {details}")
+            blueprint = DocumentIntelligenceCore().analyze_source(DocumentSource(str(source), user_label=source.stem))
+            label = unique_button_label(blueprint.title or source.stem, existing_labels)
+            target = _available_path(templates_dir / (_safe_stem(label or source.stem) + ".docx"))
+            conversion_mode = _write_pdf_template(source, target, pdf_text.text)
+            created_targets.append(target)
+            from document_intelligence.form_fill import visible_fill_field_ids
+
+            visible_fields = visible_fill_field_ids(
+                target,
+                role_id="pdf_source",
+                category=blueprint.domain or "custom",
+                button_label=label,
+            )
+            spec = DocumentTemplateSpec(
+                id=stable_document_id("pdf", label, source),
+                button_label=label,
+                template=target.relative_to(base).as_posix(),
+                output_name="{{patient.fio}} " + label + ".docx",
+                required_fields=visible_fields or blueprint.required_field_ids,
+                optional_fields=(),
+                category=blueprint.domain or "custom",
+                description=(
+                    "Converted from a user-owned PDF through Microsoft Word with layout preservation."
+                    if conversion_mode == "word"
+                    else "Reconstructed from extractable PDF text; complex PDF layout may require manual adjustment."
+                ),
+                role_id="pdf_source",
+                button_language="auto",
+                source_language="auto",
+                button_label_source="pdf_document_intelligence",
+            )
+            pending_specs.append(spec)
+            existing_labels.add(label.casefold())
+            imported.append(label)
+        for spec in pending_specs:
+            pack.add_document(spec)
+    except Exception:
+        pack.documents = original_documents
+        for target in reversed(created_targets):
+            with suppress(OSError):
+                target.unlink()
+        raise
     return tuple(imported)
 
 

@@ -151,7 +151,10 @@ class ActionsCreationMaintenanceMixin:
                 rows.append("Нажмите «Свои шаблоны» / «+ Добавить шаблоны» и выберите Word-файлы доктора.")
             else:
                 for doc in docs:
-                    rows.append(f"✅ {doc.label}: {Path(doc.template).name}")
+                    if doc.available:
+                        rows.append(f"✅ {doc.label}: {Path(doc.template).name}")
+                    else:
+                        rows.append(f"⚠ {doc.label}: {doc.problem or 'Word-шаблон недоступен'}")
             rows.append("")
             rows.append("Встроенных медицинских шаблонов в пользовательском сценарии нет: каждый доктор загружает свои DOCX/DOCM.")
             message = "\n".join(rows)
