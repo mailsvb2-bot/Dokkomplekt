@@ -231,7 +231,7 @@ class ActionsUniversalFlowMixin:
             output_language=self._effective_output_language(),
             spellcheck_enabled=bool(getattr(self, "spellcheck_enabled_var", None) and self.spellcheck_enabled_var.get()),
         )
-        report_path = save_generation_report(result, technical_report_path(out_dir, "custom_profile_generation_report.txt"))
+        report_path = save_generation_report(result, technical_report_path(out_dir, "custom_profile_generation_report.txt")) if self._diagnostic_reports_enabled() else None
         if result.skipped_documents:
             self._log("\n⚠ Custom-документы профиля пропущены:\n")
             for item in result.skipped_documents:
@@ -244,9 +244,9 @@ class ActionsUniversalFlowMixin:
             self._log("\n✅ Созданы custom-документы профиля:\n")
             for path in result.created_files:
                 self._log(f"- {path}\n")
-        elif result.skipped_documents:
-            raise ValueError("Custom-документы профиля не созданы: " + "; ".join(str(item) for item in result.skipped_documents[:5]))
-        if self._diagnostic_reports_enabled():
+        if result.skipped_documents:
+            raise ValueError("Неполный комплект custom-документов запрещён: " + "; ".join(str(item) for item in result.skipped_documents[:5]))
+        if self._diagnostic_reports_enabled() and report_path is not None:
             self._log(f"Технический отчёт custom-профиля: {report_path}\n")
         return [Path(item) for item in result.created_files]
 
@@ -353,7 +353,7 @@ class ActionsUniversalFlowMixin:
             treatment_correction=treatment_correction,
             birth_date=str(getattr(data, "birth", "") or case.get("patient.birth_date") or ""),
             complaints=str(getattr(data, "complaints", "") or case.get("complaints") or ""),
-            treatment=str(getattr(data, "treatment_plan", "") or case.get("treatment.plan") or ""),
+            treatment=str(case.get("treatment.plan") or getattr(data, "treatment_plan", "") or ""),
             profile_status=profile_status,
             sick_leave_from=current_semantic_date(self, "expert_sick_leave_from") or case.get("expert.sick_leave_from"),
         )

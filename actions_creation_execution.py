@@ -66,35 +66,12 @@ class ActionsCreationExecutionMixin:
 
 
     def _profile_document_matches_builtin_kind(self, document: object, kind: str) -> bool:
-        """Return True when a doctor-owned profile doc replaces a legacy button."""
-        try:
-            from universal_main_documents import custom_requirement_flags_for_documents
-            flags = custom_requirement_flags_for_documents((document,))
-        except Exception as exc:
-            record_soft_exception("actions_creation_execution.profile_doc_flags", exc, detail=str(kind))
-            flags = {}
-        signature = " ".join(
-            str(getattr(document, attr, "") or "")
-            for attr in ("id", "role_id", "category", "button_label", "template", "description")
-        ).lower().replace("ё", "е").replace("_", " ")
-        if kind == "discharge":
-            return bool(flags.get("discharge")) or any(token in signature for token in ("выписной", "выписка", "выпис", "эпикриз", "discharge", "epicrisis"))
-        if kind == "rvk":
-            return bool(flags.get("rvk")) or "рвк" in signature or "военком" in signature
-        if kind == "commission":
-            return bool(flags.get("commission")) or "комис" in signature or "совмест" in signature
-        if kind == "vk_mse":
-            return bool(flags.get("vk_mse")) or "мсэ" in signature or "мсек" in signature
-        if kind == "sick_leave_vk":
-            return bool(flags.get("sick_leave_vk")) or ("больнич" in signature and ("вк" in signature or "комис" in signature))
-        if kind == "admission_doctor_referral":
-            return "приемн" in signature or "приёмн" in signature or "госпитализац" in signature
-        if kind == "primary":
-            return "первич" in signature and "осмотр" in signature
-        return False
+        """Match legacy compatibility buttons only to an explicit persisted role."""
+        from universal_main_documents import document_role_matches_builtin_kind
+        return document_role_matches_builtin_kind(document, kind)
 
     def _route_legacy_medical_selection_to_profile_docs(self, selected_medical: list[str], selected_custom: list[str]) -> tuple[list[str], list[str]]:
-        """Prefer doctor-owned templates over the disabled legacy fixed backend."""
+        """Route legacy button to exactly one doctor-owned role, never by title guess."""
         if not selected_medical:
             return selected_medical, selected_custom
         try:
@@ -111,9 +88,15 @@ class ActionsCreationExecutionMixin:
                 if self._profile_document_matches_builtin_kind(document, kind)
             ]
             matched = [item for item in matched if item]
+            if len(matched) > 1:
+                raise ValueError(
+                    f"Для кнопки «{kind}» в профиле найдено несколько документов с одной semantic role: "
+                    + ", ".join(matched)
+                    + ". Оставьте один role-владелец или выберите нужную пользовательскую кнопку напрямую."
+                )
             if matched:
-                routed.extend(matched)
-                self._log(f"\nℹ Кнопка «{kind}» создана через doctor-owned шаблон профиля, не через старый fixed-template backend.\n")
+                routed.append(matched[0])
+                self._log(f"\nℹ Кнопка «{kind}» создана через doctor-owned шаблон с явной semantic role.\n")
             else:
                 remaining.append(kind)
         return remaining, list(dict.fromkeys([*selected_custom, *routed]))
@@ -124,7 +107,12 @@ class ActionsCreationExecutionMixin:
         diary_result = None
         errors: list[str] = []
         try:
-            selected_medical, selected_custom = self._route_legacy_medical_selection_to_profile_docs(selected_medical, selected_custom)
+            try:
+                selected_medical, selected_custom = self._route_legacy_medical_selection_to_profile_docs(selected_medical, selected_custom)
+            except Exception as exc:
+                errors.append(f"Маршрутизация документов профиля: {exc}")
+                self._log(f"\n❌ Маршрутизация документов профиля: {exc}\n")
+                return created_medical, created_custom, diary_result, errors
             if selected_medical:
                 created_medical = self._create_medical_documents_with_stop(selected_medical, selected_diaries, created_custom, errors)
                 if errors:
@@ -241,22 +229,36 @@ class ActionsCreationExecutionMixin:
             return False
         self._creation_in_progress = True
         self._allow_missing_required_creation = False
+        self._missing_required_override_fields = ()
         try:
             return self._create_selected_outputs_locked(print_after=print_after)
         finally:
             self._creation_in_progress = False
 
     def _create_selected_outputs_locked(self, *, print_after: bool = False) -> bool:
-        """Implement the _create_selected_outputs_locked workflow with validation, UI state updates and diagnostics."""
+        """Create the selected patient output set as one filesystem transaction."""
+        from dataclasses import replace
+        from output_transaction import OutputTransaction
+
         selected = self._selected_outputs_or_warn()
         if selected is None:
             return False
         selected_medical, selected_diaries, selected_custom = selected
+        # Resolve compatibility routing before preflight/collision planning so
+        # required fields and duplicate targets describe the documents that will
+        # actually be rendered.
+        try:
+            selected_medical, selected_custom = self._route_legacy_medical_selection_to_profile_docs(selected_medical, selected_custom)
+        except Exception as exc:
+            messagebox.showerror("Неоднозначный профиль документов", str(exc))
+            return False
         self._active_patient_output_dir = None
+        self._pending_output_commit = None
         if not self._ensure_patient_folder_naming_configured():
             return False
         if not self._collect_creation_requirements(selected_medical, selected_diaries, selected_custom):
             return False
+
         review = self._build_patient_case_review_for_selection(selected_medical, selected_diaries, selected_custom)
         try:
             from doctor_action_journal import append_doctor_action
@@ -276,77 +278,117 @@ class ActionsCreationExecutionMixin:
             except Exception as exc:
                 record_soft_exception("actions_creation_execution.journal_preflight_cancel", exc)
             return False
+
         review = self._build_patient_case_review_for_selection(selected_medical, selected_diaries, selected_custom)
         self._active_patient_output_dir = Path(review.output_dir)
         if not self._apply_duplicate_policy(review, selected_medical, selected_custom, selected_diaries):
             self._active_patient_output_dir = None
             return False
-        review = self._build_patient_case_review_for_selection(selected_medical, selected_diaries, selected_custom)
-        self._active_patient_output_dir = Path(review.output_dir)
+        plan = dict(getattr(self, "_pending_output_commit", None) or {})
+        final_dir = Path(plan.get("final_dir") or review.output_dir or self._result_output_dir()).expanduser()
+        overwrite_paths = tuple(Path(item) for item in plan.get("overwrite_paths", ()))
+        review = replace(review, output_dir=str(final_dir))
+        self._last_patient_case_review = review
+        self._active_patient_output_dir = final_dir
+
         if print_after and not self.printer_var.get().strip():
             if not self._select_default_printer_sync():
+                self._active_patient_output_dir = final_dir
                 messagebox.showwarning("Принтер не выбран", "Выберите принтер перед печатью или используйте кнопку сохранения без печати.")
                 return False
+
+        transaction = OutputTransaction(final_dir=final_dir, overwrite_paths=overwrite_paths)
+        try:
+            staging_dir = transaction.begin()
+        except Exception as exc:
+            self._active_patient_output_dir = final_dir
+            messagebox.showerror("Не удалось начать создание", f"Не удалось подготовить безопасную временную папку:\n{exc}")
+            return False
+
+        self._active_patient_output_dir = staging_dir
         self._start_progress()
-        created_medical, created_custom, diary_result, errors = self._run_creation_jobs(selected_medical, selected_diaries, selected_custom)
-        if errors:
+        try:
+            created_medical, created_custom, diary_result, errors = self._run_creation_jobs(selected_medical, selected_diaries, selected_custom)
+        except Exception as exc:
+            transaction.rollback()
+            self._active_patient_output_dir = final_dir
+            record_classified_error("create_selected_outputs_transaction", exc, category=ErrorCategory.DOCX_RENDER)
+            messagebox.showerror("Документы не созданы", f"Создание остановлено до изменения папки пациента:\n\n{exc}")
+            return False
+
+        staged_files = self._created_files_from_results(created_medical, created_custom, diary_result)
+        if errors or not staged_files:
+            transaction.rollback()
+            self._active_patient_output_dir = final_dir
+            if not errors:
+                errors = ["Ничего не создано: выбранные документы не дали итоговых файлов. Проверьте шаблоны и повторите."]
             try:
                 from doctor_action_journal import append_doctor_action
-                append_doctor_action(output_dir=review.output_dir or self._result_output_dir(), action="Создание завершилось с ошибками", review=review, errors=errors, category="error")
+                append_doctor_action(output_dir=final_dir, action="Создание отменено без изменения готовых документов", review=review, errors=errors, category="error")
             except Exception as exc:
                 record_soft_exception("actions_creation_execution.journal_errors", exc)
             self._write_creation_report(
-                selected_medical=selected_medical,
-                selected_diaries=selected_diaries,
-                created_medical=created_medical,
-                diary_result=diary_result,
-                created_custom=created_custom,
-                errors=errors,
+                selected_medical=selected_medical, selected_diaries=selected_diaries,
+                created_medical=[], diary_result=None, created_custom=[], errors=errors,
             )
-            messagebox.showwarning("Готово с ошибками", "Часть задач не выполнена:\n\n" + "\n".join(errors))
+            messagebox.showwarning("Документы не созданы", "Папка пациента оставлена без частичного комплекта:\n\n" + "\n".join(errors))
+            self._set_status("Создание отменено: готовые документы не изменены")
             return False
-        created_files = self._created_files_from_results(created_medical, created_custom, diary_result)
-        if not created_files:
-            warning = "Ничего не создано: выбранные документы не дали итоговых файлов. Проверьте шаблоны и повторите."
+
+        try:
+            mapping = transaction.commit()
+        except Exception as exc:
+            transaction.rollback()
+            self._active_patient_output_dir = final_dir
+            record_classified_error("commit_output_transaction", exc, category=ErrorCategory.DOCX_RENDER)
+            messagebox.showerror("Не удалось сохранить комплект", "Все временные файлы отменены; прежние документы восстановлены.\n\n" + str(exc))
+            return False
+
+        self._active_patient_output_dir = final_dir
+
+        def committed_path(path: Path) -> Path:
+            candidate = Path(path)
+            direct = mapping.get(candidate)
+            if direct is not None:
+                return direct
             try:
-                from doctor_action_journal import append_doctor_action
-                append_doctor_action(output_dir=review.output_dir or self._result_output_dir(), action="Создание остановлено без файлов", review=review, errors=[warning], category="warning")
-            except Exception as exc:
-                record_soft_exception("actions_creation_execution.journal_no_created_files", exc)
-            self._write_creation_report(
-                selected_medical=selected_medical,
-                selected_diaries=selected_diaries,
-                created_medical=created_medical,
-                diary_result=diary_result,
-                created_custom=created_custom,
-                errors=[warning],
-            )
-            messagebox.showwarning("Ничего не создано", warning)
-            self._set_status("Ничего не создано: проверьте шаблоны")
-            return False
+                return final_dir / candidate.relative_to(staging_dir)
+            except ValueError:
+                return candidate
+
+        created_medical = [committed_path(path) for path in created_medical]
+        created_custom = [committed_path(path) for path in created_custom]
+        if diary_result is not None:
+            diary_result.created_files = [committed_path(path) for path in diary_result.created_files]
+            if getattr(diary_result, "report_path", None):
+                diary_result.report_path = committed_path(diary_result.report_path)
+        created_files = self._created_files_from_results(created_medical, created_custom, diary_result)
+        override_fields = tuple(getattr(self, "_missing_required_override_fields", ()) or ())
+        details = {"print_after": "да" if print_after else "нет"}
+        if override_fields:
+            details["explicit_missing_override"] = ", ".join(override_fields)
         try:
             from doctor_action_journal import append_doctor_action
             append_doctor_action(
-                output_dir=review.output_dir or self._result_output_dir(),
-                action="Документы созданы",
-                review=review,
-                created_files=created_files,
-                details={"print_after": "да" if print_after else "нет"},
-                category="created",
+                output_dir=final_dir,
+                action="Документы созданы с явно разрешёнными пропусками" if override_fields else "Документы созданы",
+                review=review, created_files=created_files, details=details,
+                category="warning" if override_fields else "created",
             )
         except Exception as exc:
             record_soft_exception("actions_creation_execution.journal_created", exc)
+
         self._print_created_files_if_requested(print_after, created_files)
         creation_report = self._write_creation_report(
-            selected_medical=selected_medical,
-            selected_diaries=selected_diaries,
-            created_medical=created_medical,
-            diary_result=diary_result,
-            created_custom=created_custom,
-            errors=None,
+            selected_medical=selected_medical, selected_diaries=selected_diaries,
+            created_medical=created_medical, diary_result=diary_result, created_custom=created_custom, errors=None,
         )
         self._show_created_document_preview(created_files)
         opened_folder = self._open_output_folder_after_creation(created_files=created_files, creation_report=creation_report)
-        self._set_status("Готово: файлы сохранены")
-        self._log("\n✅ Готово: файлы сохранены.{}\n".format(" Папка результата открыта." if opened_folder else ""))
+        if override_fields:
+            self._set_status("Готово с явно разрешёнными пропусками")
+            self._log("\n⚠ Комплект создан с явным разрешением врача оставить обязательные поля пустыми.\n")
+        else:
+            self._set_status("Готово: файлы сохранены")
+            self._log("\n✅ Готово: файлы сохранены.{}\n".format(" Папка результата открыта." if opened_folder else ""))
         return True

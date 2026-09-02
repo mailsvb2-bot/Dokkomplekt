@@ -62,7 +62,7 @@ def test_desktop_intake_pending_state_is_pathless(monkeypatch) -> None:
     assert "path" not in pending
 
 
-def test_desktop_intake_pending_resolves_by_signature(monkeypatch, tmp_path) -> None:
+def test_desktop_intake_pending_absence_is_not_processing_proof(monkeypatch, tmp_path) -> None:
     import desktop_intake_agent as agent
 
     seen: set[str] = set()
@@ -71,7 +71,7 @@ def test_desktop_intake_pending_resolves_by_signature(monkeypatch, tmp_path) -> 
     resolved, changed = agent._resolve_pending_state(pending, seen, tmp_path)
     assert resolved == {}
     assert changed is True
-    assert "b" * 64 in seen
+    assert "b" * 64 not in seen
 
 
 def test_architecture_privacy_runtime_gates() -> None:

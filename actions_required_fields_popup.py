@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tkinter as tk
 from tkinter import messagebox
 from typing import Any
@@ -133,58 +134,34 @@ def _field_id(field: Any) -> str:
 
 
 def _normalized_field_signature(field: Any) -> str:
-    parts = (
-        getattr(field, "key", ""),
-        getattr(field, "field_id", ""),
-        getattr(field, "label", ""),
-        getattr(field, "placeholder", ""),
-        getattr(field, "reason", ""),
-    )
-    return " ".join(str(part or "") for part in parts).casefold().replace("ё", "е").replace("_", ".")
-
-
-def _matches_any(field: Any, exact_ids: set[str], text_hints: tuple[str, ...]) -> bool:
-    normalized = _field_id(field)
-    signature = _normalized_field_signature(field)
-    return normalized in exact_ids or any(hint in signature for hint in text_hints)
+    """Diagnostic-only representation; never used to infer field semantics."""
+    return _field_id(field)
 
 
 def _store_key_for_field(field: Any) -> str:
-    """Map universal/custom field ids to the legacy UI state keys.
-
-    The preflight popup stores values through the same canonical UI/data
-    setters that fixed-document generation uses.  This keeps custom doctor
-    templates from creating a second, invisible state for case number,
-    diagnosis, dates, treatment or labs.
-    """
     normalized = _field_id(field)
     if normalized in LEGACY_STORE_KEYS:
         return LEGACY_STORE_KEYS[normalized]
-    if _is_diagnosis_field(field):
-        return "diagnosis"
-    if _is_case_number_field(field):
+    if normalized == "patient.fio":
+        return "fio"
+    if normalized == "case.number":
         return "case_number"
-    if _is_admission_date_field(field):
+    if normalized == "admission.date":
         return "admission_date"
-    if _is_discharge_date_field(field):
+    if normalized == "discharge.date":
         return "discharge_date"
-    if _is_treatment_field(field):
+    if normalized in {"diagnosis.main", "diagnosis.icd10"} or normalized.startswith("diagnosis."):
+        return "diagnosis"
+    if normalized.startswith("treatment."):
         return "treatment"
-    if _is_labs_field(field):
+    if normalized in {"labs.results", "labs", "laboratory", "analysis", "analyses", "instrumental.results"}:
         return "labs"
     return _raw_field_id(field)
 
 
-
 def _semantic_date_store_key_for_field(field: Any) -> str:
     normalized = _field_id(field)
-    if normalized in SEMANTIC_DATE_STORE_KEYS:
-        return SEMANTIC_DATE_STORE_KEYS[normalized]
-    if _is_admission_date_field(field):
-        return "admission_date"
-    if _is_discharge_date_field(field):
-        return "discharge_date"
-    return ""
+    return SEMANTIC_DATE_STORE_KEYS.get(normalized, "")
 
 
 def _is_semantic_date_field(field: Any) -> bool:
@@ -192,52 +169,28 @@ def _is_semantic_date_field(field: Any) -> bool:
 
 
 def _is_diagnosis_field(field: Any) -> bool:
-    """Return True for both legacy and dynamic diagnosis fields.
-
-    The required-fields popup may receive universal-profile fields such as
-    ``patient.diagnosis`` or ``diagnosis.primary``.  ICD-10 autocomplete and
-    validation must not depend on one exact legacy key, otherwise custom doctor
-    templates silently lose diagnosis normalization.
-    """
     normalized = _field_id(field)
-    signature = _normalized_field_signature(field)
-    return normalized in DIAGNOSIS_FIELD_HINTS or normalized.startswith("diagnosis.") or any(hint in signature for hint in DIAGNOSIS_TEXT_HINTS)
+    return normalized in {"diagnosis.main", "diagnosis.icd10"} or normalized.startswith("diagnosis.")
 
 
 def _is_case_number_field(field: Any) -> bool:
-    return _matches_any(field, {"case.number"}, CASE_TEXT_HINTS)
+    return _field_id(field) == "case.number"
 
 
 def _is_discharge_date_field(field: Any) -> bool:
-    normalized = _field_id(field)
-    signature = _normalized_field_signature(field)
-    return (
-        normalized in {"discharge.date", "discharge.date.actual"}
-        or any(hint in signature for hint in DISCHARGE_TEXT_HINTS)
-        or (("date" in normalized or "дата" in signature or "data" in signature) and ("discharge" in normalized or "выписк" in signature or "wypis" in signature))
-    )
+    return _field_id(field) == "discharge.date"
 
 
 def _is_admission_date_field(field: Any) -> bool:
-    normalized = _field_id(field)
-    signature = _normalized_field_signature(field)
-    return (
-        normalized in {"admission.date", "hospitalization.date"}
-        or any(hint in signature for hint in ADMISSION_TEXT_HINTS)
-        or (("date" in normalized or "дата" in signature or "data" in signature) and ("admission" in normalized or "hospitalization" in normalized or "поступ" in signature or "госпитал" in signature or "przyj" in signature or "hospitaliz" in signature))
-    )
+    return _field_id(field) == "admission.date"
 
 
 def _is_treatment_field(field: Any) -> bool:
-    return _matches_any(field, {"treatment.plan"}, TREATMENT_TEXT_HINTS)
+    return _field_id(field).startswith("treatment.")
 
 
 def _is_labs_field(field: Any) -> bool:
-    normalized = _field_id(field)
-    if normalized in {"labs.results", "labs", "laboratory", "analysis", "analyses"}:
-        return True
-    signature = _normalized_field_signature(field)
-    return any(hint in signature for hint in LABS_TEXT_HINTS)
+    return _field_id(field) in {"labs.results", "labs", "laboratory", "analysis", "analyses", "instrumental.results"}
 
 
 def prompt_missing_required_fields_or_continue(app: Any, review: Any) -> bool:
@@ -415,12 +368,15 @@ class _RequiredFieldsDialog:
         labels = [str(getattr(field, "label", getattr(field, "key", "поле"))) for field in self.missing]
         text = (
             "Документ будет создан с незаполненными обязательными полями:\n\n"
-            + "\n".join(f"• {label}" for label in labels[:12])
-            + "\n\nПродолжить именно так?"
+            + "\n".join(f"• {label}" for label in labels)
+            + "\n\nЭто явное решение врача и оно будет записано в журнал создания. Продолжить именно так?"
         )
         if not messagebox.askyesno("Продолжить без обязательных полей", text, parent=self._window()):
             return
         self.app._allow_missing_required_creation = True
+        self.app._missing_required_override_fields = tuple(
+            str(getattr(field, "key", "") or getattr(field, "label", "") or "поле") for field in self.missing
+        )
         self.result["action"] = "continue_missing"
         self._close()
 
@@ -435,6 +391,7 @@ class _RequiredFieldsDialog:
             if not self._store_value(key, value):
                 return
         self.app._allow_missing_required_creation = False
+        self.app._missing_required_override_fields = ()
         self.result["action"] = "save"
         self._close()
 
@@ -449,6 +406,28 @@ class _RequiredFieldsDialog:
             return self._validate_diagnosis(field, raw)
         if _is_case_number_field(field):
             return self._validate_case_number(field, raw)
+        # Custom semantic fields may declare a value kind in the profile
+        # registry. Validate what the schema actually knows; do not guess from
+        # the human label/reason text.
+        try:
+            pack = self.app._load_or_create_universal_pack()
+            definition = pack.registry().get(_field_id(field))
+            value_kind = str(getattr(definition, "value_kind", "text") or "text").strip().lower() if definition else "text"
+        except Exception as exc:
+            record_soft_exception("actions_required_fields_popup.value_kind", exc, detail=_field_id(field))
+            value_kind = "text"
+        if value_kind == "date":
+            normalized = self.app._normalize_date_for_ui(raw) if hasattr(self.app, "_normalize_date_for_ui") else raw
+            if not parse_date(normalized):
+                self._warn_and_focus(field.key, "Некорректная дата", f"Проверьте поле: {field.label}")
+                return None
+            self._set_value_for(field.key, normalized)
+            return normalized
+        if value_kind == "number":
+            normalized_number = raw.replace(" ", "").replace(",", ".")
+            if not re.fullmatch(r"[-+]?\d+(?:\.\d+)?", normalized_number):
+                self._warn_and_focus(field.key, "Некорректное число", f"Проверьте поле: {field.label}")
+                return None
         return raw
 
     def _validate_date(self, field: Any, raw: str) -> str | None:
@@ -586,6 +565,7 @@ class _RequiredFieldsDialog:
 
     def _cancel(self) -> None:
         self.app._allow_missing_required_creation = False
+        self.app._missing_required_override_fields = ()
         self.result["action"] = "cancel"
         self._close()
 

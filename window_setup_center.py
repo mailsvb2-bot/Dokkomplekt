@@ -42,7 +42,7 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
     title.grid(row=0, column=0, sticky="ew", pady=(14, 2))
     subtitle = tk.Label(
         dialog,
-        text="Выберите Word-шаблоны врача. Программа прочитает название сверху каждого листа и создаст такие кнопки в блоке 03." if first_run else "Здесь врач загружает свои Word-шаблоны. Программа читает названия сверху листа и делает такие кнопки в блоке 03. Встроенных медицинских шаблонов нет.",
+        text=("Выберите Word-шаблоны врача. Программа прочитает название сверху каждого листа и создаст такие кнопки в блоке 03. DOCM импортируется как безопасная копия DOCX без макросов." if first_run else "Здесь врач загружает свои Word-шаблоны. Программа читает названия сверху листа и делает такие кнопки в блоке 03. DOCM импортируется как безопасная копия DOCX без макросов. Встроенных медицинских шаблонов нет."),
         bg=DEEP,
         fg=MUTED,
         font=self._font(10),
@@ -216,13 +216,19 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
             return
         try:
             from universal_profiles import load_document_pack, save_document_pack
+            from universal_template_engine import validate_document_pack
             opened_pack = load_document_pack(path)
-            if getattr(opened_pack, "documents", ()): 
+            validation = validate_document_pack(opened_pack, base_dir=Path(path).expanduser().parent)
+            if getattr(opened_pack, "documents", ()) and validation.ok:
                 _mark_buttons_created(opened_pack)
                 save_document_pack(opened_pack, path, backup_reason="open_profile_mark")
             self._set_universal_profile_path(path)
             _refresh_main_tiles("open_profile")
-            refresh("Профиль врача открыт. Кнопки блока 03 обновлены.")
+            if validation.ok:
+                refresh("Профиль врача открыт. Кнопки блока 03 обновлены.")
+            else:
+                refresh("Профиль открыт в режиме восстановления: часть шаблонов повреждена или отсутствует.")
+                messagebox.showwarning("Профиль требует восстановления", validation.human_report(), parent=dialog)
         except Exception as exc:
             messagebox.showerror("Открыть профиль врача", str(exc), parent=dialog)
     def export_profile() -> None:
@@ -257,6 +263,10 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
             from universal_template_engine import import_document_pack_zip
             pack, _ = import_document_pack_zip(source_path, profile_dir)
             from universal_profiles import save_document_pack
+            from universal_template_engine import validate_document_pack
+            validation = validate_document_pack(pack, base_dir=profile_dir)
+            if not validation.ok:
+                raise ValueError("Импортированный профиль не прошёл проверку:\n" + validation.human_report())
             if getattr(pack, "documents", ()): 
                 _mark_buttons_created(pack)
             target = available_profile_path(profile_dir / safe_profile_filename(pack.name or source_path.stem or "imported_profile"))
@@ -499,13 +509,17 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
             row.grid_columnconfigure(0, weight=1)
             row.grid_columnconfigure(1, weight=1)
             def save_button() -> None:
-                """Implement the save_button workflow with validation, UI state updates and diagnostics."""
+                """Add one doctor button transactionally; failure restores pack and copied files."""
+                current_pack = None
+                original_documents = None
+                copied_to = None
                 try:
                     role_id = role_id_from_choice(role_var.get())
                     label = label_var.get().strip()
                     if not label:
                         raise ValueError("Введите понятное название кнопки.")
                     current_pack = self._load_or_create_universal_pack()
+                    original_documents = tuple(current_pack.documents)
                     existing_labels = {str(doc.button_label or "").casefold() for doc in current_pack.documents}
                     label = unique_button_label(label, existing_labels)
                     from personal_document_buttons import suggest_button_label_for_template
@@ -547,7 +561,10 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
                         source_language=final_suggestion.source_language,
                         button_label_source="simple_ui_manual",
                     )
-                    validation = validate_template(copied_to, required_fields=spec.required_fields, registry=current_pack.registry())
+                    validation = validate_template(
+                        copied_to, required_fields=spec.required_fields, registry=current_pack.registry(),
+                        role_id=spec.role_id, category=spec.category, button_label=spec.button_label,
+                    )
                     if not validation.ok and spec.category != "diaries":
                         raise ValueError(
                             "Шаблон добавлять рано: в нём нет понятных меток для заполнения.\n\n"
@@ -572,6 +589,13 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
                     )
                     refresh(f"Кнопка «{label}» добавлена. Она уже должна быть видна в блоке 03.")
                 except Exception as exc:
+                    if current_pack is not None and original_documents is not None:
+                        current_pack.documents = original_documents
+                    if copied_to is not None:
+                        try:
+                            Path(copied_to).unlink()
+                        except OSError as cleanup_exc:
+                            record_soft_exception("window_setup_center.rollback_template_copy", cleanup_exc, detail=str(copied_to))
                     messagebox.showerror("Новая кнопка в блоке 03", str(exc), parent=popup)
 
             tk.Button(row, text="Добавить кнопку в блок 03", command=save_button, bg=ACCENT_2, fg="#03101f", relief="flat", font=self._font(10, "bold"), padx=10, pady=10).grid(row=0, column=0, sticky="ew", padx=(0, 6))

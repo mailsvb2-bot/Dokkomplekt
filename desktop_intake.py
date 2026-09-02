@@ -20,7 +20,8 @@ from diagnostic_logging import record_soft_exception
 from medical_docx_reader import extract_docx_text
 from medical_formatting import available_path, safe_filename
 
-DESKTOP_INTAKE_LOCK_VERSION = "v1.13"
+DESKTOP_INTAKE_LOCK_VERSION = "v1.14"
+PRIMARY_FILE_QUIET_SECONDS = 1.5
 DESKTOP_INTAKE_SETUP_PROMPT_VERSION = "v4-intake-patient-folder-confirm"
 DESKTOP_INTAKE_FOLDER_NAME = "Выписанные пациенты"
 DESKTOP_INTAKE_REQUIRES_RUNNING_APP = False
@@ -263,7 +264,7 @@ def normalize_intake_settings(raw: Mapping[str, object] | None) -> dict:
         "enabled": _setting_bool(data.get("enabled", False)),
         "folder": folder,
         "prompt_version": prompt_version,
-        "seen_signatures": tuple(dict.fromkeys(seen[-300:])),
+        "seen_signatures": tuple(dict.fromkeys(seen)),
     }
 
 
@@ -301,8 +302,24 @@ def _available_dir(path: str | Path) -> Path:
         index += 1
 
 
+def _file_content_digest(path: str | Path) -> str:
+    """Return a stable content fingerprint without persisting patient text or paths."""
+    candidate = Path(path).expanduser()
+    digest = hashlib.sha256()
+    with candidate.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _same_patient_existing_folder(candidate: Path, primary_path: str | Path) -> bool:
-    """Reuse a folder only when an existing primary document identifies the same case."""
+    """Reuse only a proven same hospitalization episode.
+
+    FIO equality alone is never sufficient.  When both admission dates are
+    known they must match exactly.  If either date is unavailable, reuse is
+    allowed only for an exact byte-identical source document; this preserves a
+    failed/retried intake without ever merging two ambiguous admissions.
+    """
     if not candidate.exists() or not candidate.is_dir():
         return False
     try:
@@ -310,22 +327,26 @@ def _same_patient_existing_folder(candidate: Path, primary_path: str | Path) -> 
         source_info = build_patient_folder_info(primary_path)
         source_fio = " ".join(source_info.fio.casefold().replace("ё", "е").split())
         source_date = source_info.admission_date.strip()
-        if not source_fio:
-            return False
+        source_digest = _file_content_digest(primary_path)
         for doc in candidate.iterdir():
             if not doc.is_file() or doc.suffix.lower() not in _ALLOWED_PRIMARY_SUFFIXES:
                 continue
             try:
                 info = build_patient_folder_info(doc)
+                existing_digest = _file_content_digest(doc)
             except Exception as exc:
                 record_soft_exception("desktop_intake.same_patient_existing_document", exc, detail=str(doc))
                 continue
             fio = " ".join(info.fio.casefold().replace("ё", "е").split())
-            if fio != source_fio:
+            existing_date = info.admission_date.strip()
+            if source_fio and fio and fio != source_fio:
                 continue
-            if source_date and info.admission_date and info.admission_date.strip() != source_date:
+            if source_date and existing_date:
+                if source_fio and fio and source_date == existing_date:
+                    return True
                 continue
-            return True
+            if existing_digest == source_digest:
+                return True
     except Exception as exc:
         record_soft_exception("desktop_intake.same_patient_folder", exc, detail=str(candidate))
     return False
@@ -380,11 +401,19 @@ def scan_primary_candidates(folder: str | Path, seen_signatures: set[str]) -> tu
             continue
         if stat.st_size <= 0:
             continue
-        if time.time() - stat.st_mtime < 1.2:
+        if time.time() - stat.st_mtime < PRIMARY_FILE_QUIET_SECONDS:
             continue
-
+        # Do not trust age alone.  A copied Word file may be old according to
+        # metadata while bytes are still changing (network/OneDrive/AV paths).
+        # Read it once, then prove size+mtime stayed unchanged throughout parse.
         doc_text = _read_intake_docx_text(path, context="desktop_intake.scan_primary_candidate_score")
         if doc_text is None:
+            continue
+        try:
+            after = path.stat()
+        except OSError:
+            continue
+        if (after.st_mtime_ns, after.st_size) != (stat.st_mtime_ns, stat.st_size):
             continue
         score = primary_document_score(doc_text)
         if score < 5:
@@ -397,7 +426,7 @@ def scan_primary_candidates(folder: str | Path, seen_signatures: set[str]) -> tu
         candidate = DesktopCandidate(path, (stat.st_mtime_ns, stat.st_size))
         primary_candidates.append((score, candidate))
 
-    ordered = sorted(primary_candidates, key=lambda item: (-item[0], item[1].path.name.lower()))
+    ordered = sorted(primary_candidates, key=lambda item: (item[1].signature[0], item[1].path.name.lower()))
     return tuple(candidate for _score, candidate in ordered)
 
 
@@ -433,6 +462,17 @@ def prepare_patient_work_folder(
         raise FileNotFoundError(f"Не найден первичный документ для папки пациента: {source}")
     patient_dir = safe_patient_subfolder(folder, source, folder_name=folder_name)
     patient_dir.mkdir(parents=True, exist_ok=True)
+    # A failed transaction may already have staged this exact primary.  Reuse
+    # that owned copy instead of accumulating "(2)", "(3)" duplicates.
+    source_digest = _file_content_digest(source)
+    for existing in patient_dir.iterdir():
+        if not existing.is_file() or existing.suffix.lower() not in _ALLOWED_PRIMARY_SUFFIXES:
+            continue
+        try:
+            if _file_content_digest(existing) == source_digest:
+                return patient_dir, existing
+        except OSError:
+            continue
     target = available_path(patient_dir / source.name)
     if keep_source:
         try:
@@ -454,11 +494,22 @@ def prepare_patient_work_folder(
     except Exception as move_exc:
         try:
             shutil.copy2(str(source), str(target))
-            moved = target
             try:
                 source.unlink()
             except Exception as unlink_exc:
-                record_soft_exception("desktop_intake.copy_fallback_unlink_source", unlink_exc, detail=str(source))
+                # A move fallback is not committed unless ownership actually
+                # transferred.  Returning with source+target duplicates would
+                # make the watcher/process state ambiguous.
+                with suppress(Exception):
+                    target.unlink()
+                with suppress(Exception):
+                    if patient_dir.exists() and not any(patient_dir.iterdir()):
+                        patient_dir.rmdir()
+                raise RuntimeError(
+                    "Копия первичного документа создана, но исходный файл не удалось удалить. "
+                    "Перенос отменён без дублирования файла."
+                ) from unlink_exc
+            moved = target
         except Exception as copy_exc:
             with suppress(Exception):
                 if target.exists():
@@ -477,11 +528,19 @@ def prepare_patient_work_folder(
 
 
 def signature_key(path: str | Path, mtime_ns: int, size: int) -> str:
+    """Hash path metadata plus content so same-size/same-mtime replacements differ."""
+    candidate = Path(path)
     try:
-        resolved = str(Path(path).resolve())
+        resolved = str(candidate.resolve())
     except OSError:
-        resolved = str(Path(path))
-    raw = f"{resolved}|{mtime_ns}|{size}"
+        resolved = str(candidate)
+    content_digest = ""
+    try:
+        if candidate.exists() and candidate.is_file():
+            content_digest = _file_content_digest(candidate)
+    except OSError as exc:
+        record_soft_exception("desktop_intake.signature_content", exc, detail=str(candidate))
+    raw = f"{resolved}|{mtime_ns}|{size}|{content_digest}"
     return hashlib.sha256(raw.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
@@ -492,7 +551,7 @@ def mark_seen(seen_signatures: set[str], candidate: DesktopCandidate) -> None:
 def assert_desktop_intake_lock() -> None:
     """Lock the desktop-intake production behavior."""
 
-    if DESKTOP_INTAKE_LOCK_VERSION != "v1.13":
+    if DESKTOP_INTAKE_LOCK_VERSION != "v1.14":
         raise AssertionError("Desktop intake lock changed unexpectedly")
     if DESKTOP_INTAKE_REQUIRES_RUNNING_APP:
         raise AssertionError("Desktop intake must support activation through the optional background agent")

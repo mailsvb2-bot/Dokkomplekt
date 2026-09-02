@@ -146,6 +146,7 @@ class LayoutChecklistMixin:
                 self.custom_output_vars.pop(kind, None)
                 self.output_vars.pop(kind, None)
                 self._check_tile_redrawers.pop(kind, None)
+        self._unavailable_custom_output_problems = {doc.kind: doc.problem for doc in custom_docs if not doc.available}
         for col in range(4):
             container.grid_columnconfigure(col, weight=1, uniform="custom_profile_tiles")
         if not custom_docs:
@@ -215,7 +216,10 @@ class LayoutChecklistMixin:
                     var = tk.BooleanVar(value=False)
                     self.custom_output_vars[doc.kind] = var
                 self.output_vars[doc.kind] = var
-            item = self._check_tile(container, kind=doc.kind, label=doc.label, icon="doc")
+            if not doc.available:
+                self.output_vars[doc.kind].set(False)
+            display_label = doc.label if doc.available else f"⚠ {doc.label} — шаблон не найден"
+            item = self._check_tile(container, kind=doc.kind, label=display_label, icon="doc")
             item.grid(
                 row=1 + idx // 4,
                 column=idx % 4,
@@ -367,6 +371,14 @@ class LayoutChecklistMixin:
         deselect. First date of discharge is requested, then sick-leave number
         if «Больничный лист: да» is set.
         """
+        problem = str(getattr(self, "_unavailable_custom_output_problems", {}).get(kind, "") or "")
+        if problem:
+            messagebox.showerror(
+                "Шаблон кнопки недоступен",
+                problem + "\n\nОткройте «+ Добавить» / «Свои шаблоны» и восстановите или замените Word-шаблон.",
+                parent=getattr(self, "root", None),
+            )
+            return
         var = self.output_vars[kind]
         currently_selected = bool(var.get())
         if kind == "discharge" and currently_selected:

@@ -128,7 +128,7 @@ def _day_offsets_from_date_templates(
             template_doc = Document(str(readable))
         except Exception as exc:
             record_soft_exception("diary_batch.date_template_read", exc, detail=str(raw))
-            continue
+            raise ValueError(f"Не удалось прочитать выбранный файл дат дневников: {raw}: {exc}") from exc
 
         candidates: list[tuple[int, int, str | None]] = []
         for match in re.finditer(r"(?<!\d)([0-3]?\d)[./-]([01]?\d)(?:[./-](20\d{2}|\d{2}))?(?!\d)", text):
@@ -156,7 +156,7 @@ def _day_offsets_from_date_templates(
                 if year < 100:
                     year += 2000
                 candidate = date(year, month, day)
-                if not year_raw and candidate < admission_date_value and admission_date_value.month == 12 and month == 1:
+                if not year_raw and candidate < admission_date_value and month < admission_date_value.month:
                     candidate = date(admission_date_value.year + 1, month, day)
                 offset = (candidate - admission_date_value).days
                 if offset < 1:
@@ -181,45 +181,48 @@ def _resolve_output_dir(output_dir: str | Path | None, fallback_dir: Path) -> Pa
 def _fallback_statuses_from_docx(path: str | Path) -> list[str]:
     doc = Document(str(path))
     result: list[str] = []
-    seen: set[str] = set()
 
-    def add(text: str) -> None:
-        cleaned = clean_status_text(text)
-        low = cleaned.lower().replace("ё", "е")
+    def add_block(lines: Sequence[str]) -> None:
+        joined = "\n".join(str(line or "").strip() for line in lines if str(line or "").strip())
+        cleaned = clean_status_text(joined)
         if not cleaned or len(cleaned) < 3 or is_signature_paragraph_text(cleaned):
             return
         if re.fullmatch(r"[\d\s./-]+", cleaned):
             return
-        if low in seen:
-            return
-        seen.add(low)
         result.append(cleaned)
 
+    # Preserve multi-paragraph observations as one block.  Blank paragraphs are
+    # the fallback separator when the structured status parser found nothing.
+    block: list[str] = []
     for paragraph in doc.paragraphs:
-        add(paragraph.text)
+        text = str(paragraph.text or "").strip()
+        if text:
+            block.append(text)
+        elif block:
+            add_block(block); block = []
+    if block:
+        add_block(block)
     for table in doc.tables:
         for row in table.rows:
+            row_lines: list[str] = []
             seen_cells: set[int] = set()
             for cell in row.cells:
                 tc_id = id(cell._tc)
                 if tc_id in seen_cells:
                     continue
                 seen_cells.add(tc_id)
-                for paragraph in cell.paragraphs:
-                    add(paragraph.text)
+                row_lines.extend(p.text for p in cell.paragraphs if p.text.strip())
+            if row_lines:
+                add_block(row_lines)
     return result
 
 
 def read_statuses_from_files(paths: Iterable[str | Path]) -> list[str]:
     statuses: list[str] = []
-    seen: set[str] = set()
     for path in _existing_docx_files(paths, "тексты дневников"):
         path_statuses = extract_statuses_from_docx(path) or _fallback_statuses_from_docx(path)
-        for status in path_statuses:
-            key = " ".join(status.strip().lower().replace("ё", "е").split())
-            if key not in seen:
-                statuses.append(status.strip())
-                seen.add(key)
+        # Repeated statuses are meaningful sequence entries and must be kept.
+        statuses.extend(status.strip() for status in path_statuses if status.strip())
     return statuses
 
 
@@ -358,13 +361,8 @@ def _hourly_text_diary_datetimes(admission_value: str, discharge_date_value: dat
     result: list[datetime] = []
     for offset in offsets:
         planned = base + timedelta(hours=int(offset))
-        # Hourly diaries are multiple observations within the same treatment day.
-        # The old uniqueness-by-date guard moved the second hourly record to the
-        # next workday (15:00, then tomorrow 16:00), breaking the user-visible
-        # hourly route. Only non-working days are shifted; same-date observations
-        # stay on the same date.
-        if is_non_working_day(planned.date()):
-            planned = datetime.combine(next_working_day(planned.date()), planned.time())
+        # Inpatient observations are continuous clinical records.  Weekends and
+        # fixed public holidays are real treatment days and must never be shifted.
         if discharge_date_value is not None and planned.date() > discharge_date_value:
             break
         result.append(planned)

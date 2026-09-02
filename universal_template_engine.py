@@ -12,9 +12,11 @@ required medical fields.
 
 from __future__ import annotations
 
+from contextlib import suppress
 from diagnostic_logging import record_soft_exception
 from dataclasses import asdict, dataclass, replace
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
@@ -347,7 +349,7 @@ def validate_document_pack(pack: DocumentPack, *, base_dir: str | Path | None = 
         if template_path.exists() and template_path.suffix.lower() in {".docx", ".docm"}:
             template_results.append(validate_template(template_path, required_fields=document.required_fields, registry=registry, role_id=document.role_id, category=document.category, button_label=document.button_label))
         elif not any(ch in document.template for ch in "*?"):
-            warnings.append(f"{document.button_label}: шаблон пока не найден рядом с профилем: {document.template}")
+            errors.append(f"{document.button_label}: шаблон не найден рядом с профилем: {document.template}")
     return PackValidationResult(pack.pack_id, tuple(errors), tuple(warnings), tuple(template_results))
 
 
@@ -487,6 +489,25 @@ def attach_template_to_pack(
         readable, button_label=button_label, document_id=document_id,
         category=category, registry=registry, role_id=role_id,
     )
+    final_role = role_id or draft.role_id
+    final_validation = validate_template(
+        readable,
+        required_fields=draft.required_fields,
+        registry=registry,
+        role_id=final_role,
+        category=category,
+        button_label=button_label or draft.button_label,
+    )
+    if category != "diaries" and not final_validation.ok:
+        reasons: list[str] = []
+        if not final_validation.placeholders:
+            reasons.append("нет placeholders")
+        if final_validation.unknown_fields:
+            reasons.append("неизвестные поля: " + ", ".join(final_validation.unknown_fields))
+        if final_validation.missing_required_placeholders:
+            reasons.append("нет обязательных placeholders: " + ", ".join(final_validation.missing_required_placeholders))
+        raise ValueError("Шаблон не прошёл финальную семантическую проверку: " + "; ".join(reasons or ["ошибка шаблона"]))
+
     target_name = source.with_suffix(".docx").name if source.suffix.lower() == ".docm" else source.name
     target = _available_template_copy_path(templates_dir / target_name)
     copied = False
@@ -500,7 +521,7 @@ def attach_template_to_pack(
             draft,
             id=unique_document_id_for_pack(pack, draft.id, template_path=target),
             template=(PurePosixPath(TEMPLATE_DIR_NAME) / target.name).as_posix(),
-            role_id=role_id or draft.role_id,
+            role_id=final_role,
             button_language=button_language or draft.button_language,
             source_language=source_language or draft.source_language,
             button_label_source=button_label_source or draft.button_label_source,
@@ -516,30 +537,51 @@ def attach_template_to_pack(
         raise
 
 def export_document_pack_zip(pack: DocumentPack, target_zip: str | Path, *, template_base_dir: str | Path | None = None) -> Path:
-    """Export a profile as a portable ``.medpack.zip`` with manifest and templates."""
+    """Export only a self-contained profile; dangling template links are fatal."""
 
     target = Path(target_zip).expanduser()
     target.parent.mkdir(parents=True, exist_ok=True)
     base = Path(template_base_dir).expanduser() if template_base_dir else None
+    planned: list[tuple[DocumentTemplateSpec, Path, str]] = []
+    missing: list[str] = []
+    for document in pack.documents:
+        source = _resolve_pack_template_path(document.template, base)
+        if not source.exists() or not source.is_file() or source.suffix.lower() not in {".docx", ".docm"}:
+            missing.append(f"{document.button_label or document.id}: {document.template or 'template не указан'}")
+            continue
+        try:
+            with zipfile.ZipFile(source, "r"):
+                pass
+        except Exception as exc:
+            missing.append(f"{document.button_label or document.id}: шаблон повреждён ({exc})")
+            continue
+        planned.append((document, source, (PurePosixPath(TEMPLATE_DIR_NAME) / source.name).as_posix()))
+    if missing:
+        raise ValueError("Профиль нельзя экспортировать: не все Word-шаблоны доступны. " + "; ".join(missing[:10]))
+
     manifest = pack.to_dict()
     portable_documents: list[dict] = []
-    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-        seen: set[str] = set()
-        for document in pack.documents:
-            doc_data = document.to_dict()
-            source = _resolve_pack_template_path(document.template, base)
-            if source.exists() and source.is_file() and source.suffix.lower() in {".docx", ".docm"}:
-                arcname = PurePosixPath(TEMPLATE_DIR_NAME) / source.name
-                if arcname.as_posix() not in seen:
-                    zf.write(source, arcname.as_posix())
-                    seen.add(arcname.as_posix())
-                # A portable medpack must never keep an absolute path from the
-                # exporting doctor's desktop/downloads in pack.json.
-                doc_data["template"] = arcname.as_posix()
-            portable_documents.append(doc_data)
-        manifest["documents"] = portable_documents
-        zf.writestr(PACK_MANIFEST_NAME, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
-    return target
+    temp_target = target.with_name(target.name + ".tmp")
+    with suppress(OSError):
+        temp_target.unlink()
+    try:
+        with zipfile.ZipFile(temp_target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+            seen: set[str] = set()
+            for document, source, arcname in planned:
+                doc_data = document.to_dict()
+                if arcname not in seen:
+                    zf.write(source, arcname)
+                    seen.add(arcname)
+                doc_data["template"] = arcname
+                portable_documents.append(doc_data)
+            manifest["documents"] = portable_documents
+            zf.writestr(PACK_MANIFEST_NAME, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+        os.replace(temp_target, target)
+        return target
+    except Exception:
+        with suppress(OSError):
+            temp_target.unlink()
+        raise
 
 
 def import_document_pack_zip(source_zip: str | Path, target_dir: str | Path) -> tuple[DocumentPack, Path]:
@@ -649,18 +691,52 @@ def _iter_table_paragraphs(table, prefix: str):
 
 
 def _iter_docx_paragraphs(doc: Document):
-    """Yield body/header/footer paragraphs recursively through nested tables."""
+    """Yield every visible Word paragraph, including text boxes/shapes.
+
+    python-docx's high-level ``document.paragraphs`` omits paragraphs nested in
+    ``w:txbxContent``.  We first yield the structured body/table/header/footer
+    paragraphs, then walk raw XML and wrap any still-unseen ``w:p`` elements.
+    This keeps ordinary run formatting support while closing the text-box gap.
+    """
+    from docx.text.paragraph import Paragraph
+    from docx.oxml.ns import qn
+
+    seen: set[object] = set()
+
+    def emit(paragraph, hint: str):
+        key = paragraph._p
+        if key in seen:
+            return
+        seen.add(key)
+        yield paragraph, hint
 
     for paragraph_index, paragraph in enumerate(doc.paragraphs):
-        yield paragraph, f"paragraph[{paragraph_index}]"
+        yield from emit(paragraph, f"paragraph[{paragraph_index}]")
     for table_index, table in enumerate(doc.tables):
-        yield from _iter_table_paragraphs(table, f"table[{table_index}]")
+        for paragraph, hint in _iter_table_paragraphs(table, f"table[{table_index}]"):
+            yield from emit(paragraph, hint)
     for section_index, section in enumerate(doc.sections):
         for area_name, area in (("header", section.header), ("footer", section.footer)):
             for paragraph_index, paragraph in enumerate(area.paragraphs):
-                yield paragraph, f"section[{section_index}].{area_name}.paragraph[{paragraph_index}]"
+                yield from emit(paragraph, f"section[{section_index}].{area_name}.paragraph[{paragraph_index}]")
             for table_index, table in enumerate(area.tables):
-                yield from _iter_table_paragraphs(table, f"section[{section_index}].{area_name}.table[{table_index}]")
+                for paragraph, hint in _iter_table_paragraphs(table, f"section[{section_index}].{area_name}.table[{table_index}]"):
+                    yield from emit(paragraph, hint)
+
+    # Raw descendants include Word drawing/text-box paragraphs omitted by the
+    # high-level collections above.  Paragraph(..., owner) is sufficient because
+    # placeholder replacement only needs runs/text and the owning part.
+    for raw_index, element in enumerate(doc.element.body.iter(qn("w:p"))):
+        if element not in seen:
+            yield from emit(Paragraph(element, doc), f"body.xml.paragraph[{raw_index}]")
+    for section_index, section in enumerate(doc.sections):
+        for area_name, area in (("header", section.header), ("footer", section.footer)):
+            root = getattr(area, "_element", None)
+            if root is None:
+                continue
+            for raw_index, element in enumerate(root.iter(qn("w:p"))):
+                if element not in seen:
+                    yield from emit(Paragraph(element, area), f"section[{section_index}].{area_name}.xml.paragraph[{raw_index}]")
 
 
 def _resolve_pack_template_path(template_value: str, base_dir: str | Path | None) -> Path:
@@ -707,36 +783,56 @@ def _copy_json_profile_templates(pack: DocumentPack, source_base: Path, target_b
     updated_documents: list[DocumentTemplateSpec] = []
     templates_dir = target_base / TEMPLATE_DIR_NAME
     templates_dir.mkdir(parents=True, exist_ok=True)
-    for document in pack.documents:
-        source = _resolve_pack_template_path(document.template, source_base)
-        if source.exists() and source.is_file() and source.suffix.lower() in {".docx", ".docm"}:
+    created: list[Path] = []
+    try:
+        for document in pack.documents:
+            source = _resolve_pack_template_path(document.template, source_base)
+            if not source.exists() or not source.is_file() or source.suffix.lower() not in {".docx", ".docm"}:
+                raise ValueError(f"Профиль повреждён: не найден шаблон для «{document.button_label or document.id}»: {document.template}")
             target = _available_template_copy_path(templates_dir / source.name)
             if source.resolve() != target.resolve():
-                shutil.copy2(source, target)
+                shutil.copy2(source, target); created.append(target)
             document = replace(document, template=(PurePosixPath(TEMPLATE_DIR_NAME) / target.name).as_posix())
-        updated_documents.append(document)
-    pack.documents = tuple(updated_documents)
-    return pack
+            updated_documents.append(document)
+        pack.documents = tuple(updated_documents)
+        return pack
+    except Exception:
+        for item in reversed(created):
+            with suppress(OSError): item.unlink()
+        raise
 
 
 def _copy_zip_profile_templates(pack: DocumentPack, zf: zipfile.ZipFile, names: set[str], target_base: Path) -> DocumentPack:
     updated_documents: list[DocumentTemplateSpec] = []
     templates_dir = target_base / TEMPLATE_DIR_NAME
     templates_dir.mkdir(parents=True, exist_ok=True)
-    for document in pack.documents:
-        template_value = str(document.template or "").replace("\\", "/").strip()
-        candidates = [template_value]
-        if template_value:
-            candidates.append((PurePosixPath(TEMPLATE_DIR_NAME) / PurePosixPath(template_value).name).as_posix())
-        archive_name = next((item for item in candidates if item in names and PurePosixPath(item).suffix.lower() in {".docx", ".docm"}), "")
-        if archive_name:
+    created: list[Path] = []
+    try:
+        for document in pack.documents:
+            template_value = str(document.template or "").replace("\\", "/").strip()
+            candidates = [template_value]
+            if template_value:
+                candidates.append((PurePosixPath(TEMPLATE_DIR_NAME) / PurePosixPath(template_value).name).as_posix())
+            archive_name = next((item for item in candidates if item in names and PurePosixPath(item).suffix.lower() in {".docx", ".docm"}), "")
+            if not archive_name:
+                raise ValueError(f"medpack повреждён: нет шаблона для «{document.button_label or document.id}»: {document.template}")
             target = _available_template_copy_path(templates_dir / PurePosixPath(archive_name).name)
             with zf.open(archive_name, "r") as source_file, target.open("wb") as target_file:
                 shutil.copyfileobj(source_file, target_file)
+            created.append(target)
+            # Prove copied member is a readable Word package before committing pack.
+            with zipfile.ZipFile(target, "r") as probe:
+                if "word/document.xml" not in probe.namelist():
+                    raise ValueError(f"Шаблон «{document.button_label or document.id}» не является корректным DOCX/DOCM.")
             document = replace(document, template=(PurePosixPath(TEMPLATE_DIR_NAME) / target.name).as_posix())
-        updated_documents.append(document)
-    pack.documents = tuple(updated_documents)
-    return pack
+            updated_documents.append(document)
+        pack.documents = tuple(updated_documents)
+        return pack
+    except Exception:
+        for item in reversed(created):
+            with suppress(OSError): item.unlink()
+        raise
+
 
 def _replace_placeholders(text: str, context: Mapping[str, str], *, missing_value: str, document: DocumentTemplateSpec | None = None) -> str:
     def repl(match: re.Match[str]) -> str:

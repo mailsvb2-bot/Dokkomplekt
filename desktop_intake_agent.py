@@ -24,6 +24,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import uuid
 from typing import Iterable
 
 from diagnostic_logging import record_soft_exception
@@ -267,7 +268,13 @@ def is_gui_runtime_active(now: float | None = None) -> bool:
         return False
     updated_at = _safe_float(payload.get("updated_at", 0.0), 0.0)
     current = time.time() if now is None else now
-    if current - updated_at <= GUI_ACTIVE_SECONDS:
+    pid = _safe_int(payload.get("pid"), 0)
+    # A live GUI process remains the owner even if its Tk event loop is busy for
+    # more than the heartbeat window.  Starting a second GUI is strictly worse
+    # than waiting for the existing process to recover.
+    if pid > 0 and _pid_is_running(pid):
+        return True
+    if pid <= 0 and current - updated_at <= GUI_ACTIVE_SECONDS:
         return True
     with suppress(OSError):
         _gui_lock_path().unlink()
@@ -603,7 +610,7 @@ def _safe_float(value: object, default: float = 0.0) -> float:
 
 
 def _save_state(seen: set[str], *, last_launch: float, pending: dict | None = None) -> None:
-    payload = {"version": AGENT_VERSION, "seen_signatures": sorted(seen)[-300:], "last_launch": last_launch}
+    payload = {"version": AGENT_VERSION, "seen_signatures": sorted(seen), "last_launch": last_launch}
     if pending:
         payload["pending"] = pending
     _save_json(_state_path(), payload)
@@ -687,13 +694,17 @@ def _resolve_pending_state(state: dict, seen: set[str], folder: Path | None = No
             return pending, False
         _write_log(f"pending launch expired while intake folder unavailable: {_safe_signature_ref(signature)}")
         return {}, True
-    if not _signature_present_in_folder(folder, signature):
-        seen.add(signature)
-        _write_log(f"pending launch confirmed by moved/removed file: {_safe_signature_ref(signature)}")
+    if _signature_present_in_folder(folder, signature):
+        if time.time() - launched_at < PENDING_RETRY_SECONDS:
+            return pending, False
+        _write_log(f"pending launch expired without GUI confirmation: {_safe_signature_ref(signature)}")
         return {}, True
+    # Absence from a scan is not proof of processing: the file may be locked,
+    # temporarily unreadable or mid-sync.  Only the GUI's persisted seen ledger
+    # (or the legacy explicit-path migration above) may finalize a pending item.
     if time.time() - launched_at < PENDING_RETRY_SECONDS:
         return pending, False
-    _write_log(f"pending launch expired without processing: {_safe_signature_ref(signature)}")
+    _write_log(f"pending launch expired without proof of processing: {_safe_signature_ref(signature)}")
     return {}, True
 
 
@@ -704,6 +715,15 @@ def _lock_owner_pid(path: Path) -> int | None:
         return int(match.group(1)) if match else None
     except (OSError, ValueError):
         return None
+
+
+def _lock_owner_token(path: Path) -> str:
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        match = re.search(r"(?m)^token=([0-9a-f]{32})\s*$", text)
+        return match.group(1) if match else ""
+    except OSError:
+        return ""
 
 
 def _pid_is_running(pid: int) -> bool:
@@ -743,8 +763,9 @@ def _agent_lock_has_live_owner() -> bool:
 def _lock_is_stale(path: Path) -> bool:
     try:
         pid = _lock_owner_pid(path)
-        if pid is not None and not _pid_is_running(pid):
-            return True
+        if pid is not None:
+            return not _pid_is_running(pid)
+        # Legacy/corrupt locks without an owner may be reclaimed after timeout.
         return time.time() - path.stat().st_mtime > LOCK_STALE_SECONDS
     except OSError:
         return True
@@ -756,9 +777,10 @@ def _acquire_agent_lock() -> int | None:
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
     for attempt in range(2):
         try:
+            token = uuid.uuid4().hex
             fd = os.open(str(path), flags)
-            os.write(fd, f"pid={os.getpid()}\nversion={AGENT_VERSION}\n".encode("utf-8"))
-            atexit.register(_release_agent_lock, fd, path)
+            os.write(fd, f"pid={os.getpid()}\nversion={AGENT_VERSION}\ntoken={token}\n".encode("utf-8"))
+            atexit.register(_release_agent_lock, fd, path, token)
             return fd
         except FileExistsError:
             if attempt == 0 and _lock_is_stale(path):
@@ -777,17 +799,26 @@ def _acquire_agent_lock() -> int | None:
 def _touch_agent_lock(fd: int | None) -> None:
     if fd is None:
         return
+    path = _lock_path()
     with suppress(Exception):
-        os.utime(_lock_path(), None)
+        if _lock_owner_pid(path) == os.getpid():
+            os.utime(path, None)
 
 
-def _release_agent_lock(fd: int | None, path: Path | None = None) -> None:
+def _release_agent_lock(fd: int | None, path: Path | None = None, token: str = "") -> None:
     if fd is not None:
         with suppress(OSError):
             os.close(fd)
-    if path is not None:
-        with suppress(OSError):
-            path.unlink()
+    if path is None:
+        return
+    try:
+        if _lock_owner_pid(path) != os.getpid():
+            return
+        if token and _lock_owner_token(path) != token:
+            return
+        path.unlink()
+    except OSError:
+        return
 
 
 def run_forever() -> None:

@@ -69,14 +69,14 @@ class ActionsCreationFolderingMixin:
         return existing
 
     def _versioned_output_dir(self, out_dir: Path, patient_stem: str) -> Path:
+        """Plan a version directory without touching disk before generation."""
         date_part = datetime.now().strftime("%Y-%m-%d")
         base = out_dir / f"{safe_filename(patient_stem)}_{date_part}_версия"
         for counter in range(2, 10000):
             candidate = Path(f"{base}_{counter}")
             if not candidate.exists():
-                candidate.mkdir(parents=True, exist_ok=False)
                 return candidate
-        raise RuntimeError("Не удалось создать версионную папку пациента.")
+        raise RuntimeError("Не удалось подобрать имя версионной папки пациента.")
 
     def _prompt_duplicate_policy(self, existing: list[Path]) -> str:
         if not existing:
@@ -136,29 +136,26 @@ class ActionsCreationFolderingMixin:
     def _apply_duplicate_policy(
         self, review, selected_medical: list[str], selected_custom: list[str] | None = None, selected_diaries: bool = False
     ) -> bool:
+        """Plan duplicate handling; never mutate patient files before render success."""
         existing = self._existing_all_targets(review, selected_medical, selected_custom, selected_diaries)
-        if not existing:
-            return True
-        policy = self._prompt_duplicate_policy(existing)
+        final_dir = Path(review.output_dir or self._result_output_dir()).expanduser()
+        policy = self._prompt_duplicate_policy(existing) if existing else "none"
         if policy == "open":
             self._open_result_folder_silent(existing[0].parent)
             return False
         if policy == "cancel":
             return False
         if policy == "version":
-            new_dir = self._versioned_output_dir(Path(review.output_dir or self._result_output_dir()), review.patient_stem())
-            self._set_output_dir_auto_patient_scoped(new_dir)
-            return True
-        if policy == "overwrite":
-            for path in existing:
-                try:
-                    self._backup_existing_output_file(path)
-                except Exception as exc:
-                    record_soft_exception("actions_creation_orchestrator.overwrite_existing", exc, detail=str(path))
-                    messagebox.showerror("Не удалось перезаписать", f"Не удалось создать резервную копию старого файла:\n{path}")
-                    return False
-            return True
-        return False
+            final_dir = self._versioned_output_dir(final_dir, review.patient_stem())
+            existing = []
+        elif policy not in {"none", "overwrite"}:
+            return False
+        self._pending_output_commit = {
+            "policy": policy,
+            "final_dir": final_dir,
+            "overwrite_paths": tuple(existing) if policy == "overwrite" else (),
+        }
+        return True
 
     def _folder_naming_settings(self) -> dict:
         from desktop_patient_folder import normalize_folder_naming_settings
@@ -190,6 +187,7 @@ class ActionsCreationFolderingMixin:
             discharge_date=getattr(data, "discharge_date", "") or current_semantic_date(self, "discharge_date"),
             settings=self._folder_naming_settings(),
             fallback=getattr(data, "output_fio", "") or getattr(data, "fio", "") or "Пациент",
+            strict=True,
         )
         return root / (name or "Пациент")
 

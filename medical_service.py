@@ -485,7 +485,7 @@ def create_documents_batch(*, primary_documents: Iterable[str | Path], output_ro
 def _batch_patient_dir_name(patient: PatientData, source_path: Path, folder_naming_settings: object | None = None) -> str:
     from desktop_patient_folder import build_patient_folder_name
 
-    name = build_patient_folder_name(fio=patient.output_fio or patient.fio, admission_date=patient.admission_date, discharge_date=patient.discharge_date, settings=folder_naming_settings, fallback=source_path.stem)
+    name = build_patient_folder_name(fio=patient.output_fio or patient.fio, admission_date=patient.admission_date, discharge_date=patient.discharge_date, settings=folder_naming_settings, fallback=source_path.stem, strict=True)
     case_number = str(patient.case_number or "").strip().strip("№ ")
     if case_number and case_number not in name:
         name = f"{name} история {case_number}" if name else f"история {case_number}"

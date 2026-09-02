@@ -91,7 +91,7 @@ class ActionsDocumentIntelligenceFlowMixin:
             record_soft_exception("actions_document_intelligence.post_render_fill", exc)
         if output_format == "pdf" and created_paths:
             created_paths = self._export_custom_documents_to_pdf(created_paths)
-        report_path = save_generation_report(result, technical_report_path(out_dir, "custom_profile_generation_report.txt"))
+        report_path = save_generation_report(result, technical_report_path(out_dir, "custom_profile_generation_report.txt")) if self._diagnostic_reports_enabled() else None
         if result.skipped_documents:
             self._log("\n⚠ Custom-документы профиля пропущены:\n")
             for item in result.skipped_documents:
@@ -104,9 +104,9 @@ class ActionsDocumentIntelligenceFlowMixin:
             self._log("\n✅ Созданы custom-документы профиля:\n")
             for path in created_paths:
                 self._log(f"- {path}\n")
-        elif result.skipped_documents:
-            raise ValueError("Custom-документы профиля не созданы: " + "; ".join(str(item) for item in result.skipped_documents[:5]))
-        if self._diagnostic_reports_enabled():
+        if result.skipped_documents:
+            raise ValueError("Неполный комплект custom-документов запрещён: " + "; ".join(str(item) for item in result.skipped_documents[:5]))
+        if self._diagnostic_reports_enabled() and report_path is not None:
             self._log(f"Технический отчёт custom-профиля: {report_path}\n")
         return created_paths
 

@@ -39,6 +39,8 @@ class MainScreenCustomDocument:
     description: str = ""
     role_id: str = ""
     button_language: str = "auto"
+    available: bool = True
+    problem: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -49,6 +51,8 @@ class MainScreenCustomDocument:
             "description": self.description,
             "role_id": self.role_id,
             "button_language": self.button_language,
+            "available": self.available,
+            "problem": self.problem,
         }
 
 
@@ -79,10 +83,11 @@ def is_builtin_document_id(document_id: str) -> bool:
 
 
 def custom_documents_for_main_ui(pack: DocumentPack, *, base_dir: str | Path | None = None) -> tuple[MainScreenCustomDocument, ...]:
-    """Return only doctor-added profile DOCX documents for block 03.
+    """Return every doctor-owned document, including damaged template links.
 
-    Only doctor-added templates are shown.  Legacy fixed ids are filtered out
-    so block 03 cannot silently resurrect an old bundled medical set.
+    A missing file is a repairable profile problem, not permission to erase a
+    button from the doctor's UI.  Block 03 therefore keeps the stable document
+    id/label visible and exposes availability explicitly.
     """
 
     base = Path(base_dir).expanduser() if base_dir else None
@@ -91,21 +96,26 @@ def custom_documents_for_main_ui(pack: DocumentPack, *, base_dir: str | Path | N
     for document in pack.documents:
         if is_builtin_document_id(document.id):
             continue
-        template_text = str(document.template or "").replace("\\", "/").strip()
-        if not template_text.lower().endswith((".docx", ".docm")):
-            continue
-        if not (template_text.startswith("templates/") or Path(template_text).is_absolute()):
-            continue
-        if base is not None:
-            candidate = Path(template_text).expanduser()
-            if not candidate.is_absolute():
-                candidate = base / candidate
-            if not candidate.exists():
-                continue
         kind = custom_kind(document.id)
         if kind in seen:
             continue
         seen.add(kind)
+        template_text = str(document.template or "").replace("\\", "/").strip()
+        candidate = Path(template_text).expanduser() if template_text else Path()
+        if template_text and not candidate.is_absolute() and base is not None:
+            candidate = base / candidate
+        suffix_ok = bool(template_text.lower().endswith((".docx", ".docm")))
+        location_ok = bool(template_text and (template_text.startswith("templates/") or Path(template_text).is_absolute()))
+        exists = bool(template_text and suffix_ok and location_ok and (base is None or candidate.exists()))
+        problem = ""
+        if not template_text:
+            problem = "В профиле не указан Word-шаблон."
+        elif not suffix_ok:
+            problem = f"Неподдерживаемый формат шаблона: {Path(template_text).suffix or 'без расширения'}."
+        elif not location_ok:
+            problem = "Ссылка на шаблон находится вне каталога templates профиля."
+        elif base is not None and not candidate.exists():
+            problem = f"Word-шаблон не найден: {template_text}"
         result.append(MainScreenCustomDocument(
             kind=kind,
             document_id=document.id,
@@ -114,6 +124,8 @@ def custom_documents_for_main_ui(pack: DocumentPack, *, base_dir: str | Path | N
             description=document.description,
             role_id=getattr(document, "role_id", ""),
             button_language=getattr(document, "button_language", "auto"),
+            available=exists if base is not None else bool(template_text and suffix_ok and location_ok),
+            problem=problem,
         ))
     return tuple(result)
 
@@ -145,6 +157,8 @@ def empty_custom_requirement_flags() -> dict[str, bool]:
         "commission": False,
         "vk_mse": False,
         "sick_leave_vk": False,
+        "requires_fio": False,
+        "requires_admission_date": False,
         "requires_case_number": False,
         "requires_diagnosis": False,
         "requires_treatment": False,
@@ -153,6 +167,8 @@ def empty_custom_requirement_flags() -> dict[str, bool]:
     }
 
 
+_FIO_FIELDS = {"patient.fio", "fio", "patient.name", "patient.full_name"}
+_ADMISSION_FIELDS = {"admission.date", "admission_date", "hospitalization.date"}
 _CASE_FIELDS = {"case.number", "case_number", "history.number", "history.case", "patient.case_number"}
 _DIAGNOSIS_FIELDS = {"diagnosis", "diagnosis.main", "diagnosis.icd10", "diagnosis.code", "diagnosis.text"}
 _TREATMENT_FIELDS = {"treatment", "treatment.plan", "treatment.summary", "treatment.result", "treatment.assigned"}
@@ -227,14 +243,16 @@ def _canonical_role_id(value: object) -> str:
     return _LEGACY_ROLE_ALIASES.get(normalized, normalized)
 
 
-def _field_set(document: object) -> set[str]:
+def _field_set(document: object, *, required_only: bool = False) -> set[str]:
+    """Canonical semantic fields independent of button label/path/description."""
     fields: set[str] = set()
     context = {
         "role_id": getattr(document, "role_id", "") or "",
         "category": getattr(document, "category", "") or "",
-        "document_label": getattr(document, "button_label", "") or "",
+        "document_label": "",
     }
-    for attr in ("required_fields", "optional_fields"):
+    attrs = ("required_fields",) if required_only else ("required_fields", "optional_fields")
+    for attr in attrs:
         for item in tuple(getattr(document, attr, ()) or ()):  # type: ignore[arg-type]
             raw = str(item or "").strip()
             if not raw:
@@ -242,75 +260,80 @@ def _field_set(document: object) -> set[str]:
             try:
                 fields.add(normalize_field_id_for_context(raw, **context))
             except ValueError:
-                # Keep malformed doctor-owned ids visible to heuristics instead of
-                # crashing the main screen; release gates still validate packs.
-                fields.add(raw.lower().replace("-", "_").replace(" ", "_"))
+                try:
+                    fields.add(normalize_field_id(raw))
+                except ValueError:
+                    fields.add(raw.lower().replace("-", "_").replace(" ", "_"))
     return fields
 
 
-def _signature_for_document(document: object) -> str:
-    parts = [
-        getattr(document, "id", ""),
-        getattr(document, "document_id", ""),
-        getattr(document, "role_id", ""),
-        getattr(document, "category", ""),
-        getattr(document, "button_label", ""),
-        getattr(document, "template", ""),
-        getattr(document, "description", ""),
-        " ".join(_field_set(document)),
-    ]
-    return " ".join(str(part or "") for part in parts).lower().replace("\\", "/").replace("ё", "е")
-
-
 def _has_any(fields: set[str], aliases: set[str]) -> bool:
-    return bool(fields & aliases)
+    normalized_aliases: set[str] = set()
+    for alias in aliases:
+        try:
+            normalized_aliases.add(normalize_field_id(alias))
+        except ValueError:
+            normalized_aliases.add(alias)
+    return bool(fields & normalized_aliases)
+
+
+_ROLE_REQUIREMENTS: dict[str, frozenset[str]] = {
+    **{role: frozenset({"case"}) for role in _PRIMARY_ROLES},
+    **{role: frozenset({"case", "diagnosis", "treatment", "discharge"}) for role in _DISCHARGE_ROLES},
+    **{role: frozenset({"case", "diagnosis", "treatment", "discharge"}) for role in _RVK_ROLES},
+    **{role: frozenset({"case", "diagnosis", "treatment"}) for role in _COMMISSION_ROLES},
+    **{role: frozenset({"case", "diagnosis", "treatment"}) for role in _VK_MSE_ROLES},
+    **{role: frozenset({"case", "diagnosis", "treatment"}) for role in _SICK_LEAVE_ROLES},
+    "daily_diary": frozenset({"discharge"}),
+}
+
+
+def semantic_role_for_document(document: object) -> str:
+    """Return persisted semantic role without guessing from human-facing text."""
+    role = _canonical_role_id(getattr(document, "role_id", "") or "")
+    if role and role != "unknown":
+        return role
+    # Exact historic ids may be migrated safely; substring/title/path guessing is
+    # deliberately forbidden because rename/location must never change behavior.
+    raw_id = _canonical_role_id(getattr(document, "id", "") or getattr(document, "document_id", "") or "")
+    known = set(_ROLE_REQUIREMENTS) | _PRIMARY_ROLES | _DISCHARGE_ROLES | _COMMISSION_ROLES | _VK_MSE_ROLES | _SICK_LEAVE_ROLES | _RVK_ROLES
+    return raw_id if raw_id in known else "unknown"
+
+
+def document_role_matches_builtin_kind(document: object, kind: str) -> bool:
+    role = semantic_role_for_document(document)
+    mapping = {
+        "discharge": _DISCHARGE_ROLES,
+        "rvk": _RVK_ROLES,
+        "commission": _COMMISSION_ROLES,
+        "vk_mse": _VK_MSE_ROLES,
+        "sick_leave_vk": _SICK_LEAVE_ROLES,
+        "admission_doctor_referral": {"admission_doctor_exam", "hospitalization_referral"},
+        "primary": {"primary_exam", "inpatient_record"},
+    }
+    return role in mapping.get(str(kind or "").strip(), set())
 
 
 def custom_requirement_flags_for_documents(documents: object) -> dict[str, bool]:
-    """Infer popup requirements for doctor-owned block-03 documents.
+    """Derive popup requirements only from persisted role + required fields.
 
-    The contract is data-driven: role_id/category/button label/template path and
-    semantic placeholders all participate.  A doctor may rename a button in the
-    confirmation table, but the saved role/placeholders still restore the right
-    popup chain.
+    Human button labels, file paths and descriptions are presentation metadata.
+    They are intentionally excluded so renaming/moving a template cannot mutate
+    the clinical workflow.
     """
 
     flags = empty_custom_requirement_flags()
     for document in tuple(documents or ()):  # type: ignore[arg-type]
-        fields = _field_set(document)
-        signature = _signature_for_document(document)
-        raw_role = getattr(document, "role_id", "") or ""
-        raw_id = getattr(document, "id", "") or getattr(document, "document_id", "") or ""
-        role = _canonical_role_id(raw_role) or _canonical_role_id(raw_id)
-        if not role:
-            role = _canonical_role_id(raw_id)
+        fields = _field_set(document, required_only=True)
+        role = semantic_role_for_document(document)
         category = _normalize_role_token(getattr(document, "category", "") or "")
-
-        is_diary = category == "diaries" or role == "daily_diary" or any(token in signature for token in ("дневник", "дневники", "diary", "daily_diary"))
-        is_primary = role in _PRIMARY_ROLES or any(token in signature for token in (
-            "первичный осмотр", "первичный", "осмотр при поступлении",
-            "осмотр врача приемного покоя", "осмотр врача приёмного покоя",
-            "приемный покой", "приёмный покой", "admission_doctor",
-        ))
-        is_discharge = role in _DISCHARGE_ROLES or any(token in signature for token in (
-            "выписной эпикриз", "выписка", "выпис", "эпикриз", "epicrisis", "discharge",
-        ))
-        is_rvk = role in _RVK_ROLES or any(token in signature for token in (
-            "акт для рвк", "акт рвк", "рвк", "военком", "военно", "военный комиссариат",
-            "military_commissariat", "military commissariat",
-        ))
-        is_commission = role in _COMMISSION_ROLES or any(token in signature for token in (
-            "совместный осмотр", "комиссионный осмотр", "врачебная комиссия", "медицинская комиссия",
-            "лкк", "комиссион",
-        )) or ("врачебн" in signature and "комисс" in signature)
-        is_vk_mse = role in _VK_MSE_ROLES or any(token in signature for token in (
-            "вк на мсэ", "на мсэ", "мсэ", "мсек", "медико-социаль", "mse",
-        ))
-        is_sick_leave_vk = role in _SICK_LEAVE_ROLES or (
-            ("больнич" in signature or "нетрудоспособ" in signature or "sick_leave" in signature)
-            and ("вк" in signature or "комисс" in signature or "протокол" in signature)
-        )
-        requires_labs = _has_any(fields, _LABS_FIELDS) or any(token in signature for token in ("анализ", "лаборатор", "оак", "оам", "labs", "analysis.results"))
+        is_diary = category == "diaries" or role == "daily_diary"
+        is_discharge = role in _DISCHARGE_ROLES
+        is_rvk = role in _RVK_ROLES
+        is_commission = role in _COMMISSION_ROLES
+        is_vk_mse = role in _VK_MSE_ROLES
+        is_sick_leave_vk = role in _SICK_LEAVE_ROLES
+        requirements = _ROLE_REQUIREMENTS.get(role, frozenset())
 
         flags["diary"] = flags["diary"] or is_diary
         flags["discharge"] = flags["discharge"] or is_discharge
@@ -319,12 +342,15 @@ def custom_requirement_flags_for_documents(documents: object) -> dict[str, bool]
         flags["vk_mse"] = flags["vk_mse"] or is_vk_mse
         flags["sick_leave_vk"] = flags["sick_leave_vk"] or is_sick_leave_vk
         flags["regular"] = flags["regular"] or not is_diary
-        flags["requires_case_number"] = flags["requires_case_number"] or (not is_diary) or _has_any(fields, _CASE_FIELDS)
-        flags["requires_diagnosis"] = flags["requires_diagnosis"] or _has_any(fields, _DIAGNOSIS_FIELDS) or is_discharge or is_rvk or is_commission or is_vk_mse or is_sick_leave_vk
-        flags["requires_treatment"] = flags["requires_treatment"] or _has_any(fields, _TREATMENT_FIELDS) or is_discharge or is_rvk or is_commission or is_vk_mse or is_sick_leave_vk
-        flags["requires_discharge_date"] = flags["requires_discharge_date"] or _has_any(fields, _DISCHARGE_FIELDS) or is_diary or is_discharge or is_rvk
-        flags["requires_labs"] = flags["requires_labs"] or requires_labs
+        flags["requires_fio"] = flags["requires_fio"] or _has_any(fields, _FIO_FIELDS)
+        flags["requires_admission_date"] = flags["requires_admission_date"] or _has_any(fields, _ADMISSION_FIELDS)
+        flags["requires_case_number"] = flags["requires_case_number"] or "case" in requirements or _has_any(fields, _CASE_FIELDS)
+        flags["requires_diagnosis"] = flags["requires_diagnosis"] or "diagnosis" in requirements or _has_any(fields, _DIAGNOSIS_FIELDS)
+        flags["requires_treatment"] = flags["requires_treatment"] or "treatment" in requirements or _has_any(fields, _TREATMENT_FIELDS)
+        flags["requires_discharge_date"] = flags["requires_discharge_date"] or "discharge" in requirements or _has_any(fields, _DISCHARGE_FIELDS)
+        flags["requires_labs"] = flags["requires_labs"] or _has_any(fields, _LABS_FIELDS)
     return flags
+
 
 def assert_dynamic_medpack_button_lock() -> None:
     """Release-gate lock: doctor-owned buttons must stay in their own namespace."""

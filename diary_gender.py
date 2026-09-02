@@ -44,6 +44,12 @@ def detect_gender_from_patient_name(patient_name: str) -> str | None:
         if token in _POLISH_MALE_FIRST_NAMES or token.endswith(_POLISH_MALE_SUFFIXES):
             return "male"
     surname = lowered[0]
+    raw_tokens = value.split()
+    if len(lowered) >= 2 and raw_tokens:
+        first_raw = re.sub(r"[^A-Za-zА-Яа-яЁё.]", "", raw_tokens[0])
+        compact = first_raw.replace(".", "")
+        if len(compact) in {1, 2, 3} and compact.isalpha() and ("." in first_raw or len(compact) <= 2):
+            surname = lowered[1]
     last = surname[-1]
     if last in RUSSIAN_VOWELS or last in {"a", "ą", "ę"}:
         return "female"

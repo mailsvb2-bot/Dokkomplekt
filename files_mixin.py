@@ -136,6 +136,10 @@ class FilesMixin:
         self._manual_diagnosis = False
         self._popup_diagnosis_override = ""
         self._popup_discharge_date_override = ""
+        try:
+            self.diary_frequency_mode_var.set("daily")
+        except Exception as exc:
+            record_soft_exception("files_mixin.reset_diary_frequency", exc)
         # Ctrl+Z history belongs to one patient only.  Clear it before programmatic
         # resets so an undo in the next case cannot resurrect the previous FIO,
         # diagnosis, case number, dates or treatment.

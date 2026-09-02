@@ -24,7 +24,9 @@ ARCHITECTURE_CONTRACT_LOCK_VERSION = "v2.4"
 # 201 includes icd10_full_data.py, the auto-generated full ICD-10 detail layer
 # (non-F classes, ~14k rows) that upgrades the catalog from chapter/block-only
 # to the complete WHO/Minzdrav classification. It is pure data, not logic.
-TOTAL_PYTHON_FILE_BUDGET = 201
+# 202 adds output_transaction.py: one cohesive filesystem transaction boundary
+# that removes partial patient-document commits from UI/rendering modules.
+TOTAL_PYTHON_FILE_BUDGET = 202
 MAX_GENERAL_MODULE_LINES = 1200
 MAX_BIG_MODULE_LINES = 1600
 MAX_TINY_NON_ENTRYPOINT_FILES = 25
@@ -222,7 +224,7 @@ def module_layer(path: Path) -> str:
         return "auditor"
     if stem.startswith(("universal_", "regulatory_", "medical_language_", "medical_orthography")) or stem in {"personal_document_buttons", "i18n_strings", "language_preferences"}:
         return "universal_regulatory_language"
-    if stem.startswith(("window_", "layout_", "dialog_", "actions_", "files_", "dnd_", "widgets_", "settings_", "diagnosis_")) or stem in {"app", "app_initialization"}:
+    if stem.startswith(("window_", "layout_", "dialog_", "actions_", "files_", "dnd_", "widgets_", "settings_", "diagnosis_")) or stem in {"app", "app_initialization", "output_transaction"}:
         return "ui_actions"
     if stem.startswith(("medical_", "diary_", "icd10")) or stem in {"embedded_templates", "printer_support", "medical_documents"}:
         return "domain_medical_diary"
