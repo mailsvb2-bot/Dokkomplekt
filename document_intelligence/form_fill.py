@@ -6,6 +6,7 @@ from typing import Mapping
 
 from docx import Document
 
+from .analyzer import BLANK_RE
 from .text_utils import custom_field_id, normalize
 
 _VISIBLE_BLANK_RE = re.compile(r"^[\s_—–.\-]{3,}$")
@@ -34,6 +35,19 @@ def _is_visible_blank(value: object) -> bool:
     text = str(value or "")
     normalized = normalize(text)
     return not normalized or bool(_VISIBLE_BLANK_RE.fullmatch(text.strip()))
+
+
+def _replace_visible_blank_region(text: object, value: str) -> str | None:
+    """Replace analyzer-recognized blank runs while preserving fixed cell text."""
+
+    raw = str(text or "")
+    matches = list(BLANK_RE.finditer(raw))
+    if not matches:
+        return None
+    # One semantic table field may use several visual runs (``____ / ____``).
+    # Treat the whole visual blank region as one slot for the confirmed value,
+    # while retaining fixed prefixes/suffixes such as ``№ `` or `` руб.``.
+    return raw[: matches[0].start()] + value + raw[matches[-1].end() :]
 
 
 def visible_fill_field_ids(
@@ -106,12 +120,15 @@ def _fill_tables(
             for index, cell in enumerate(cells[:-1]):
                 label = normalize(cell.text).strip(" :")
                 target = cells[index + 1]
-                if not label or not _is_visible_blank(target.text):
+                target_text = target.text or ""
+                analyzer_blank = bool(BLANK_RE.search(normalize(target_text)))
+                if not label or (not _is_visible_blank(target_text) and not analyzer_blank):
                     continue
                 field_id = visible_field_id(label, role_id=role_id, category=category, button_label=button_label)
                 value = str(values.get(field_id, "") or "").strip()
                 if value:
-                    target.text = value
+                    replacement = _replace_visible_blank_region(target_text, value)
+                    target.text = replacement if replacement is not None else value
                     filled.append(field_id)
     return filled
 

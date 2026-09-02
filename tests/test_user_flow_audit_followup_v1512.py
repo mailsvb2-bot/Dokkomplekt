@@ -221,3 +221,33 @@ def test_visible_word_fields_share_one_canonical_semantic_owner(tmp_path: Path):
     )
 
     assert missing_fields_from_principles(case, spec, base_dir=tmp_path / "profile") == ()
+
+
+def test_table_visible_blank_with_fixed_text_matches_analyzer_and_renderer(tmp_path: Path):
+    from document_intelligence.form_fill import fill_docx_visible_fields, visible_field_id, visible_fill_field_ids
+
+    source = tmp_path / "table-fixed-text.docx"
+    doc = Document()
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Номер истории болезни"
+    table.cell(0, 1).text = "№ ____ / ____ архив"
+    table.cell(1, 0).text = "Сумма"
+    table.cell(1, 1).text = "______ руб."
+    doc.save(source)
+
+    fields = set(visible_fill_field_ids(source))
+    sum_field_id = visible_field_id("Сумма")
+    assert "case.number" in fields
+    assert sum_field_id in fields
+
+    filled = fill_docx_visible_fields(
+        source,
+        {"case.number": "314/26", sum_field_id: "1250"},
+    )
+    rendered = Document(source)
+
+    assert "case.number" in filled
+    assert rendered.tables[0].cell(0, 1).text == "№ 314/26 архив"
+    assert rendered.tables[0].cell(1, 1).text == "1250 руб."
+    assert "____" not in rendered.tables[0].cell(0, 1).text
+    assert "______" not in rendered.tables[0].cell(1, 1).text
