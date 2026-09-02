@@ -88,3 +88,26 @@ def test_overwrite_target_recreated_after_backup_is_preserved(monkeypatch, tmp_p
     backups = list(final.glob("a_backup_*.docx"))
     assert len(backups) == 1
     assert backups[0].read_text(encoding="utf-8") == "OLD"
+
+
+def test_rollback_claim_survives_public_name_swap_after_ownership_check(monkeypatch, tmp_path: Path) -> None:
+    from output_transaction import OutputTransaction
+
+    final = tmp_path / "patient"
+    final.mkdir()
+    target = final / "a.docx"
+    target.write_text("OURS", encoding="utf-8")
+    signature = OutputTransaction._owned_file_signature(target)
+    real_match = OutputTransaction._matches_owned_signature.__func__
+
+    def create_foreign_after_claim(cls, claimed: Path, expected) -> bool:
+        matched = real_match(cls, claimed, expected)
+        # The public name is free after the atomic claim. A concurrent writer
+        # recreates it before rollback deletes the object it already claimed.
+        target.write_text("FOREIGN", encoding="utf-8")
+        return matched
+
+    monkeypatch.setattr(OutputTransaction, "_matches_owned_signature", classmethod(create_foreign_after_claim))
+    assert OutputTransaction._remove_owned_committed(target, signature) is True
+    assert target.read_text(encoding="utf-8") == "FOREIGN"
+    assert not list(final.glob(".dokkomplekt-rollback-claim-*"))

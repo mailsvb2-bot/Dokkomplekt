@@ -89,19 +89,98 @@ class OutputTransaction:
                 record_soft_exception("output_transaction.no_replace_link_cleanup", cleanup_exc, detail=str(target))
             raise
 
+    @staticmethod
+    def _claim_current_path(path: Path) -> tuple[Path, Path] | None:
+        """Atomically move the current public name into a private directory.
+
+        Rollback must never perform ``check(path); unlink(path)`` because another
+        process can replace the public name between those two operations.  A
+        freshly-created private directory gives ``os.rename`` a guaranteed empty
+        destination so we can inspect/delete the claimed object without racing
+        against changes to the public target name.
+        """
+        for _attempt in range(100):
+            claim_dir = path.parent / f".dokkomplekt-rollback-claim-{uuid.uuid4().hex}"
+            try:
+                claim_dir.mkdir(exist_ok=False)
+            except FileExistsError:
+                continue
+            claimed = claim_dir / path.name
+            try:
+                os.rename(path, claimed)
+            except FileNotFoundError:
+                claim_dir.rmdir()
+                return None
+            except Exception:
+                try:
+                    claim_dir.rmdir()
+                except OSError as cleanup_exc:
+                    record_soft_exception(
+                        "output_transaction.claim_dir_cleanup",
+                        cleanup_exc,
+                        detail=str(claim_dir),
+                    )
+                raise
+            return claim_dir, claimed
+        raise FileExistsError(f"Не удалось создать приватное имя rollback для: {path}")
+
+    @staticmethod
+    def _restore_claimed_no_clobber(claimed: Path, original: Path) -> bool:
+        """Restore a claimed foreign file without replacing a new public file."""
+        try:
+            if os.name == "nt":
+                os.rename(claimed, original)
+            else:
+                os.link(claimed, original, follow_symlinks=False)
+                try:
+                    claimed.unlink()
+                except OSError as unlink_exc:
+                    # Both names still point to the same preserved data.  Keep
+                    # the private copy and surface a rollback conflict instead
+                    # of deleting either name.
+                    record_soft_exception(
+                        "output_transaction.restore_claimed_unlink",
+                        unlink_exc,
+                        detail=f"original={original}; claimed={claimed}",
+                    )
+                    return False
+        except FileExistsError:
+            return False
+        return True
+
     @classmethod
     def _remove_owned_committed(cls, path: Path, signature: tuple[int, int, str]) -> bool:
-        if not path.exists():
+        claim = cls._claim_current_path(path)
+        if claim is None:
             return True
-        if not cls._matches_owned_signature(path, signature):
+        claim_dir, claimed = claim
+        try:
+            if cls._matches_owned_signature(claimed, signature):
+                claimed.unlink()
+                return True
+
+            restored = cls._restore_claimed_no_clobber(claimed, path)
             record_soft_exception(
                 "output_transaction.concurrent_commit_change",
-                RuntimeError("Committed target changed concurrently; preserving it instead of deleting it."),
+                RuntimeError(
+                    "Committed target changed concurrently; the foreign file was "
+                    + ("restored to its public name." if restored else f"preserved at {claimed} because the public name is occupied.")
+                ),
                 detail=str(path),
             )
             return False
-        path.unlink()
-        return True
+        finally:
+            try:
+                claim_dir.rmdir()
+            except OSError as cleanup_exc:
+                # If a conflict keeps ``claimed`` in the private directory, the
+                # directory itself is the preservation container and must stay.
+                if not claimed.exists():
+                    record_soft_exception(
+                        "output_transaction.claim_dir_cleanup_after_rollback",
+                        cleanup_exc,
+                        detail=str(claim_dir),
+                    )
 
     @classmethod
     def _restore_backup_no_clobber(cls, original: Path, backup: Path) -> bool:
