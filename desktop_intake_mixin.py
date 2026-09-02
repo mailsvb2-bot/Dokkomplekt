@@ -416,7 +416,7 @@ class DesktopIntakeMixin:
             local_vars: dict[str, tk.BooleanVar] = {}
             entries: list[tuple[str, str, bool, str]] = []
             try:
-                from desktop_intake_choices import profile_choices_for_desktop_intake
+                from universal_main_documents import profile_choices_for_desktop_intake
                 from layout_checklist import _doctor_buttons_setup_completed
                 pack = self._load_or_create_universal_pack()
                 # Keep this popup in sync with block 03 while making a missing

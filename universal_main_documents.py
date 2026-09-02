@@ -29,6 +29,16 @@ PROFILE_BUTTON_LABELS_ARE_PERSISTED = True
 
 
 @dataclass(frozen=True)
+class IntakeProfileChoice:
+    """One desktop-intake profile choice derived from block-03 availability."""
+
+    kind: str
+    label: str
+    available: bool
+    problem: str = ""
+
+
+@dataclass(frozen=True)
 class MainScreenCustomDocument:
     """A profile document that can be safely shown in block 03."""
 
@@ -128,6 +138,31 @@ def custom_documents_for_main_ui(pack: DocumentPack, *, base_dir: str | Path | N
             problem=problem,
         ))
     return tuple(result)
+
+
+def profile_choices_for_desktop_intake(
+    pack: DocumentPack, *, base_dir: str | Path | None = None
+) -> tuple[IntakeProfileChoice, ...]:
+    """Expose block-03 documents to desktop intake without a second UI owner.
+
+    The same main-document model owns label, availability and repair problems for
+    both the main checklist and the dropped-file intake popup.
+    """
+
+    choices: list[IntakeProfileChoice] = []
+    for document in custom_documents_for_main_ui(pack, base_dir=base_dir):
+        problem = str(document.problem or "").strip()
+        if not document.available and not problem:
+            problem = "Word-шаблон документа недоступен."
+        choices.append(
+            IntakeProfileChoice(
+                kind=document.kind,
+                label=document.label,
+                available=bool(document.available),
+                problem=problem,
+            )
+        )
+    return tuple(choices)
 
 
 def selected_custom_document_ids(output_vars: Mapping[str, object]) -> tuple[str, ...]:

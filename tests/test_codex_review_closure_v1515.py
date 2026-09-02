@@ -74,7 +74,7 @@ def test_medpack_export_rejects_non_word_zip_named_docx(tmp_path: Path) -> None:
 
 
 def test_desktop_intake_choices_expose_broken_template_as_unavailable(tmp_path: Path) -> None:
-    from desktop_intake_choices import profile_choices_for_desktop_intake
+    from universal_main_documents import profile_choices_for_desktop_intake
     from universal_profiles import DocumentPack, DocumentTemplateSpec
 
     pack = DocumentPack(pack_id="x", name="x", documents=(
