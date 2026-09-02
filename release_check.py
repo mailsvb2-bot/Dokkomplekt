@@ -699,11 +699,14 @@ def _assert_medpack_export_contract() -> None:
     with tempfile.TemporaryDirectory(prefix="dokkomplekt-release-medpack-") as temp_dir:
         root = Path(temp_dir)
         template = root / "doctor-template.docx"
-        with zipfile.ZipFile(template, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(
-                "[Content_Types].xml",
-                "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"/>",
-            )
+        # The release gate must exercise a genuine Word OOXML package. A hand-
+        # rolled ZIP with only [Content_Types].xml is not a DOCX and would let
+        # an invalid fixture contradict the production medpack validator.
+        from docx import Document
+
+        fixture = Document()
+        fixture.add_paragraph("{{patient.fio}}")
+        fixture.save(template)
 
         pack = DocumentPack(
             pack_id="release.gate",

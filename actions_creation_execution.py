@@ -344,7 +344,11 @@ class ActionsCreationExecutionMixin:
             transaction.rollback()
             self._active_patient_output_dir = final_dir
             record_classified_error("commit_output_transaction", exc, category=ErrorCategory.DOCX_RENDER)
-            messagebox.showerror("Не удалось сохранить комплект", "Все временные файлы отменены; прежние документы восстановлены.\n\n" + str(exc))
+            messagebox.showerror(
+                "Не удалось сохранить комплект",
+                "Сохранение комплекта отменено. Транзакция не перезаписывает файлы, появившиеся параллельно; "
+                "если безопасное восстановление невозможно, прежняя версия остаётся в резервной копии рядом с документами.\n\n" + str(exc),
+            )
             return False
 
         self._active_patient_output_dir = final_dir

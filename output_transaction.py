@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -22,13 +23,11 @@ class OutputTransaction:
     final_dir: Path
     overwrite_paths: tuple[Path, ...] = ()
     stage_dir: Path | None = None
-    _final_existed: bool = field(default=False, init=False)
     _created_dirs: list[Path] = field(default_factory=list, init=False)
 
     def begin(self) -> Path:
         final = Path(self.final_dir).expanduser()
         self.final_dir = final
-        self._final_existed = final.exists()
         self._created_dirs = []
         final.parent.mkdir(parents=True, exist_ok=True)
         stage = final.parent / f".dokkomplekt-staging-{uuid.uuid4().hex}"
@@ -47,6 +46,88 @@ class OutputTransaction:
             return str(path.resolve()).casefold()
         except OSError:
             return str(path.absolute()).casefold()
+
+    @staticmethod
+    def _file_digest(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    @classmethod
+    def _owned_file_signature(cls, path: Path) -> tuple[int, int, str]:
+        stat = path.stat()
+        return int(stat.st_dev), int(stat.st_ino), cls._file_digest(path)
+
+    @classmethod
+    def _matches_owned_signature(cls, path: Path, signature: tuple[int, int, str]) -> bool:
+        try:
+            return cls._owned_file_signature(path) == signature
+        except OSError:
+            return False
+
+    @staticmethod
+    def _move_no_replace(source: Path, target: Path) -> None:
+        """Move one file while atomically refusing an existing destination.
+
+        Windows ``os.rename`` is no-clobber. POSIX ``rename`` is not, so on
+        POSIX we create a hard link first (which is atomic and fails with
+        ``EEXIST``), then remove the staging name. Stage and final paths are
+        siblings on the same filesystem by construction.
+        """
+        if os.name == "nt":
+            os.rename(source, target)
+            return
+        os.link(source, target, follow_symlinks=False)
+        try:
+            source.unlink()
+        except Exception:
+            try:
+                target.unlink()
+            except OSError as cleanup_exc:
+                record_soft_exception("output_transaction.no_replace_link_cleanup", cleanup_exc, detail=str(target))
+            raise
+
+    @classmethod
+    def _remove_owned_committed(cls, path: Path, signature: tuple[int, int, str]) -> bool:
+        if not path.exists():
+            return True
+        if not cls._matches_owned_signature(path, signature):
+            record_soft_exception(
+                "output_transaction.concurrent_commit_change",
+                RuntimeError("Committed target changed concurrently; preserving it instead of deleting it."),
+                detail=str(path),
+            )
+            return False
+        path.unlink()
+        return True
+
+    @classmethod
+    def _restore_backup_no_clobber(cls, original: Path, backup: Path) -> bool:
+        if not backup.exists():
+            return True
+        try:
+            cls._move_no_replace(backup, original)
+        except FileExistsError as restore_conflict:
+            record_soft_exception(
+                "output_transaction.restore_backup_conflict",
+                restore_conflict,
+                detail=f"original={original}; backup={backup}",
+            )
+            return False
+        return True
+
+    @classmethod
+    def _move_to_unique_backup(cls, original: Path) -> Path:
+        for _attempt in range(100):
+            backup = cls._backup_path(original)
+            try:
+                cls._move_no_replace(original, backup)
+                return backup
+            except FileExistsError:
+                continue
+        raise FileExistsError(f"Не удалось атомарно зарезервировать имя резервной копии: {original}")
 
     def _ensure_target_parent(self, parent: Path) -> None:
         """Create target directories while recording only directories we own.
@@ -104,7 +185,7 @@ class OutputTransaction:
                 raise FileExistsError(f"Новый файл неожиданно совпал с существующим и не был подтверждён для перезаписи: {target}")
 
         backups: list[tuple[Path, Path]] = []
-        committed: list[Path] = []
+        committed_owned: list[tuple[Path, tuple[int, int, str]]] = []
         mapping: dict[Path, Path] = {}
         try:
             # Back up all user-approved collisions, including older numbered
@@ -113,32 +194,41 @@ class OutputTransaction:
                 original = Path(original)
                 if not original.exists():
                     continue
-                backup = self._backup_path(original)
-                original.rename(backup)
+                backup = self._move_to_unique_backup(original)
                 backups.append((original, backup))
 
             for source, target in targets:
                 self._ensure_target_parent(target.parent)
-                os.replace(source, target)
-                committed.append(target)
+                expected_signature = self._owned_file_signature(source)
+                self._move_no_replace(source, target)
+                committed_owned.append((target, expected_signature))
                 mapping[source] = target
 
             shutil.rmtree(stage, ignore_errors=True)
             self.stage_dir = None
             self._created_dirs = []
             return mapping
-        except Exception:
-            for target in reversed(committed):
+        except Exception as commit_exc:
+            rollback_conflicts: list[str] = []
+            for target, signature in reversed(committed_owned):
                 try:
-                    target.unlink()
+                    if not self._remove_owned_committed(target, signature):
+                        rollback_conflicts.append(str(target))
                 except OSError as cleanup_exc:
+                    rollback_conflicts.append(str(target))
                     record_soft_exception("output_transaction.remove_partial_commit", cleanup_exc, detail=str(target))
             for original, backup in reversed(backups):
                 try:
-                    if original.exists():
-                        original.unlink()
-                    backup.rename(original)
+                    if not self._restore_backup_no_clobber(original, backup):
+                        rollback_conflicts.append(f"{original} (backup: {backup})")
                 except OSError as restore_exc:
+                    rollback_conflicts.append(f"{original} (backup: {backup})")
                     record_soft_exception("output_transaction.restore_backup", restore_exc, detail=str(original))
             self._remove_empty_created_dirs()
+            if rollback_conflicts:
+                raise RuntimeError(
+                    "Сохранение отменено из-за параллельного изменения файлов. "
+                    "Чужие/изменённые файлы не удалены; резервные копии прежних документов сохранены. "
+                    "Конфликты: " + "; ".join(rollback_conflicts[:10])
+                ) from commit_exc
             raise

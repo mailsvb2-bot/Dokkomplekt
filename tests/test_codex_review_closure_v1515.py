@@ -16,18 +16,18 @@ def test_output_transaction_rollback_preserves_concurrent_foreign_file(monkeypat
     stage = tx.begin()
     (stage / "a.docx").write_text("A", encoding="utf-8")
     (stage / "b.docx").write_text("B", encoding="utf-8")
-    real_replace = module.os.replace
+    real_move = module.OutputTransaction._move_no_replace
     calls = {"count": 0}
 
     def fail_after_concurrent_write(src, dst):
         calls["count"] += 1
         if calls["count"] == 1:
-            real_replace(src, dst)
+            real_move(src, dst)
             (final / "foreign.txt").write_text("FOREIGN", encoding="utf-8")
             return None
         raise OSError("simulated commit failure")
 
-    monkeypatch.setattr(module.os, "replace", fail_after_concurrent_write)
+    monkeypatch.setattr(module.OutputTransaction, "_move_no_replace", staticmethod(fail_after_concurrent_write))
     with pytest.raises(OSError, match="simulated"):
         tx.commit()
     assert (final / "foreign.txt").read_text(encoding="utf-8") == "FOREIGN"

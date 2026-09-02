@@ -191,14 +191,15 @@ def test_output_transaction_rolls_back_overwrite_on_mid_commit_failure(monkeypat
     stage = tx.begin()
     (stage / "a.docx").write_text("NEW-A", encoding="utf-8")
     (stage / "b.docx").write_text("NEW-B", encoding="utf-8")
-    real_replace = module.os.replace
+    real_move = module.OutputTransaction._move_no_replace
     calls = {"n": 0}
-    def fail_second(src, dst):
+    def fail_third(src, dst):
         calls["n"] += 1
-        if calls["n"] == 2:
+        # 1=backup old a.docx, 2=commit new a.docx, 3=commit b.docx.
+        if calls["n"] == 3:
             raise OSError("simulated commit failure")
-        return real_replace(src, dst)
-    monkeypatch.setattr(module.os, "replace", fail_second)
+        return real_move(src, dst)
+    monkeypatch.setattr(module.OutputTransaction, "_move_no_replace", staticmethod(fail_third))
     with pytest.raises(OSError, match="simulated"):
         tx.commit()
     assert old.read_text(encoding="utf-8") == "OLD"
