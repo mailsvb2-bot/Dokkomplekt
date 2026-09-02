@@ -47,6 +47,17 @@ class ActionsDocumentIntelligenceFlowMixin:
             dedup.setdefault(item.field_id, item)
         return tuple(dedup.values())
 
+    def _prepare_custom_document_output_format(self, selected_custom_ids: List[str]) -> str:
+        """Choose the regular custom-document format once for the whole transaction."""
+        self._planned_custom_output_format = "docx"
+        if not selected_custom_ids:
+            return "docx"
+        current_pack = self._load_or_create_universal_pack()
+        _diary_ids, regular_ids = self._split_custom_diary_document_ids(current_pack, selected_custom_ids)
+        if regular_ids:
+            self._planned_custom_output_format = self._ask_custom_document_output_format()
+        return self._planned_custom_output_format
+
     def _ask_custom_document_output_format(self) -> str:
         try:
             from tkinter import messagebox
@@ -66,7 +77,9 @@ class ActionsDocumentIntelligenceFlowMixin:
         from medical_formatting import technical_report_path
         from universal_generation import render_documents_from_pack, save_generation_report
 
-        output_format = self._ask_custom_document_output_format()
+        output_format = str(getattr(self, "_planned_custom_output_format", "") or "").strip().lower()
+        if output_format not in {"docx", "pdf"}:
+            output_format = self._ask_custom_document_output_format()
         result = render_documents_from_pack(
             pack=current_pack,
             case=case,

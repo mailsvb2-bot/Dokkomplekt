@@ -254,6 +254,7 @@ class ActionsCreationExecutionMixin:
             return False
         self._active_patient_output_dir = None
         self._pending_output_commit = None
+        self._planned_custom_output_format = None
         if not self._ensure_patient_folder_naming_configured():
             return False
         if not self._collect_creation_requirements(selected_medical, selected_diaries, selected_custom):
@@ -281,6 +282,8 @@ class ActionsCreationExecutionMixin:
 
         review = self._build_patient_case_review_for_selection(selected_medical, selected_diaries, selected_custom)
         self._active_patient_output_dir = Path(review.output_dir)
+        if selected_custom and hasattr(self, "_prepare_custom_document_output_format"):
+            self._prepare_custom_document_output_format(selected_custom)
         if not self._apply_duplicate_policy(review, selected_medical, selected_custom, selected_diaries):
             self._active_patient_output_dir = None
             return False

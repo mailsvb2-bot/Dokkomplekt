@@ -85,9 +85,10 @@ def test_old_agent_cannot_delete_replacement_lock(tmp_path: Path) -> None:
 def test_live_gui_pid_beats_stale_heartbeat(monkeypatch, tmp_path: Path) -> None:
     import desktop_intake_agent as agent
     lock = tmp_path / "gui.json"
-    lock.write_text(json.dumps({"pid": 5151, "updated_at": 1.0}), encoding="utf-8")
+    lock.write_text(json.dumps({"pid": 5151, "process_started": "proc:same", "updated_at": 1.0}), encoding="utf-8")
     monkeypatch.setattr(agent, "_gui_lock_path", lambda: lock)
     monkeypatch.setattr(agent, "_pid_is_running", lambda pid: pid == 5151)
+    monkeypatch.setattr(agent, "_process_start_identity", lambda pid: "proc:same" if pid == 5151 else "")
     assert agent.is_gui_runtime_active(now=999999.0) is True
 
 

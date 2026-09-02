@@ -37,6 +37,7 @@ class ActionsCreationFolderingMixin:
         """Find collisions for every block-03 output type, not legacy medical only."""
         out_dir = Path(review.output_dir or self._result_output_dir()).expanduser()
         existing = list(self._existing_medical_targets(review, selected_medical))
+        custom_names: set[str] = set()
         names: set[str] = set()
         try:
             if selected_custom:
@@ -46,11 +47,13 @@ class ActionsCreationFolderingMixin:
                     if getattr(document, "category", "") == "diaries":
                         selected_diaries = True
                         continue
-                    names.add(render_output_name(
+                    custom_name = render_output_name(
                         document, case,
                         output_language=self._effective_output_language(),
                         spellcheck_enabled=bool(getattr(self, "spellcheck_enabled_var", None) and self.spellcheck_enabled_var.get()),
-                    ))
+                    )
+                    custom_names.add(custom_name)
+                    names.add(custom_name)
         except Exception as exc:
             record_soft_exception("actions_creation_foldering.custom_collision_names", exc)
         if selected_diaries:
@@ -62,6 +65,11 @@ class ActionsCreationFolderingMixin:
             candidates = [direct]
             candidates.extend(out_dir.glob(direct.stem + " (*).docx"))
             candidates.extend(out_dir.glob(direct.stem + "_*.docx"))
+            if name in custom_names and getattr(self, "_planned_custom_output_format", "docx") == "pdf":
+                pdf_direct = direct.with_suffix(".pdf")
+                candidates.append(pdf_direct)
+                candidates.extend(out_dir.glob(pdf_direct.stem + " (*).pdf"))
+                candidates.extend(out_dir.glob(pdf_direct.stem + "_*.pdf"))
             for candidate in candidates:
                 if candidate.exists() and str(candidate).casefold() not in seen:
                     existing.append(candidate)

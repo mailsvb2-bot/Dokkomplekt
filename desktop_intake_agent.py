@@ -44,6 +44,7 @@ POLL_SECONDS = 2.5
 LAUNCH_COOLDOWN_SECONDS = 20.0
 LOCK_STALE_SECONDS = 120.0
 GUI_ACTIVE_SECONDS = 45.0
+GUI_LEGACY_LIVE_PID_MAX_STALE_SECONDS = 300.0
 PENDING_RETRY_SECONDS = 75.0
 MAX_LOG_BYTES = 512 * 1024
 STATE_FILE_NAME = "desktop_intake_agent_state.json"
@@ -234,7 +235,12 @@ def _safe_int(value: object, default: int = 0) -> int:
 
 
 def _gui_lock_payload() -> dict:
-    return {"version": AGENT_VERSION, "pid": os.getpid(), "updated_at": time.time()}
+    return {
+        "version": AGENT_VERSION,
+        "pid": os.getpid(),
+        "process_started": _process_start_identity(os.getpid()),
+        "updated_at": time.time(),
+    }
 
 
 def write_gui_runtime_lock() -> None:
@@ -269,12 +275,19 @@ def is_gui_runtime_active(now: float | None = None) -> bool:
     updated_at = _safe_float(payload.get("updated_at", 0.0), 0.0)
     current = time.time() if now is None else now
     pid = _safe_int(payload.get("pid"), 0)
-    # A live GUI process remains the owner even if its Tk event loop is busy for
-    # more than the heartbeat window.  Starting a second GUI is strictly worse
-    # than waiting for the existing process to recover.
+    age = max(0.0, current - updated_at)
     if pid > 0 and _pid_is_running(pid):
-        return True
-    if pid <= 0 and current - updated_at <= GUI_ACTIVE_SECONDS:
+        stored_identity = str(payload.get("process_started", "") or "").strip()
+        live_identity = _process_start_identity(pid)
+        if stored_identity and live_identity:
+            if stored_identity == live_identity:
+                return True
+        elif age <= GUI_LEGACY_LIVE_PID_MAX_STALE_SECONDS:
+            # Legacy locks cannot prove PID ownership.  Keep a bounded grace
+            # period for a temporarily blocked GUI, but never suppress intake
+            # forever after Windows reuses a crashed GUI's PID.
+            return True
+    if pid <= 0 and age <= GUI_ACTIVE_SECONDS:
         return True
     with suppress(OSError):
         _gui_lock_path().unlink()
@@ -722,6 +735,48 @@ def _lock_owner_token(path: Path) -> str:
         text = path.read_text(encoding="utf-8", errors="ignore")
         match = re.search(r"(?m)^token=([0-9a-f]{32})\s*$", text)
         return match.group(1) if match else ""
+    except OSError:
+        return ""
+
+
+def _process_start_identity(pid: int) -> str:
+    """Return a stable process-start identity for PID reuse detection."""
+    if pid <= 0:
+        return ""
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            process_query_limited_information = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(process_query_limited_information, False, pid)
+            if not handle:
+                return ""
+            try:
+                creation = wintypes.FILETIME()
+                exit_time = wintypes.FILETIME()
+                kernel = wintypes.FILETIME()
+                user = wintypes.FILETIME()
+                if not ctypes.windll.kernel32.GetProcessTimes(
+                    handle, ctypes.byref(creation), ctypes.byref(exit_time), ctypes.byref(kernel), ctypes.byref(user)
+                ):
+                    return ""
+                value = (int(creation.dwHighDateTime) << 32) | int(creation.dwLowDateTime)
+                return f"win:{value}"
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+        except Exception as exc:
+            record_soft_exception("desktop_intake_agent.process_identity_windows", exc, detail=str(pid))
+            return ""
+    stat_path = Path(f"/proc/{pid}/stat")
+    try:
+        raw = stat_path.read_text(encoding="utf-8", errors="ignore")
+        _prefix, separator, tail = raw.rpartition(") ")
+        fields = tail.split() if separator else []
+        # tail begins with field 3 (state), so process starttime (field 22)
+        # is index 19 here.  Parsing after the final ')' is safe when comm
+        # contains spaces.
+        return f"proc:{fields[19]}" if len(fields) > 19 else ""
     except OSError:
         return ""
 
