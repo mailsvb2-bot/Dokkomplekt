@@ -66,6 +66,7 @@ DESKTOP_INTAKE_AGENT_AUTOSTART_INSTALL_SUPPORTED = True
 DESKTOP_INTAKE_AGENT_HIDES_POWERSHELL_WINDOW = True
 DESKTOP_INTAKE_AGENT_USES_VBS_STARTUP_SCRIPT = True
 DESKTOP_INTAKE_AGENT_SUPPORTS_UPDATE_HANDOFF = True
+DESKTOP_INTAKE_AGENT_SUPPORTS_GRACEFUL_UNINSTALL = True
 DESKTOP_INTAKE_AGENT_HAS_NO_POWERSHELL_CODE_PATH = True
 DESKTOP_INTAKE_AGENT_STARTUP_SCRIPT_IS_UTF16 = True
 DESKTOP_INTAKE_AGENT_STARTUP_SCRIPT_HAS_NO_UTF8_BOM = True
@@ -148,6 +149,7 @@ def _write_agent_handoff(gui_command: list[str]) -> None:
         "gui_command": [str(item) for item in gui_command],
         "installed_at": time.time(),
         "version": AGENT_VERSION,
+        "shutdown_requested": False,
     }
     atomic_write_json(_handoff_path(), payload)
 
@@ -157,13 +159,80 @@ def _read_agent_handoff() -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def uninstall_shutdown_requested() -> bool:
+    """Return whether a running GUI/agent should exit for an explicit uninstall."""
+    return bool(_read_agent_handoff().get("shutdown_requested"))
+
+
 def _agent_is_retired() -> bool:
-    """True when a newer install owns the intake role and this agent must exit."""
+    """True when a newer install owns intake or uninstall asks this agent to exit."""
     handoff = _read_agent_handoff()
+    if bool(handoff.get("shutdown_requested")):
+        return True
     recorded = str(handoff.get("agent_identity", "") or "").strip()
     if not recorded:
         return False
     return recorded != _current_agent_identity()
+
+
+def uninstall_agent_autostart(*, wait_seconds: float = 12.0) -> tuple[bool, str]:
+    """Release every packaged-EXE owner before Windows removes the application.
+
+    Both the foreground GUI and hidden watcher execute the same packaged EXE.
+    Uninstall therefore publishes one shared shutdown request, waits until both
+    runtime owners have released the executable, and only then removes Startup
+    ownership/lock metadata.  On timeout the previous handoff is restored so a
+    failed uninstall does not silently disable the user's watcher.
+    """
+    previous_handoff = _read_agent_handoff()
+    try:
+        payload = {
+            "agent_identity": _current_agent_identity(),
+            "gui_command": [],
+            "installed_at": time.time(),
+            "version": AGENT_VERSION,
+            "shutdown_requested": True,
+        }
+        atomic_write_json(_handoff_path(), payload)
+        deadline = time.monotonic() + max(0.0, float(wait_seconds))
+        while time.monotonic() < deadline:
+            agent_live = _agent_lock_has_live_owner()
+            gui_live = is_gui_runtime_active()
+            if not agent_live and not gui_live:
+                break
+            time.sleep(min(POLL_SECONDS / 4.0, 0.5))
+        agent_live = _agent_lock_has_live_owner()
+        gui_live = is_gui_runtime_active()
+        if agent_live or gui_live:
+            if previous_handoff:
+                atomic_write_json(_handoff_path(), previous_handoff)
+            else:
+                with suppress(OSError):
+                    _handoff_path().unlink()
+            owners = []
+            if gui_live:
+                owners.append("главное окно")
+            if agent_live:
+                owners.append("фоновый агент")
+            return False, "Не удалось безопасно завершить Dokkomplekt: " + ", ".join(owners)
+        for path in (_startup_agent_script_path(), _legacy_startup_shortcut_path()):
+            with suppress(OSError):
+                path.unlink()
+        with suppress(OSError):
+            _lock_path().unlink()
+        with suppress(OSError):
+            _gui_lock_path().unlink()
+        with suppress(OSError):
+            _handoff_path().unlink()
+        return True, "Dokkomplekt и фоновый агент остановлены, автозагрузка удалена."
+    except Exception as exc:
+        try:
+            if previous_handoff:
+                atomic_write_json(_handoff_path(), previous_handoff)
+        except Exception as restore_exc:
+            record_soft_exception("desktop_intake_agent.uninstall_restore_handoff", restore_exc)
+        record_soft_exception("desktop_intake_agent.uninstall_autostart", exc)
+        return False, str(exc)
 
 
 def _handoff_gui_command() -> list[str] | None:
@@ -1011,6 +1080,8 @@ def assert_desktop_intake_agent_lock() -> None:
         raise AssertionError("Desktop intake agent must hide PowerShell/console windows during autostart installation and launch")
     if not DESKTOP_INTAKE_AGENT_USES_VBS_STARTUP_SCRIPT:
         raise AssertionError("Desktop intake agent must install Startup through a hidden VBS script")
+    if not DESKTOP_INTAKE_AGENT_SUPPORTS_GRACEFUL_UNINSTALL:
+        raise AssertionError("Desktop intake agent must release the packaged EXE before uninstall")
     if not DESKTOP_INTAKE_AGENT_HAS_NO_POWERSHELL_CODE_PATH:
         raise AssertionError("Desktop intake agent must avoid shell flashes")
     if not DESKTOP_INTAKE_AGENT_STARTUP_SCRIPT_IS_UTF16 or not DESKTOP_INTAKE_AGENT_STARTUP_SCRIPT_HAS_NO_UTF8_BOM:
@@ -1048,6 +1119,10 @@ def main_cli() -> int:
 
     if "--install-autostart" in sys.argv:
         ok, message = install_agent_autostart(start_now=True)
+        print(message)
+        return 0 if ok else 1
+    if "--uninstall-autostart" in sys.argv:
+        ok, message = uninstall_agent_autostart()
         print(message)
         return 0 if ok else 1
     run_forever()

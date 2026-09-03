@@ -33,6 +33,8 @@ FOOTER_WATERMARK_ENABLED = True
 NO_WATERMARK_FOR_PAID_LICENSES = True
 TEST_PRODUCT_ACCESS_DISABLED_ENV = "DOKKOMPLEKT_TEST_DISABLE_PRODUCT_ACCESS"
 PRODUCT_ACCESS_STATE_VERSION = 3
+PRODUCTION_TRIAL_EPOCH = "v1.4.91-public"
+PRODUCTION_TRIAL_CUTOFF = datetime(2026, 9, 3, 20, 2, 48, tzinfo=timezone.utc)
 TRIAL_WATERMARK_TEXT = "ПРОБНАЯ ВЕРСИЯ. НЕ ИСПОЛЬЗОВАТЬ КАК МЕДИЦИНСКИЙ ДОКУМЕНТ."
 EXPIRED_DEMO_WATERMARK_TEXT = "ДЕМО-ДОКУМЕНТ. ЛИЦЕНЗИЯ НЕ АКТИВНА."
 
@@ -517,11 +519,38 @@ class ProductAccessManager:
     def _ensure_trial_started(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("_state_corrupt"):
             return payload
+        payload = dict(payload)
+        changed = False
+        started_at = parse_dt(str(payload.get("trial_started_at") or ""))
+        # v1.4.91 is the first public production release.  Internal/pre-release
+        # builds used the same machine-wide trial storage, so months of developer
+        # testing could otherwise make a freshly downloaded production EXE say
+        # "Пробный период завершён" on its very first real launch.  Grant the
+        # public trial exactly once for state that demonstrably predates that
+        # release.  The epoch marker is integrity-protected and persisted to all
+        # redundant copies, so reinstalling/updating cannot reset the trial again.
+        if (
+            not self.license_path.exists()
+            and payload.get("trial_epoch") != PRODUCTION_TRIAL_EPOCH
+            and started_at is not None
+            and started_at < PRODUCTION_TRIAL_CUTOFF
+        ):
+            payload["trial_started_at"] = iso(self._now())
+            payload["trial_created_total"] = 0
+            payload["usage_by_month"] = {}
+            payload["trial_epoch"] = PRODUCTION_TRIAL_EPOCH
+            payload["trial_public_reset_at"] = iso(self._now())
+            started_at = self._now()
+            changed = True
         if not payload.get("trial_started_at"):
-            payload = dict(payload)
             payload["trial_started_at"] = iso(self._now())
             payload.setdefault("usage_by_month", {})
             payload.setdefault("trial_created_total", 0)
+            changed = True
+        if payload.get("trial_epoch") != PRODUCTION_TRIAL_EPOCH:
+            payload["trial_epoch"] = PRODUCTION_TRIAL_EPOCH
+            changed = True
+        if changed:
             self._save_state_payload(payload)
         return payload
 

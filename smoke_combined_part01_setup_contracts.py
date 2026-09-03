@@ -452,7 +452,9 @@ assert '("Место работы, должность", self.vk_mse_work_org_var
 assert '_apply_primary_work_defaults(data)' in main_source
 assert 'self._primary_work_org_default' in main_source
 assert 'self._work_details_manually_edited' in main_source
-assert '"городской военный комиссариат"' in main_source and '"областной военный комиссариат"' in main_source
+for commissariat in ("Ленинский", "Канавинский", "Сормовский", "Московский"):
+    assert f'"{commissariat}"' in main_source, commissariat
+assert 'add_entry("Военкомат / организация направления", military_var' in main_source
 assert 'kind == "discharge"' in main_source
 assert 'def _ensure_discharge_date' in main_source
 assert 'title="Дата выписки"' in main_source

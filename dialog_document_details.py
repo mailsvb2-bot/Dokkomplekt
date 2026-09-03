@@ -9,6 +9,7 @@ from medical_text_utils import sanitize_case_number_candidate
 from medical_parser_sanitize import sanitize_diagnosis
 from medical_primary_document_state import selected_primary_document_path_text
 from medical_date_state import current_semantic_date
+from medical_constants import RVK_COMMISSARIAT_PRESETS
 from diagnostic_logging import record_soft_exception
 from dialog_fields_popup import DialogDiagnosisPopup
 from dialog_fields_core import call_prompt_fields_compatible, attach_additional_info_buttons, choose_epi_file_for_app
@@ -109,7 +110,7 @@ class DialogDocumentDetailsMixin:
         options_frame = tk.Frame(frame, bg=PANEL)
         options_frame.grid(row=row, column=0, sticky="ew", pady=(0, 8))
         row += 1
-        for idx, value in enumerate(("районный военный комиссариат", "городской военный комиссариат", "областной военный комиссариат")):
+        for idx, value in enumerate(RVK_COMMISSARIAT_PRESETS):
             options_frame.grid_columnconfigure(idx, weight=1)
             btn = tk.Button(
                 options_frame,

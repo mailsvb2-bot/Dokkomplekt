@@ -17,7 +17,7 @@ def _legacy_key() -> bytes:
 def test_v2_state_migrates_to_random_key_v3_without_resetting_usage(tmp_path: Path) -> None:
     payload = {
         "state_version": 2,
-        "trial_started_at": "2026-09-01T00:00:00+00:00",
+        "trial_started_at": "2026-09-04T00:00:00+00:00",
         "usage_by_month": {"2026-09": 12},
         "trial_created_total": 12,
     }
@@ -27,7 +27,7 @@ def test_v2_state_migrates_to_random_key_v3_without_resetting_usage(tmp_path: Pa
     (tmp_path / "product_access_state.json").write_text(json.dumps(payload), encoding="utf-8")
     (tmp_path / "product_access_guard.json").write_text(json.dumps(payload), encoding="utf-8")
 
-    manager = ProductAccessManager(tmp_path, now=datetime(2026, 9, 3, tzinfo=timezone.utc))
+    manager = ProductAccessManager(tmp_path, now=datetime(2026, 9, 5, tzinfo=timezone.utc))
     state = manager.current_state()
     manager.record_created_documents(1)
 

@@ -96,6 +96,8 @@ REQUIRED_FILES = [
     "desktop_intake_agent.pyw",
     "install_background_watcher.bat",
     "uninstall_background_watcher.bat",
+    "installer/Dokkomplekt.iss",
+    "tools/windows_installer_smoke.ps1",
     "desktop_patient_folder.py",
     "medical_admission_resolver.py",
     "universal_diary_generation.py",
@@ -288,9 +290,20 @@ def _assert_build_contract() -> None:
         "python -m ruff check .",
         "python -m mypy --config-file pyproject.toml",
         "--check-runtime-bundle",
+        "Build Windows installer",
+        "Smoke installer uninstall with live intake agent",
+        "Upload Windows installer artifact",
     ]:
         if snippet not in workflow:
             raise SystemExit(f"GitHub Actions workflow misses production snippet: {snippet}")
+    installer = (ROOT / "installer/Dokkomplekt.iss").read_text(encoding="utf-8", errors="replace")
+    for snippet in ["[Code]", "InitializeUninstall", "--uninstall-intake-agent", "CloseApplications=force", "PrivilegesRequired=lowest", "x64compatible"]:
+        if snippet not in installer:
+            raise SystemExit(f"Windows installer misses safe-uninstall snippet: {snippet}")
+    agent = (ROOT / "desktop_intake_agent.py").read_text(encoding="utf-8", errors="replace")
+    main = (ROOT / "main.py").read_text(encoding="utf-8", errors="replace")
+    if "def uninstall_agent_autostart" not in agent or "--uninstall-intake-agent" not in main:
+        raise SystemExit("Packaged EXE uninstall handshake is incomplete")
     for forbidden in ["contents: write", "git push origin HEAD:main", "apply-hotfix"]:
         if forbidden in workflow:
             raise SystemExit(f"GitHub Actions workflow must not mutate main during CI: {forbidden}")

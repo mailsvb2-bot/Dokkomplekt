@@ -1,6 +1,13 @@
 # MedicalDiaryAutofill / Dokkomplekt
 
-Version: `v1.4.91_audit_hardening`
+Version: `v1.4.92_trial_uninstall_hotfix`
+
+## v1.4.92 — production trial / uninstall hotfix
+
+- первый публичный production-релиз один раз отделяет реальный 14-дневный Trial от старого pre-release/test состояния; повторная установка Trial не сбрасывает;
+- «Акт для РВК» закреплён отдельным DOCX regression replay и пресетами Ленинский / Канавинский / Сормовский / Московский с возможностью ручного ввода;
+- packaged watcher получает явный shutdown handshake перед удалением, поэтому скрытый `--intake-agent` больше не должен удерживать EXE;
+- добавлен полноценный per-user Windows Setup/Uninstaller и CI-smoke реального сценария install → live agent → uninstall.
 
 ## v1.4.91 — audit hardening
 
