@@ -9,7 +9,7 @@ on:
       - "product_access/**"
       - "tests/test_native_license_security_v1499.py"
       - "tests/test_product_licensing_contract.py"
-      - ".github/license-hardening.patch.gz.b64"
+      - ".github/license-hardening.part*"
       - ".github/workflows/rustfmt-maintenance.yml"
 
 permissions:
@@ -42,8 +42,14 @@ jobs:
           git checkout 68c752c8db53c44b5d048df8529b7eb483c1457e -- rust
           python - <<'PY'
           import base64, gzip, pathlib
-          encoded = pathlib.Path('.github/license-hardening.patch.gz.b64').read_text('utf-8').strip()
-          pathlib.Path('/tmp/license-hardening.patch').write_bytes(gzip.decompress(base64.b64decode(encoded)))
+          parts = [pathlib.Path(f'.github/license-hardening.part{i:02d}').read_text('utf-8').strip() for i in range(4)]
+          encoded = ''.join(parts)
+          if len(encoded) != 23028:
+              raise SystemExit(f'unexpected encoded payload length: {len(encoded)}')
+          patch = gzip.decompress(base64.b64decode(encoded, validate=True))
+          if len(patch) != 89528:
+              raise SystemExit(f'unexpected patch length: {len(patch)}')
+          pathlib.Path('/tmp/license-hardening.patch').write_bytes(patch)
           PY
           git apply --check /tmp/license-hardening.patch
           git apply /tmp/license-hardening.patch
