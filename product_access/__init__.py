@@ -8,12 +8,14 @@ lazy so headless CI can test the product contract without a Tk display stack.
 """
 
 from dataclasses import dataclass
+import base64
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
 import os
 import platform
+import secrets
 from pathlib import Path
 import sys
 from typing import Any, Iterable, Mapping
@@ -30,7 +32,7 @@ LOCAL_ONLY_PRODUCT_ACCESS = True
 FOOTER_WATERMARK_ENABLED = True
 NO_WATERMARK_FOR_PAID_LICENSES = True
 TEST_PRODUCT_ACCESS_DISABLED_ENV = "DOKKOMPLEKT_TEST_DISABLE_PRODUCT_ACCESS"
-PRODUCT_ACCESS_STATE_VERSION = 2
+PRODUCT_ACCESS_STATE_VERSION = 3
 TRIAL_WATERMARK_TEXT = "ПРОБНАЯ ВЕРСИЯ. НЕ ИСПОЛЬЗОВАТЬ КАК МЕДИЦИНСКИЙ ДОКУМЕНТ."
 EXPIRED_DEMO_WATERMARK_TEXT = "ДЕМО-ДОКУМЕНТ. ЛИЦЕНЗИЯ НЕ АКТИВНА."
 
@@ -279,6 +281,8 @@ class ProductAccessManager:
         self.state_guard_path = self.storage_dir / "product_access_guard.json"
         self.license_path = Path(os.getenv("DOKKOMPLEKT_LICENSE_FILE") or self.storage_dir / "license.json")
         self.state_lock_path = self.storage_dir / "product_access_state.lock"
+        self.integrity_key_path = self.storage_dir / "product_access_integrity.key"
+        self.integrity_key_guard_path = self.storage_dir / "product_access_integrity.guard"
         self._live_usage_reservations: set[str] = set()
 
     def _state_mutation_lock(self):
@@ -295,25 +299,128 @@ class ProductAccessManager:
     def _now(self) -> datetime:
         return self.now or utc_now()
 
-    def _state_integrity_key(self) -> bytes:
+    @staticmethod
+    def _legacy_state_integrity_key() -> bytes:
         seed = f"dokkomplekt-product-access-v2|{machine_fingerprint()}"
         return hashlib.sha256(seed.encode("utf-8", errors="replace")).digest()
+
+    @staticmethod
+    def _dpapi_protect(value: bytes) -> bytes:
+        if os.name != "nt":
+            return value
+        import ctypes
+        from ctypes import wintypes
+
+        class DataBlob(ctypes.Structure):
+            _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_ubyte))]
+
+        source_buffer = (ctypes.c_ubyte * len(value)).from_buffer_copy(value)
+        source = DataBlob(len(value), source_buffer)
+        protected = DataBlob()
+        if not ctypes.windll.crypt32.CryptProtectData(
+            ctypes.byref(source), None, None, None, None, 0, ctypes.byref(protected)
+        ):
+            raise OSError("Windows DPAPI could not protect the product-access integrity key.")
+        try:
+            return ctypes.string_at(protected.pbData, protected.cbData)
+        finally:
+            ctypes.windll.kernel32.LocalFree(protected.pbData)
+
+    @staticmethod
+    def _dpapi_unprotect(value: bytes) -> bytes:
+        if os.name != "nt":
+            return value
+        import ctypes
+        from ctypes import wintypes
+
+        class DataBlob(ctypes.Structure):
+            _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_ubyte))]
+
+        source_buffer = (ctypes.c_ubyte * len(value)).from_buffer_copy(value)
+        source = DataBlob(len(value), source_buffer)
+        clear = DataBlob()
+        if not ctypes.windll.crypt32.CryptUnprotectData(
+            ctypes.byref(source), None, None, None, None, 0, ctypes.byref(clear)
+        ):
+            raise OSError("Windows DPAPI could not unprotect the product-access integrity key.")
+        try:
+            return ctypes.string_at(clear.pbData, clear.cbData)
+        finally:
+            ctypes.windll.kernel32.LocalFree(clear.pbData)
+
+    def _encode_integrity_key(self, key: bytes) -> str:
+        protected = self._dpapi_protect(key)
+        prefix = "dpapi:" if os.name == "nt" else "raw:"
+        return prefix + base64.b64encode(protected).decode("ascii")
+
+    def _decode_integrity_key(self, text: str) -> bytes:
+        raw = str(text or "").strip()
+        expected_prefix = "dpapi:" if os.name == "nt" else "raw:"
+        if not raw.startswith(expected_prefix):
+            raise ValueError("Unexpected product-access integrity-key format.")
+        protected = base64.b64decode(raw[len(expected_prefix) :], validate=True)
+        key = self._dpapi_unprotect(protected)
+        if len(key) != 32:
+            raise ValueError("Invalid product-access integrity-key length.")
+        return key
+
+    def _read_integrity_key_copy(self, path: Path) -> tuple[bytes | None, bool]:
+        if not path.exists():
+            return None, False
+        try:
+            return self._decode_integrity_key(path.read_text("ascii")), False
+        except Exception as exc:
+            record_soft_exception("product_access.read_integrity_key", exc, detail=str(path))
+            return None, True
+
+    def _write_integrity_key_copies(self, key: bytes) -> None:
+        from medical_paths import atomic_write_text
+
+        encoded = self._encode_integrity_key(key)
+        for path in (self.integrity_key_path, self.integrity_key_guard_path):
+            atomic_write_text(path, encoded)
+            try:
+                path.chmod(0o600)
+            except OSError:
+                pass
+
+    def _state_integrity_key(self) -> bytes:
+        primary, primary_bad = self._read_integrity_key_copy(self.integrity_key_path)
+        guard, guard_bad = self._read_integrity_key_copy(self.integrity_key_guard_path)
+        valid = [key for key in (primary, guard) if key is not None]
+        if primary is not None and guard is not None and not hmac.compare_digest(primary, guard):
+            raise ValueError("Product-access integrity key copies disagree.")
+        if valid:
+            key = valid[0]
+            if primary_bad or guard_bad or primary is None or guard is None:
+                self._write_integrity_key_copies(key)
+            return key
+        if primary_bad or guard_bad:
+            raise ValueError("Product-access integrity key is damaged.")
+        key = secrets.token_bytes(32)
+        self._write_integrity_key_copies(key)
+        return key
 
     def _with_state_integrity(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         result = dict(payload)
         result["state_version"] = PRODUCT_ACCESS_STATE_VERSION
+        result["usage_sequence"] = max(0, int(result.get("usage_sequence", 0) or 0)) + 1
         result.pop("_state_mac", None)
         message = stable_json(result).encode("utf-8")
         result["_state_mac"] = hmac.new(self._state_integrity_key(), message, hashlib.sha256).hexdigest()
         return result
 
     def _verify_state_integrity(self, payload: Mapping[str, Any]) -> bool:
+        version = int(payload.get("state_version") or 1)
         actual = str(payload.get("_state_mac") or "").strip()
+        if version < 2:
+            return not actual
         if not actual:
-            return int(payload.get("state_version") or 1) < PRODUCT_ACCESS_STATE_VERSION
+            return False
         unsigned = dict(payload)
         unsigned.pop("_state_mac", None)
-        expected = hmac.new(self._state_integrity_key(), stable_json(unsigned).encode("utf-8"), hashlib.sha256).hexdigest()
+        key = self._legacy_state_integrity_key() if version == 2 else self._state_integrity_key()
+        expected = hmac.new(key, stable_json(unsigned).encode("utf-8"), hashlib.sha256).hexdigest()
         return hmac.compare_digest(actual, expected)
 
     def _read_state_copy(self, path: Path) -> tuple[dict[str, Any] | None, bool]:
@@ -357,6 +464,7 @@ class ProductAccessManager:
         if starts:
             result["trial_started_at"] = iso(min(starts))
         result["trial_created_total"] = max(int(item.get("trial_created_total", 0) or 0) for item in items)
+        result["usage_sequence"] = max(int(item.get("usage_sequence", 0) or 0) for item in items)
         merged_usage: dict[str, int] = {}
         for item in items:
             usage = item.get("usage_by_month") if isinstance(item.get("usage_by_month"), dict) else {}
