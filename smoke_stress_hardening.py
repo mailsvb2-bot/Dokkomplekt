@@ -188,9 +188,37 @@ def _assert_v1427_regression_guards() -> None:
         output_app = _OutputDirFakeApp()
         output_app._set_output_dir_auto_patient_scoped(old_patient_dir)
         output_app._release_patient_scoped_output_dir_before_new_primary()
+        from desktop_intake import default_intake_folder
         output_app._set_output_dir_from_primary_default(new_primary)
-        if output_app.output_dir_var.get() != str(new_primary.parent.resolve()):
-            raise AssertionError("Patient-scoped desktop-intake output folder must not leak to the next patient")
+        canonical_root = default_intake_folder()
+        if output_app.output_dir_var.get() != str(canonical_root):
+            raise AssertionError("New primary must return to the canonical «Выписанные пациенты» root, not the previous patient/source folder")
+
+        class _PatientFolderFake(ActionsCreationOrchestratorMixin):
+            def __init__(self, root: Path) -> None:
+                self._root = root
+                self._settings = {
+                    "folder_naming": {
+                        "parts": ["surname_initials"],
+                        "date_format": "short",
+                        "doctor_confirmed": True,
+                    }
+                }
+                self._output_dir_auto_locked_to_patient = False
+
+            def _base_output_dir(self) -> Path:
+                return self._root
+
+        patient_folder_app = _PatientFolderFake(canonical_root)
+        patient_dir = patient_folder_app._patient_output_dir_for_data(
+            PatientData(
+                fio="Агафонов Артём Алексеевич",
+                admission_date="31.10.2025",
+                discharge_date="09.09.2026",
+            )
+        )
+        if patient_dir.parent != canonical_root or patient_dir == canonical_root:
+            raise AssertionError("Regular primary creation must plan one patient subfolder inside «Выписанные пациенты»")
 
         manual_dir = tmp / "manual-output"
         output_app = _OutputDirFakeApp()

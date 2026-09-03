@@ -15,7 +15,7 @@ from typing import Iterable, Mapping, Sequence
 
 from regulatory_caucasus_aliases import field_aliases_for
 
-_FIELD_ID_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")
+_FIELD_ID_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)*$")
 
 _FIELD_ID_ALIASES = {
     "fio": "patient.fio",

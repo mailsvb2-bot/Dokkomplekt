@@ -51,17 +51,19 @@ class FilesMixin:
         self._output_dir_auto_locked_to_patient = True
 
     def _set_output_dir_from_primary_default(self, primary_path: str | Path) -> None:
-        # Главный пользовательский контракт: если выбран первичный осмотр
-        # или направление на госпитализацию, папка сохранения по умолчанию
-        # становится папкой этого входного файла.
+        # По умолчанию все результаты пациента живут в едином врачебном корне
+        # Desktop/«Выписанные пациенты», независимо от того, где лежит выбранный
+        # первичный DOCX. Явно выбранная врачом папка результата имеет приоритет.
         if self._manual_output_dir:
             return
+        from desktop_intake import default_intake_folder
+
         try:
-            parent = Path(primary_path).resolve().parent
+            output_root = default_intake_folder()
         except Exception as exc:
-            record_soft_exception("files_mixin.primary_parent_resolve", exc, detail=str(primary_path))
-            parent = Path(primary_path).parent
-        self._set_output_dir_auto(parent)
+            record_soft_exception("files_mixin.default_intake_folder", exc, detail=str(primary_path))
+            output_root = Path.home() / "Desktop" / "Выписанные пациенты"
+        self._set_output_dir_auto(output_root)
 
     def choose_output_dir(self) -> None:
         path = filedialog.askdirectory(

@@ -18,11 +18,12 @@ import medical_paths
 from medical_paths import atomic_write_json
 from diary_schedule import diary_minute_schedule_from_choice
 from document_intelligence.form_fill import fill_docx_visible_fields, visible_fill_field_ids
+from document_intelligence.text_utils import custom_field_id
 from document_output_format import export_docx_to_pdf
 from medical_paths import interprocess_file_lock
 from output_transaction import OutputTransaction
 from product_access import ProductAccessManager
-from universal_fields import PatientCase
+from universal_fields import FieldDefinition, PatientCase, normalize_field_id
 from universal_generation import render_documents_from_pack
 from universal_profiles import DocumentPack, DocumentTemplateSpec, default_document_pack, save_document_pack
 from universal_template_engine import export_document_pack_zip, import_document_pack_zip, infer_document_spec_from_template, render_template_to_docx
@@ -41,6 +42,87 @@ def _case(**values: str) -> PatientCase:
         case.set(field_id.replace("__", "."), value)
     return case
 
+
+
+def test_numeric_custom_field_id_generated_by_intelligence_is_profile_compatible_and_renderable(tmp_path: Path) -> None:
+    field_id = custom_field_id("2")
+    assert field_id == "custom.2"
+    assert normalize_field_id(field_id) == field_id
+
+    template = _docx(tmp_path / "numeric-custom.docx", "Поле 2: {{custom.2}}")
+    document = DocumentTemplateSpec(
+        id="numeric_custom",
+        button_label="Числовое custom-поле",
+        template=template.name,
+        output_name="numeric-custom-result.docx",
+        required_fields=(field_id,),
+    )
+    pack = DocumentPack(
+        pack_id="doctor.numeric-custom",
+        name="Numeric custom compatibility",
+        documents=(document,),
+        custom_fields=(FieldDefinition(field_id, "2", "custom"),),
+    )
+    assert field_id in pack.registry()
+    case = PatientCase()
+    case.set(field_id, "ЗНАЧЕНИЕ-2")
+    result = render_documents_from_pack(
+        pack=pack,
+        case=case,
+        document_ids=(document.id,),
+        output_dir=tmp_path / "out",
+        base_dir=tmp_path,
+        strict=True,
+    )
+    assert not result.skipped_documents, result.skipped_documents
+    assert len(result.created_files) == 1
+    rendered = Document(result.created_files[0])
+    assert "Поле 2: ЗНАЧЕНИЕ-2" in "\n".join(par.text for par in rendered.paragraphs)
+
+
+def test_primary_default_output_root_is_vypisannye_pacienty_not_source_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import desktop_intake
+    from actions_selection import ActionsSelectionMixin
+
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    monkeypatch.setattr(desktop_intake, "desktop_path", lambda: desktop)
+    incoming = tmp_path / "incoming"
+    incoming.mkdir()
+    primary = _docx(incoming / "primary.docx", "Первичный осмотр")
+
+    class Var:
+        def __init__(self, value: str = "") -> None:
+            self.value = value
+        def get(self) -> str:
+            return self.value
+        def set(self, value: object) -> None:
+            self.value = str(value)
+
+    class Fake(ActionsSelectionMixin):
+        pass
+
+    app = Fake()
+    app.navigation_path_var = Var(str(primary))
+    app.output_dir_var = Var(str(primary.parent))  # legacy auto-value must not win
+    app._manual_output_dir = False
+    app._last_primary_document_path = str(primary)
+    app._active_primary_document_path = str(primary)
+    app._last_patient_case_review = None
+    app.diary_files = []
+    assert app._base_output_dir() == desktop / desktop_intake.DESKTOP_INTAKE_FOLDER_NAME
+
+    locked_patient = desktop / desktop_intake.DESKTOP_INTAKE_FOLDER_NAME / "Иванов И.И."
+    app.output_dir_var.set(locked_patient)
+    app._manual_output_dir = False
+    app._output_dir_auto_locked_to_patient = True
+    assert app._base_output_dir() == locked_patient
+
+    manual = tmp_path / "doctor-selected-output"
+    app.output_dir_var.set(manual)
+    app._manual_output_dir = True
+    app._output_dir_auto_locked_to_patient = False
+    assert app._base_output_dir() == manual
 
 def test_visible_fullwidth_colon_and_no_colon_are_fillable(tmp_path: Path) -> None:
     for name, text in (("wide.docx", "ФИО： ______"), ("space.docx", "ФИО ______")):
