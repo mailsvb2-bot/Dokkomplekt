@@ -1,8 +1,12 @@
+use crate::provider_yookassa::YooKassaProvider;
+use crate::providers::{
+    PaymentProvider as _, ProviderError, ProviderEvent, ProviderKind, ProviderPaymentStatus,
+};
 use crate::state::AppState;
 use crate::storage::{
     PaymentEventRecord, PaymentEventStatus, PaymentEventWriteOutcome, PaymentProvider, StoreError,
 };
-use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
+use axum::{body::Bytes, extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -26,24 +30,44 @@ pub struct ProviderCallbackResponse {
 }
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/api/provider/callback", post(provider_callback))
+    Router::new()
+        .route("/api/provider/callback", post(provider_callback))
+        .route(
+            "/api/provider/yookassa/callback",
+            post(yookassa_callback),
+        )
 }
 
-async fn provider_callback(State(state): State<AppState>, Json(event): Json<ProviderCallbackRequest>) -> Result<Json<ProviderCallbackResponse>, StatusCode> {
+async fn provider_callback(
+    State(state): State<AppState>,
+    Json(event): Json<ProviderCallbackRequest>,
+) -> Result<Json<ProviderCallbackResponse>, StatusCode> {
     let event_id = event.provider_event_id.trim();
     if event_id.is_empty() || event.amount_rub == 0 {
         return Err(StatusCode::BAD_REQUEST);
     }
-    if !callback_secret_matches(state.config.provider_callback_secret.as_deref(), event.callback_secret.as_deref()) {
+    if !callback_secret_matches(
+        state.config.provider_callback_secret.as_deref(),
+        event.callback_secret.as_deref(),
+    ) {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    let order = state.store.get_order_async(event.order_id).await.map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
+    let order = state
+        .store
+        .get_order_async(event.order_id)
+        .await
+        .map_err(store_error_status)?
+        .ok_or(StatusCode::NOT_FOUND)?;
     if order.amount_rub != event.amount_rub {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let provider = normalize_callback_provider(event.provider.as_deref().unwrap_or("manual")).ok_or(StatusCode::BAD_REQUEST)?;
+    let provider = normalize_callback_provider(event.provider.as_deref().unwrap_or("manual"))
+        .ok_or(StatusCode::BAD_REQUEST)?;
     if !matches!(&provider, PaymentProvider::Manual) {
         return Err(StatusCode::NOT_IMPLEMENTED);
+    }
+    if state.config.payment_provider != "manual" {
+        return Err(StatusCode::FORBIDDEN);
     }
     let status = normalize_payment_status(&event.status).ok_or(StatusCode::BAD_REQUEST)?;
     let record = PaymentEventRecord {
@@ -56,22 +80,115 @@ async fn provider_callback(State(state): State<AppState>, Json(event): Json<Prov
         amount_rub: event.amount_rub,
         received_at: OffsetDateTime::now_utc(),
     };
-    let outcome = state.store.record_payment_event_for_order_async(record).await.map_err(store_error_status)?;
+    persist_payment_event(&state, record).await
+}
+
+async fn yookassa_callback(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Result<Json<ProviderCallbackResponse>, StatusCode> {
+    let sbp_only = match state.config.payment_provider.as_str() {
+        "yookassa" => false,
+        "sbp" => true,
+        _ => return Err(StatusCode::NOT_FOUND),
+    };
+    let provider = YooKassaProvider::from_env(sbp_only).map_err(provider_error_status)?;
+    let raw = body.to_vec();
+    let event = tokio::task::spawn_blocking(move || provider.parse_callback(&raw))
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(provider_error_status)?;
+    let order = state
+        .store
+        .get_order_async(event.order_id)
+        .await
+        .map_err(store_error_status)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    if order.amount_rub != event.amount_rub {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let record = provider_event_record(event)?;
+    persist_payment_event(&state, record).await
+}
+
+async fn persist_payment_event(
+    state: &AppState,
+    record: PaymentEventRecord,
+) -> Result<Json<ProviderCallbackResponse>, StatusCode> {
+    let order_id = record.order_id;
+    let outcome = state
+        .store
+        .record_payment_event_for_order_async(record)
+        .await
+        .map_err(store_error_status)?;
     Ok(Json(ProviderCallbackResponse {
         accepted: true,
         duplicate: matches!(outcome, PaymentEventWriteOutcome::Duplicate),
-        order_id: event.order_id,
+        order_id,
     }))
 }
 
-
-pub fn callback_secret_matches(configured_secret: Option<&str>, supplied_secret: Option<&str>) -> bool {
-    let Some(expected) = configured_secret.map(str::trim).filter(|value| !value.is_empty()) else { return true; };
-    supplied_secret.map(str::trim).filter(|value| !value.is_empty()).is_some_and(|actual| constant_time_eq(actual.as_bytes(), expected.as_bytes()))
+fn provider_event_record(event: ProviderEvent) -> Result<PaymentEventRecord, StatusCode> {
+    let provider = match event.provider {
+        ProviderKind::YooKassa => PaymentProvider::YooKassa,
+        ProviderKind::Sbp => PaymentProvider::Sbp,
+        ProviderKind::Manual => PaymentProvider::Manual,
+        ProviderKind::BankInvoice => PaymentProvider::BankInvoice,
+    };
+    let status = match event.status {
+        ProviderPaymentStatus::Pending => PaymentEventStatus::Pending,
+        ProviderPaymentStatus::Succeeded => PaymentEventStatus::Succeeded,
+        ProviderPaymentStatus::Cancelled => PaymentEventStatus::Cancelled,
+        ProviderPaymentStatus::Rejected => PaymentEventStatus::Rejected,
+    };
+    if event.amount_rub == 0 || event.provider_event_id.trim().is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    Ok(PaymentEventRecord {
+        id: Uuid::new_v4(),
+        order_id: event.order_id,
+        provider,
+        provider_event_id: event.provider_event_id,
+        provider_payment_id: event.provider_payment_id,
+        status,
+        amount_rub: event.amount_rub,
+        received_at: OffsetDateTime::now_utc(),
+    })
 }
+
+fn provider_error_status(error: ProviderError) -> StatusCode {
+    match error {
+        ProviderError::BadRequest(_) => StatusCode::BAD_REQUEST,
+        ProviderError::BadSignature => StatusCode::UNAUTHORIZED,
+        ProviderError::Transport(_) => StatusCode::BAD_GATEWAY,
+        ProviderError::Unsupported => StatusCode::NOT_IMPLEMENTED,
+    }
+}
+
+pub fn callback_secret_matches(
+    configured_secret: Option<&str>,
+    supplied_secret: Option<&str>,
+) -> bool {
+    let Some(expected) = configured_secret
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return true;
+    };
+    supplied_secret
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some_and(|actual| constant_time_eq(actual.as_bytes(), expected.as_bytes()))
+}
+
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() { return false; }
-    left.iter().zip(right.iter()).fold(0u8, |acc, (a,b)| acc | (a ^ b)) == 0
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right.iter())
+        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+        == 0
 }
 
 fn store_error_status(error: StoreError) -> StatusCode {
@@ -109,11 +226,26 @@ mod tests {
 
     #[test]
     fn payment_status_values_are_normalized() {
-        assert!(matches!(normalize_payment_status("succeeded"), Some(PaymentEventStatus::Succeeded)));
-        assert!(matches!(normalize_payment_status(" pending "), Some(PaymentEventStatus::Pending)));
-        assert!(matches!(normalize_payment_status("canceled"), Some(PaymentEventStatus::Cancelled)));
-        assert!(matches!(normalize_payment_status("cancelled"), Some(PaymentEventStatus::Cancelled)));
-        assert!(matches!(normalize_payment_status("rejected"), Some(PaymentEventStatus::Rejected)));
+        assert!(matches!(
+            normalize_payment_status("succeeded"),
+            Some(PaymentEventStatus::Succeeded)
+        ));
+        assert!(matches!(
+            normalize_payment_status(" pending "),
+            Some(PaymentEventStatus::Pending)
+        ));
+        assert!(matches!(
+            normalize_payment_status("canceled"),
+            Some(PaymentEventStatus::Cancelled)
+        ));
+        assert!(matches!(
+            normalize_payment_status("cancelled"),
+            Some(PaymentEventStatus::Cancelled)
+        ));
+        assert!(matches!(
+            normalize_payment_status("rejected"),
+            Some(PaymentEventStatus::Rejected)
+        ));
     }
 
     #[test]
@@ -123,10 +255,22 @@ mod tests {
 
     #[test]
     fn callback_provider_values_are_normalized() {
-        assert!(matches!(normalize_callback_provider(" manual "), Some(PaymentProvider::Manual)));
-        assert!(matches!(normalize_callback_provider("YooKassa"), Some(PaymentProvider::YooKassa)));
-        assert!(matches!(normalize_callback_provider("SBP"), Some(PaymentProvider::Sbp)));
-        assert!(matches!(normalize_callback_provider("bank_invoice"), Some(PaymentProvider::BankInvoice)));
+        assert!(matches!(
+            normalize_callback_provider(" manual "),
+            Some(PaymentProvider::Manual)
+        ));
+        assert!(matches!(
+            normalize_callback_provider("YooKassa"),
+            Some(PaymentProvider::YooKassa)
+        ));
+        assert!(matches!(
+            normalize_callback_provider("SBP"),
+            Some(PaymentProvider::Sbp)
+        ));
+        assert!(matches!(
+            normalize_callback_provider("bank_invoice"),
+            Some(PaymentProvider::BankInvoice)
+        ));
     }
 
     #[test]

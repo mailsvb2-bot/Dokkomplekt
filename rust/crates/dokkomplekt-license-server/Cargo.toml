@@ -13,6 +13,7 @@ dokkomplekt-license-core = { path = "../dokkomplekt-license-core" }
 ed25519-dalek.workspace = true
 hex.workspace = true
 rand_core.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

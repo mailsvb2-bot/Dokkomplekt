@@ -96,4 +96,5 @@ jobs:
             rust/postgres-migration.log
             rust/rust-test.log
             rust/rust-clippy.log
+            rust/Cargo.lock
           if-no-files-found: ignore
