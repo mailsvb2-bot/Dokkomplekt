@@ -198,6 +198,7 @@ class FilesMixin:
             self.primary_selected_status_var.set(" ")
         self.data = PatientData()
 
+    @staticmethod
     def _primary_type_from_parsed_data(data: PatientData) -> str:
         kind = (data.input_document_kind or "").lower().replace("ё", "е")
         if "направ" in kind or "госпитализируется" in kind:
