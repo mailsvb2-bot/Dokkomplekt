@@ -53,7 +53,16 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
+
+      - name: Cargo fmt check
+        shell: bash
+        run: |
+          set +e
+          cargo fmt --all -- --check > rustfmt.log 2>&1
+          code=$?
+          cat rustfmt.log
+          exit $code
 
       - name: Validate storage boundary
         shell: bash
@@ -93,6 +102,7 @@ jobs:
         with:
           name: rust-ci-logs
           path: |
+            rust/rustfmt.log
             rust/postgres-migration.log
             rust/rust-test.log
             rust/rust-clippy.log
