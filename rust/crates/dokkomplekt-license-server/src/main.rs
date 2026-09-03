@@ -4,6 +4,7 @@ mod issuer;
 #[path = "http/license_issue.rs"]
 mod license_issue;
 mod memory_store;
+mod provider_bank_invoice;
 mod provider_manual;
 mod provider_yookassa;
 mod providers;
@@ -25,6 +26,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 fn build_app(state: AppState) -> Router {
     Router::new()
         .merge(http::health::router())
+        .merge(http::licenses::router())
         .merge(http::orders::router())
         .merge(http::activations::router())
         .merge(license_issue::router())
