@@ -212,7 +212,7 @@ class ActionsCreationBatchingMixin:
         if not selected_medical and not selected_diaries and not selected_custom:
             messagebox.showwarning(
                 "Ничего не выбрано",
-                "Отметьте хотя бы один документ, custom-документ профиля или «Дневники наблюдения».",
+                "Отметьте хотя бы один документ из блока 03 или «Дневники наблюдения».",
             )
             return None
         names = self._selected_output_names(selected_medical, selected_diaries, selected_custom)

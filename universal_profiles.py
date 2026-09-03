@@ -534,7 +534,7 @@ def _assert_safe_zip_name(name: str) -> None:
         or "\x00" in normalized
         or ":" in first_part
     ):
-        raise ValueError(f"Небезопасный путь внутри medpack: {name}")
+        raise ValueError(f"Небезопасный путь внутри архива профиля: {name}")
 
 
 def _validate_word_package(source: Path, label: str) -> None:
@@ -590,7 +590,7 @@ def _copy_zip_profile_templates(pack: DocumentPack, zf: zipfile.ZipFile, names: 
                 candidates.append((PurePosixPath(TEMPLATE_DIR_NAME) / PurePosixPath(template_value).name).as_posix())
             archive_name = next((item for item in candidates if item in names and PurePosixPath(item).suffix.lower() in {".docx", ".docm"}), "")
             if not archive_name:
-                raise ValueError(f"medpack повреждён: нет шаблона для «{document.button_label or document.id}»: {document.template}")
+                raise ValueError(f"Архив профиля повреждён: нет шаблона для «{document.button_label or document.id}»: {document.template}")
             target = available_template_copy_path(templates_dir / PurePosixPath(archive_name).name)
             with zf.open(archive_name, "r") as source_file, target.open("wb") as target_file:
                 shutil.copyfileobj(source_file, target_file)
@@ -674,14 +674,14 @@ def inspect_document_pack_source(source_path: str | Path) -> DocumentPack:
             _assert_safe_zip_name(str(getattr(info, "orig_filename", info.filename))); _assert_safe_zip_name(info.filename)
         names = [info.filename for info in infos]
         if PACK_MANIFEST_NAME not in names:
-            raise ValueError("В medpack-архиве нет pack.json.")
+            raise ValueError("В архиве профиля отсутствует служебное описание.")
         if len(infos) > 250:
-            raise ValueError("Слишком много файлов внутри medpack-архива.")
+            raise ValueError("Слишком много файлов внутри архива профиля.")
         if sum(max(0, info.file_size) for info in infos) > MAX_MEDPACK_UNCOMPRESSED_BYTES:
-            raise ValueError("medpack-архив слишком большой для безопасного импорта.")
+            raise ValueError("Архив профиля слишком большой для безопасного импорта.")
         data = json.loads(zf.read(PACK_MANIFEST_NAME).decode("utf-8"))
         if not isinstance(data, dict):
-            raise ValueError("pack.json внутри medpack должен содержать JSON-объект.")
+            raise ValueError("Служебное описание профиля повреждено: ожидался объект данных.")
         pack = DocumentPack.from_dict(data)
         if pack.schema_version != PACK_SCHEMA_VERSION:
             raise ValueError(f"Неподдерживаемая версия профиля: {pack.schema_version}")
@@ -706,14 +706,14 @@ def import_document_pack_zip(source_zip: str | Path, target_dir: str | Path, *, 
                     _assert_safe_zip_name(str(getattr(info, "orig_filename", info.filename))); _assert_safe_zip_name(info.filename)
                 names = [info.filename for info in infos]
                 if PACK_MANIFEST_NAME not in names:
-                    raise ValueError("В medpack-архиве нет pack.json.")
+                    raise ValueError("В архиве профиля отсутствует служебное описание.")
                 if len(infos) > 250:
-                    raise ValueError("Слишком много файлов внутри medpack-архива.")
+                    raise ValueError("Слишком много файлов внутри архива профиля.")
                 if sum(max(0, info.file_size) for info in infos) > MAX_MEDPACK_UNCOMPRESSED_BYTES:
-                    raise ValueError("medpack-архив слишком большой для безопасного импорта.")
+                    raise ValueError("Архив профиля слишком большой для безопасного импорта.")
                 data = json.loads(zf.read(PACK_MANIFEST_NAME).decode("utf-8"))
                 if not isinstance(data, dict):
-                    raise ValueError("pack.json внутри medpack должен содержать JSON-объект.")
+                    raise ValueError("Служебное описание профиля повреждено: ожидался объект данных.")
                 pack = DocumentPack.from_dict(data)
                 pack = _copy_zip_profile_templates(pack, zf, set(names), target, created_templates)
             pack_path = _available_profile_manifest_path(target / PACK_MANIFEST_NAME)

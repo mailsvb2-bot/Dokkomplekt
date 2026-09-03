@@ -630,3 +630,93 @@ def test_doctor_facing_file_dialogs_and_license_label_stay_russian() -> None:
     assert 'text="Лицензия"' in sources['app.py']
     assert 'title="Выберите примеры документов PDF"' in sources['window_universal_dialogs_mixin.py']
     assert '("Все файлы", "*.*")' in combined
+
+
+def test_template_auditor_accepts_ordinary_visible_word_fields(tmp_path: Path) -> None:
+    from auditor_template import audit_template
+
+    template = _docx(tmp_path / "ordinary-doctor-form.docx", "ФИО: ______")
+    report = audit_template(template)
+
+    assert report.ok, report.human_report()
+    assert not any(
+        finding.code == "TEMPLATE_HAS_NO_PLACEHOLDERS" and finding.blocking
+        for finding in report.findings
+    ), report.human_report()
+
+
+def test_doctor_facing_workflow_avoids_internal_engine_jargon() -> None:
+    root = Path(__file__).resolve().parents[1]
+    sources = {
+        name: (root / name).read_text(encoding="utf-8")
+        for name in (
+            "actions_creation_batch.py",
+            "actions_creation_execution.py",
+            "actions_document_intelligence_flow.py",
+            "actions_universal_flow.py",
+            "desktop_intake_mixin.py",
+            "dialog_dates.py",
+            "dialog_fields_popup.py",
+            "files_mixin.py",
+            "installation_diagnostics.py",
+            "medical_service.py",
+            "universal_generation.py",
+            "universal_profile_builder.py",
+            "universal_profiles.py",
+            "universal_template_engine.py",
+            "window_completion_dialog.py",
+            "window_document_mapper.py",
+            "window_header_mixin.py",
+            "window_setup_center.py",
+        )
+    }
+    combined = "\n".join(sources.values())
+    stale_visible_phrases = (
+        "Отметьте хотя бы один документ, custom-документ профиля",
+        "Custom-документы профиля",
+        "Создать итоговые custom-документы",
+        "Генерация custom-документов",
+        "Создать custom DOCX",
+        "Куда сохранить custom DOCX",
+        "Обязательные поля popup",
+        "Фоновый watcher",
+        "Автозагрузка watcher",
+        "Watcher lock",
+        "Мастер профиля / checklist",
+        "checklist сформирован",
+        "Доступные пресеты",
+        "используйте пресет",
+        "Popup не требуется",
+        "В текущем popup",
+        "popup/UI",
+        "custom-дневников",
+        "fixed-template backend",
+        "doctor-owned шаблоны/профиль документов",
+        "Экспортировать medpack",
+        "Импортировать medpack",
+        "Импортировать medpack/profile",
+        "Создано автоматически по placeholders",
+        "medpack-архив",
+        "Watcher log",
+        "Custom-дневники не созданы",
+        'label_text = f"{item.label}  {item.placeholder}"',
+        "Проверьте placeholders",
+        "смысловые поля/placeholders",
+        "{{placeholders}}",
+        "Экспорт профиля .medpack.zip",
+        "MedicalDiaryAutofill_Profile.medpack.zip",
+        "пресет специальности",
+    )
+    for stale in stale_visible_phrases:
+        assert stale not in combined
+
+    assert "Документы из ваших шаблонов" in combined
+    assert "Обязательные поля перед созданием" in combined
+    assert "Фоновое наблюдение за папкой" in combined
+    assert "Проверка настройки профиля" in combined
+    assert "Готовые варианты специальности" in combined
+    assert "Экспортировать профиль" in combined
+    assert "Импортировать профиль" in combined
+    assert "Dokkomplekt_Profile.zip" in combined
+    assert "служебные метки шаблона" in combined
+    assert "Журнал фонового наблюдения" in combined

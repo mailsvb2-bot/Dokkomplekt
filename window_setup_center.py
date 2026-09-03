@@ -253,7 +253,7 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
     def export_profile() -> None:
         target = filedialog.asksaveasfilename(
             title="Сохранить профиль врача для переноса",
-            initialfile="MedicalDiaryAutofill_Profile.medpack.zip",
+            initialfile="Dokkomplekt_Profile.zip",
             defaultextension=".zip",
             filetypes=[("Профиль документов", "*.zip *.medpack"), ("Все файлы", "*.*")],
             parent=dialog,
@@ -881,7 +881,7 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
         add_button("Удалить созданную кнопку", delete_created_button, row=2)
         add_button("Как называть папку пациента", self.configure_patient_folder_naming_dialog, row=3)
         add_button("Добавить один шаблон вручную", add_template_button, row=4)
-        add_button("Обязательные поля popup", configure_required_popup_fields, row=5)
+        add_button("Обязательные поля перед созданием", configure_required_popup_fields, row=5)
         add_button("2. Научить читать первичный документ", teach_source_document, row=6)
         add_button("Сканер Word: открыть и взять выделение", open_external_word_scanner, row=7)
         add_button("Цветной сканер внутри программы", open_color_mouse_scanner, row=8)

@@ -35,14 +35,14 @@ def audit_template(path: str | Path, *, required_fields: Sequence[str] = (), exp
         return AuditReport("Аудит шаблона", (finding,), str(candidate), compute_score((finding,)))
     stat = candidate.stat()
     validation, detected, advice = _cached_template_signature(str(candidate.resolve()), stat.st_mtime_ns, stat.st_size)
-    if not validation.placeholders:
-        findings.append(AuditFinding("TEMPLATE_HAS_NO_PLACEHOLDERS", "В шаблоне нет placeholders вида {{patient.fio}}; universal-движок не сможет его заполнить.", AuditSeverity.ERROR, candidate.name, blocking=True))
+    if not validation.placeholders and not validation.visible_fields:
+        findings.append(AuditFinding("TEMPLATE_HAS_NO_PLACEHOLDERS", "В шаблоне не найдено заполняемых полей. Добавьте обычные поля Word (например «ФИО: ______») или метки вида {{patient.fio}}.", AuditSeverity.ERROR, candidate.name, blocking=True))
     for field_id in validation.unknown_fields:
         findings.append(AuditFinding("UNKNOWN_PLACEHOLDER", f"Неизвестное поле: {field_id}", AuditSeverity.ERROR, candidate.name, {"field_id": field_id}, blocking=True))
     for field_id in validation.missing_required_placeholders:
-        findings.append(AuditFinding("MISSING_REQUIRED_PLACEHOLDER", f"Нет обязательного placeholder: {field_id}", AuditSeverity.ERROR, candidate.name, {"field_id": field_id}, blocking=True))
+        findings.append(AuditFinding("MISSING_REQUIRED_PLACEHOLDER", f"Нет обязательного заполняемого поля: {field_id}", AuditSeverity.ERROR, candidate.name, {"field_id": field_id}, blocking=True))
     for warning in validation.warnings:
-        if "нет placeholders" in warning.lower():
+        if "нет placeholders" in warning.lower() or "нет ни placeholders" in warning.lower() or "нет ни служебных меток" in warning.lower():
             continue
         findings.append(AuditFinding("TEMPLATE_WARNING", warning, AuditSeverity.WARNING, candidate.name))
     if detected.language_id == "auto":

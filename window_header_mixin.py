@@ -158,7 +158,7 @@ class WindowHeaderMixin:
         spell.grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 12))
         note = tk.Label(
             body,
-            text="Орфография применяется безопасно: коды МКБ, даты, номера, подписи и {{placeholders}} не изменяются.",
+            text="Орфография применяется безопасно: коды МКБ, даты, номера, подписи и служебные метки шаблона не изменяются.",
             bg=PANEL,
             fg=MUTED,
             wraplength=self._px(470, 320),

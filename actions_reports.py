@@ -59,7 +59,7 @@ class ActionsReportsMixin:
                 lines.append(f"Предупреждений проверки: {len(review.warnings)}")
             lines.append("")
             lines.append(f"Медицинских документов создано: {len(created_medical)}")
-            lines.append(f"Custom-документов профиля создано: {len(created_custom)}")
+            lines.append(f"Документов из ваших шаблонов создано: {len(created_custom)}")
             if diary_result is not None:
                 lines.append("")
                 lines.append(f"Дневниковых файлов создано: {len(list(diary_result.created_files))}")

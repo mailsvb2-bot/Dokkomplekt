@@ -221,10 +221,10 @@ def configure_required_popup_fields_dialog(app, parent, *, save_pack, refresh_ma
         pack = app._load_or_create_universal_pack()
         documents = list(pack.documents)
         if not documents:
-            messagebox.showwarning("Обязательные поля popup", "Сначала добавьте хотя бы одну кнопку документа в блок 03.", parent=parent)
+            messagebox.showwarning("Обязательные поля перед созданием", "Сначала добавьте хотя бы одну кнопку документа в блок 03.", parent=parent)
             return
         choices = "\n".join(f"{i}. {doc.button_label}" for i, doc in enumerate(documents, 1))
-        number_raw = simpledialog.askstring("Обязательные поля popup", "Для какой кнопки добавить обязательные поля?\n\n" + choices + "\n\nВведите номер кнопки:", parent=parent)
+        number_raw = simpledialog.askstring("Обязательные поля перед созданием", "Для какой кнопки добавить обязательные поля?\n\n" + choices + "\n\nВведите номер кнопки:", parent=parent)
         if not number_raw:
             return
         index = int(str(number_raw).strip()) - 1
@@ -232,8 +232,8 @@ def configure_required_popup_fields_dialog(app, parent, *, save_pack, refresh_ma
             raise ValueError("Нет кнопки с таким номером.")
         selected_doc = documents[index]
         raw_fields = simpledialog.askstring(
-            "Обязательные поля popup",
-            "Введите дополнительные обязательные поля для popup — по одному в строке.\n\nЧтобы значение попало в документ, вставьте показанную метку в Word-шаблон.",
+            "Обязательные поля перед созданием",
+            "Введите дополнительные обязательные поля — по одному в строке.\n\nЧтобы значение попало в документ, вставьте показанную метку в Word-шаблон.",
             parent=parent,
         )
         labels = [line.strip(" •-\t") for line in str(raw_fields or "").splitlines() if line.strip(" •-\t")]
@@ -246,7 +246,7 @@ def configure_required_popup_fields_dialog(app, parent, *, save_pack, refresh_ma
             field_id = field_id_from_label(label)
             if field_id in existing_defs and existing_defs[field_id].label != label:
                 field_id = "custom.field_" + hashlib.sha1(label.encode("utf-8")).hexdigest()[:8]
-            existing_defs[field_id] = FieldDefinition(field_id, label, "custom", (label,), "text", "Дополнительное обязательное поле врача для popup", False)
+            existing_defs[field_id] = FieldDefinition(field_id, label, "custom", (label,), "text", "Дополнительное обязательное поле врача перед созданием", False)
             field_ids.append(field_id)
             placeholder_lines.append(f"{label}: {{{{{field_id}}}}}")
         pack.custom_fields = tuple(existing_defs.values())
@@ -256,7 +256,7 @@ def configure_required_popup_fields_dialog(app, parent, *, save_pack, refresh_ma
         )
         save_pack(pack)
         refresh_main_tiles("required_popup_fields")
-        refresh_view("Обязательные поля popup сохранены.")
-        messagebox.showinfo("Обязательные поля popup", "Сохранено. Перед созданием программа спросит:\n\n" + "\n".join(placeholder_lines), parent=parent)
+        refresh_view("Обязательные поля сохранены.")
+        messagebox.showinfo("Обязательные поля перед созданием", "Сохранено. Перед созданием программа спросит:\n\n" + "\n".join(placeholder_lines), parent=parent)
     except Exception as exc:
-        messagebox.showerror("Обязательные поля popup", str(exc), parent=parent)
+        messagebox.showerror("Обязательные поля перед созданием", str(exc), parent=parent)

@@ -39,7 +39,9 @@ def main() -> None:
     assert_installation_diagnostics_lock()
     assert_diary_creation_wizard_lock()
     rows = collect_installation_diagnostics(None)
-    assert rows and any("Watcher" in row.name for row in rows)
+    row_names = {row.name for row in rows}
+    assert "Фоновое наблюдение: автозагрузка" in row_names, row_names
+    assert "Журнал фонового наблюдения" in row_names, row_names
     risky_files = ("desktop_intake.py", "dnd_mixin.py", "files_mixin.py", "dialog_fields_core.py", "window_document_mapper.py", "diary_text_selection.py", "actions_creation_execution.py")
     for filename in risky_files:
         source = Path(filename).read_text(encoding="utf-8")

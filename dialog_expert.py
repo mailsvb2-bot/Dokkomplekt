@@ -299,7 +299,7 @@ class DialogExpertMixin:
                 "expert_sick_leave_from",
                 sick_from,
                 parent=win,
-                source_label="popup экспертного анамнеза",
+                source_label="окно экспертного анамнеза",
             ):
                 error_label.config(text="Дата начала больничного отличается от уже сохранённой или выходит за период лечения. Подтвердите замену или исправьте поле.")
                 try:
@@ -464,7 +464,7 @@ class DialogExpertMixin:
         if values is None:
             return False
         discharge_value = values[0].strip()
-        if not self._store_discharge_date_value(discharge_value, source_label="popup даты выписки"):
+        if not self._store_discharge_date_value(discharge_value, source_label="окно даты выписки"):
             messagebox.showwarning(
                 "Некорректная дата выписки",
                 "Укажите дату выписки не раньше даты поступления в формате ДД.ММ.ГГГГ, ДДММГГГГ, ДДММГГ или коротко ДМГГ, например 20.04.2026, 200426 или 1126.",
@@ -598,7 +598,7 @@ class DialogExpertMixin:
                 if hasattr(self, "data"):
                     self.data.diagnosis = diagnosis
             elif field == "discharge_date":
-                if not self._store_discharge_date_value(value, source_label="popup выбранных документов"):
+                if not self._store_discharge_date_value(value, source_label="окно выбранных документов"):
                     messagebox.showwarning(
                         "Некорректная дата выписки",
                         "Дата выписки должна быть корректной, не раньше даты поступления и в формате ДД.ММ.ГГГГ, ДДММГГГГ, ДДММГГ или коротко ДМГГ, например 20.04.2026, 200426 или 1126.",
@@ -688,7 +688,7 @@ class DialogExpertMixin:
                 if hasattr(self, "data"):
                     self.data.diagnosis = diagnosis
             elif field == "discharge_date":
-                if not self._store_discharge_date_value(value, source_label="popup выбранных документов"):
+                if not self._store_discharge_date_value(value, source_label="окно выбранных документов"):
                     messagebox.showwarning(
                         "Некорректная дата выписки",
                         "Дата выписки должна быть корректной, не раньше даты поступления и в формате ДД.ММ.ГГГГ, ДДММГГГГ, ДДММГГ или коротко ДМГГ, например 20.04.2026, 200426 или 1126.",
@@ -781,7 +781,7 @@ class DialogExpertMixin:
                 if hasattr(self, "data"):
                     self.data.diagnosis = popup_diagnosis
             elif field == "discharge_date":
-                if not self._store_discharge_date_value(value, source_label="popup выбранных документов"):
+                if not self._store_discharge_date_value(value, source_label="окно выбранных документов"):
                     messagebox.showwarning(
                         "Некорректная дата выписки",
                         "Дата выписки должна быть корректной, не раньше даты поступления и в формате ДД.ММ.ГГГГ, ДД.ММ.ГГ, ДДММГГГГ, ДДММГГ или коротко ДМГГ, например 20.04.2026, 200426 или 1126.",

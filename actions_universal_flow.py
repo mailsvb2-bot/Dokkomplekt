@@ -187,7 +187,7 @@ class ActionsUniversalFlowMixin:
         try:
             raw_values = self._prompt_regulatory_completion_values(inputs, parent=self.root)
         except Exception as exc:
-            raise RuntimeError(f"Не удалось открыть popup дополнения custom-документа: {exc}") from exc
+            raise RuntimeError(f"Не удалось открыть окно дополнительных полей документа: {exc}") from exc
         from regulatory_completion_blocks import apply_completion_values, completion_values_from_raw
 
         values = completion_values_from_raw(inputs, raw_values)
@@ -195,10 +195,10 @@ class ActionsUniversalFlowMixin:
             return apply_completion_values(case, values, source_document="custom_document_completion_popup")
         if required_mode and not bool(getattr(self, "_allow_missing_required_creation", False)):
             labels = ", ".join(str(getattr(item, "label", item.field_id)) for item in inputs[:6])
-            raise ValueError("Не заполнены обязательные поля custom-документа: " + labels)
+            raise ValueError("Не заполнены обязательные поля документа из вашего шаблона: " + labels)
         if required_mode:
-            self._log("\n⚠ Врач явно выбрал «Продолжить без…»: custom-документ будет создан с незаполненными обязательными полями.\n")
-        self._log("\nℹ Врач выбрал создание custom-документов как есть, без дополнительных полей.\n")
+            self._log("\n⚠ Вы выбрали «Продолжить без…»: документ из вашего шаблона будет создан с незаполненными обязательными полями.\n")
+        self._log("\nℹ Вы выбрали создание документов из ваших шаблонов как есть, без дополнительных полей.\n")
         return case
 
     def _create_custom_documents_impl(self, selected_custom_ids: List[str]) -> List[Path]:
@@ -214,7 +214,7 @@ class ActionsUniversalFlowMixin:
             created_paths.extend(self._create_custom_diary_documents_impl(current_pack, case, diary_ids, out_dir))
         if regular_ids:
             created_paths.extend(self._create_regular_custom_documents(current_pack, case, regular_ids, out_dir))
-        self._set_status("Custom-документы профиля обработаны")
+        self._set_status("Документы из ваших шаблонов обработаны")
         return created_paths
 
     def _create_regular_custom_documents(self, current_pack, case, regular_ids: List[str], out_dir) -> List[Path]:
@@ -233,21 +233,21 @@ class ActionsUniversalFlowMixin:
         )
         report_path = save_generation_report(result, technical_report_path(out_dir, "custom_profile_generation_report.txt")) if self._diagnostic_reports_enabled() else None
         if result.skipped_documents:
-            self._log("\n⚠ Custom-документы профиля пропущены:\n")
+            self._log("\n⚠ Документы из ваших шаблонов пропущены:\n")
             for item in result.skipped_documents:
                 self._log(f"- {item}\n")
         if result.warnings:
-            self._log("\n⚠ Custom-документы профиля созданы с предупреждениями:\n")
+            self._log("\n⚠ Документы из ваших шаблонов созданы с предупреждениями:\n")
             for warning in result.warnings:
                 self._log(f"- {warning}\n")
         if result.created_files:
-            self._log("\n✅ Созданы custom-документы профиля:\n")
+            self._log("\n✅ Созданы документы из ваших шаблонов:\n")
             for path in result.created_files:
                 self._log(f"- {path}\n")
         if result.skipped_documents:
-            raise ValueError("Неполный комплект custom-документов запрещён: " + "; ".join(str(item) for item in result.skipped_documents[:5]))
+            raise ValueError("Не удалось создать полный комплект документов из ваших шаблонов: " + "; ".join(str(item) for item in result.skipped_documents[:5]))
         if self._diagnostic_reports_enabled() and report_path is not None:
-            self._log(f"Технический отчёт custom-профиля: {report_path}\n")
+            self._log(f"Технический отчёт по вашим шаблонам: {report_path}\n")
         return [Path(item) for item in result.created_files]
 
     def _split_custom_diary_document_ids(self, current_pack, selected_custom_ids: List[str]) -> tuple[list[str], list[str]]:
@@ -292,7 +292,7 @@ class ActionsUniversalFlowMixin:
             chooser()
         if not getattr(self, "status_files", None):
             raise ValueError(
-                "Выберите файл(ы) с текстами дневников или используйте doctor-owned шаблон, в котором уже есть тексты наблюдения."
+                "Выберите файл(ы) с текстами дневников или используйте свой шаблон, в котором уже есть тексты наблюдения."
             )
 
     def _create_custom_diary_documents_impl(self, current_pack, case, diary_ids: List[str], out_dir) -> List[Path]:
@@ -302,7 +302,7 @@ class ActionsUniversalFlowMixin:
         from diary_creation_wizard import confirm_diary_creation, current_diary_calendar_schedule
 
         if not confirm_diary_creation(self):
-            raise ValueError("Создание custom-дневников остановлено мастером дневников: проверьте дату госпитализации, дату выписки, тексты и принцип дневников.")
+            raise ValueError("Создание дневников из вашего шаблона остановлено: проверьте дату госпитализации, дату выписки, тексты и выбранный принцип дневников.")
         diary_schedule = current_diary_calendar_schedule(self, fallback=self._selected_profile_diary_schedule())
         diary_mode = getattr(diary_schedule, "mode", "daily") if diary_schedule else "daily"
 
@@ -358,13 +358,13 @@ class ActionsUniversalFlowMixin:
             sick_leave_from=current_semantic_date(self, "expert_sick_leave_from") or case.get("expert.sick_leave_from"),
         )
         if result.skipped:
-            self._log("\n⚠ Custom-дневники профиля пропущены:\n")
+            self._log("\n⚠ Дневники из вашего шаблона пропущены:\n")
             for item in result.skipped:
                 self._log(f"- {item}\n")
         if result.created_files:
-            self._log("\n✅ Созданы custom-дневники профиля:\n")
+            self._log("\n✅ Созданы дневники из вашего шаблона:\n")
             for path in result.created_files:
                 self._log(f"- {path}\n")
         elif result.skipped:
-            raise ValueError("Custom-дневники не созданы: " + "; ".join(str(item) for item in result.skipped[:5]))
+            raise ValueError("Дневники из вашего шаблона не созданы: " + "; ".join(str(item) for item in result.skipped[:5]))
         return list(result.created_files)
