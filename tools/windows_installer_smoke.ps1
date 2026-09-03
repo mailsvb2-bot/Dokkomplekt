@@ -17,8 +17,8 @@ try {
     $exe = Join-Path $installDir 'MedicalDiaryAutofill.exe'
     if (-not (Test-Path $exe)) { throw 'Installed EXE is missing.' }
 
-    & $exe --check-runtime-bundle
-    if ($LASTEXITCODE -ne 0) { throw 'Installed EXE runtime-bundle smoke failed.' }
+    $bundleCheck = Start-Process -FilePath $exe -ArgumentList '--check-runtime-bundle' -Wait -PassThru
+    if ($bundleCheck.ExitCode -ne 0) { throw "Installed EXE runtime-bundle smoke failed: $($bundleCheck.ExitCode)" }
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $exe
