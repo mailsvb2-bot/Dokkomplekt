@@ -1,3 +1,11 @@
+# Release notes — v1.4.92_trial_uninstall_hotfix
+
+- Исправлен ложный «Пробный период завершён» у первого публичного production-релиза: состояние внутренних/pre-release сборок не съедает 14-дневный Trial. Сброс выполняется строго один раз и защищён integrity state/guard.
+- «Акт для РВК» проверяется отдельным реальным DOCX replay; восстановлены быстрые варианты Ленинский / Канавинский / Сормовский / Московский, ручной ввод военкомата остаётся доступен.
+- Исправлено удаление программы при активном фоне: uninstaller публикует shutdown-handoff, ждёт завершения скрытого `--intake-agent`, удаляет Startup VBS/LNK и только затем освобождает EXE.
+- Добавлен Inno Setup установщик для `%LocalAppData%\Dokkomplekt` с ярлыками и штатным Windows uninstaller.
+- CI теперь строит Setup и реально проверяет install → запуск фонового агента → uninstall → отсутствие удерживаемого EXE.
+
 # Release notes — v1.4.91_audit_hardening
 
 - Закрыт fail-open коммерческого доступа: packaged EXE больше нельзя перевести в unrestricted-режим через `CI`, legacy disable/unsigned environment flags или подмену Ed25519 public key; production-сборка требует встраиваемый публичный ключ лицензирования.

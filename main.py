@@ -95,6 +95,11 @@ def main() -> None:
         ok, message = install_agent_autostart(start_now=True)
         print(message)
         raise SystemExit(0 if ok else 1)
+    if "--uninstall-intake-agent" in sys.argv:
+        from desktop_intake_agent import uninstall_agent_autostart
+        ok, message = uninstall_agent_autostart()
+        print(message)
+        raise SystemExit(0 if ok else 1)
     if "--intake-agent" in sys.argv:
         from desktop_intake_agent import run_forever
         run_forever()

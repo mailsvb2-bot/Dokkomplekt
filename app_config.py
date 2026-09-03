@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 APP_TITLE = "Медицинский автозаполнитель"
-APP_VERSION = "v1.4.91_audit_hardening"
+APP_VERSION = "v1.4.92_trial_uninstall_hotfix"
 
 # Цветовая схема точно по референсу: глубокий navy-midnight, cyan-акцент, card-стиль блоков.
 BG = "#07111d"

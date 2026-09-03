@@ -83,7 +83,10 @@ class DesktopIntakeMixin:
 
     def _refresh_gui_runtime_lock(self) -> None:
         try:
-            from desktop_intake_agent import write_gui_runtime_lock
+            from desktop_intake_agent import uninstall_shutdown_requested, write_gui_runtime_lock
+            if uninstall_shutdown_requested():
+                self._close_app_with_runtime_lock_release()
+                return
             write_gui_runtime_lock()
         except Exception as exc:
             record_soft_exception("desktop_intake_mixin.gui_runtime_lock", exc)

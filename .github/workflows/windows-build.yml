@@ -192,6 +192,19 @@ jobs:
         env:
           MEDICAL_AUTOFILL_SKIP_BUILD_PRECHECKS: '1'
         run: build_exe_windows.bat
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found: $iscc" }
+          & $iscc '.\installer\Dokkomplekt.iss'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Smoke installer uninstall with live intake agent
+        shell: pwsh
+        run: .\tools\windows_installer_smoke.ps1
       - name: Smoke packaged EXE native verifier
         shell: pwsh
         run: |
@@ -220,6 +233,12 @@ jobs:
         with:
           name: MedicalDiaryAutofill-Windows-EXE
           path: dist/MedicalDiaryAutofill.exe
+          if-no-files-found: error
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dokkomplekt-Windows-Setup
+          path: dist/Dokkomplekt-Setup-*.exe
           if-no-files-found: error
       - name: Upload source release artifact
         uses: actions/upload-artifact@v4
