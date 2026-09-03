@@ -207,6 +207,53 @@ impl LicenseStore for PostgresStore {
         Ok(())
     }
 
+    fn get_license_by_id(&self, license_id: &str) -> Result<Option<LicenseRecord>, StoreError> {
+        let mut client = self.client()?;
+        Ok(client
+            .query_opt(
+                "SELECT id, order_id, license_id, document_json, issued_at, revoked_at FROM license_documents WHERE license_id = $1",
+                &[&license_id],
+            )
+            .map_err(pg_err)?
+            .map(license_from_row))
+    }
+
+    fn revoke_license(
+        &self,
+        license_id: &str,
+        revoked_at: OffsetDateTime,
+    ) -> Result<LicenseRecord, StoreError> {
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(pg_err)?;
+        let row = tx
+            .query_opt(
+                "SELECT id, order_id, license_id, document_json, issued_at, revoked_at FROM license_documents WHERE license_id = $1 FOR UPDATE",
+                &[&license_id],
+            )
+            .map_err(pg_err)?
+            .ok_or(StoreError::NotFound)?;
+        let mut record = license_from_row(row);
+        if record.revoked_at.is_none() {
+            tx.execute(
+                "UPDATE license_documents SET revoked_at = $2 WHERE license_id = $1 AND revoked_at IS NULL",
+                &[&license_id, &revoked_at],
+            )
+            .map_err(pg_err)?;
+            record.revoked_at = Some(revoked_at);
+            insert_audit_event(
+                &mut tx,
+                &audit_event(
+                    record.order_id,
+                    "license_revoked",
+                    &record.license_id,
+                    revoked_at,
+                ),
+            )?;
+        }
+        tx.commit().map_err(pg_err)?;
+        Ok(record)
+    }
+
     fn audit(&self, record: AuditEventRecord) -> Result<(), StoreError> {
         let mut client = self.client()?;
         insert_audit_event(&mut *client, &record)
