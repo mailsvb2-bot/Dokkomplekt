@@ -265,6 +265,7 @@ def test_atomic_json_concurrent_writers_never_share_fixed_temp(tmp_path: Path) -
         assert process.returncode == 0, (stdout, stderr)
     assert json.loads(target.read_text())["writer"] in {str(i) for i in range(12)}
     assert not list(tmp_path.glob("*.tmp"))
+    assert not list(tmp_path.glob("*.write.lock"))
 
 
 def test_interprocess_lock_recovers_dead_stale_owner(tmp_path: Path) -> None:

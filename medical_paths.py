@@ -62,9 +62,7 @@ def embedded_template_path(filename: str) -> Optional[Path]:
     # this folder between launches. Validate the expected size and replace
     # atomically when needed.
     if not out.exists() or out.stat().st_size != len(data):
-        tmp = out.with_suffix(out.suffix + ".tmp")
-        tmp.write_bytes(data)
-        tmp.replace(out)
+        atomic_write_bytes(out, data)
     _EMBEDDED_TEMPLATE_CACHE[filename] = out
     return out
 
@@ -88,28 +86,35 @@ def bundled_template_path(kind: str) -> Path:
     return result
 
 
-def atomic_write_text(path: str | Path, text: str, *, encoding: str = "utf-8") -> Path:
+def atomic_write_bytes(path: str | Path, data: bytes) -> Path:
+    """Durably publish bytes with unique temp storage and one target-scoped writer lock."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw_tmp = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent))
-    tmp = Path(raw_tmp)
-    try:
-        with os.fdopen(fd, "w", encoding=encoding, newline="\n") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp, target)
-        return target
-    except Exception:
+    publish_lock = target.with_name(f".{target.name}.write.lock")
+    with interprocess_file_lock(publish_lock, timeout_seconds=10.0, stale_seconds=120.0):
+        fd, raw_tmp = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent))
+        tmp = Path(raw_tmp)
         try:
-            os.close(fd)
-        except OSError:
-            pass
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-        raise
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, target)
+            return target
+        except Exception:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            raise
+
+
+def atomic_write_text(path: str | Path, text: str, *, encoding: str = "utf-8") -> Path:
+    return atomic_write_bytes(path, str(text).encode(encoding))
 
 
 def atomic_write_json(path: str | Path, payload: Mapping[str, Any], *, sort_keys: bool = False) -> Path:
