@@ -299,6 +299,7 @@ class OutputTransaction:
         return path.suffix.casefold() == ".txt" and ("report" in name or "отч" in name)
 
     def commit(self, *, expected_files=None) -> dict[Path, Path]:
+        """Publish the complete staged output atomically or restore the prior final directory state."""
         if self.stage_dir is None or not self.stage_dir.exists():
             raise RuntimeError("Output transaction has not been started.")
         stage = self.stage_dir
