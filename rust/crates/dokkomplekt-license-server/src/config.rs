@@ -1,3 +1,4 @@
+use crate::provider_bank_invoice::BankInvoiceProvider;
 use std::net::SocketAddr;
 
 #[derive(Debug, Clone)]
@@ -36,10 +37,6 @@ impl ServerConfig {
         if strict_runtime && payment_provider == "manual" {
             anyhow::bail!("manual payment provider is not allowed for license server runtime");
         }
-        if strict_runtime && payment_provider == "bank_invoice" {
-            anyhow::bail!("bank_invoice payment provider is not implemented for production runtime");
-        }
-
         let database_url = non_empty_env("DATABASE_URL");
         if database_url
             .as_ref()
@@ -65,6 +62,15 @@ impl ServerConfig {
             if non_empty_env("DOKKOMPLEKT_YOOKASSA_SECRET_KEY").is_none() {
                 anyhow::bail!("DOKKOMPLEKT_YOOKASSA_SECRET_KEY is required for YooKassa/SBP payments");
             }
+        }
+        if payment_provider == "bank_invoice" {
+            if provider_callback_secret.is_none() {
+                anyhow::bail!(
+                    "DOKKOMPLEKT_PROVIDER_CALLBACK_SECRET is required for bank_invoice confirmation"
+                );
+            }
+            BankInvoiceProvider::validate_env()
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         }
 
         let storage_mode = match database_url
