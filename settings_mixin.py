@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from diagnostic_logging import record_soft_exception
+from medical_paths import atomic_write_text, prune_old_files
 import json
 import os
 import shutil
@@ -160,12 +161,14 @@ class SettingsMixin:
                     value = str(item or "").strip().lower()
                     if len(value) == 64 and all(ch in "0123456789abcdef" for ch in value):
                         seen_signatures.append(value)
+            from desktop_intake import DESKTOP_INTAKE_MAX_SEEN_SIGNATURES
+
             payload["desktop_intake"] = {
                 "asked": _setting_bool(desktop_intake.get("asked", False)),
                 "enabled": _setting_bool(desktop_intake.get("enabled", False)),
                 "folder": str(desktop_intake.get("folder", "") or ""),
                 "prompt_version": str(desktop_intake.get("prompt_version", "") or ""),
-                "seen_signatures": list(dict.fromkeys(seen_signatures[-300:])),
+                "seen_signatures": list(dict.fromkeys(seen_signatures[-DESKTOP_INTAKE_MAX_SEEN_SIGNATURES:])),
             }
         return payload
 
@@ -186,30 +189,29 @@ class SettingsMixin:
                 timestamped = self._settings_timestamped_backup_path(reason=reason)
                 timestamped.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(self._settings_path, timestamped)
+                prune_old_files(timestamped.parent, pattern="settings_*_*.json", keep=24)
                 return timestamped
         except Exception as exc:
             record_soft_exception("settings_mixin.backup", exc, detail=str(self._settings_path))
         return None
 
-    def _save_settings(self) -> None:
-        tmp_path = self._settings_path.with_name(self._settings_path.name + ".tmp")
+    def _save_settings(self) -> bool:
         try:
             self._settings_path.parent.mkdir(parents=True, exist_ok=True)
             self._backup_settings_file(reason="save")
-            tmp_path.write_text(
+            atomic_write_text(
+                self._settings_path,
                 json.dumps(self._settings_payload_for_disk(), ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
             )
-            os.replace(tmp_path, self._settings_path)
+            self._last_settings_save_error = ""
+            return True
         except Exception as exc:
-            # Настройки — удобство, не критичная функция. Ошибку не показываем врачу,
-            # но не оставляем рядом битый settings.json.tmp после неудачной записи.
+            # Keep the GUI usable, but expose persistence failure to critical
+            # callers (profile selection / watcher settings) instead of silently
+            # pretending the preference survived a restart.
+            self._last_settings_save_error = str(exc)
             record_soft_exception("settings_mixin:save", exc, detail=str(self._settings_path))
-            try:
-                if tmp_path.exists():
-                    tmp_path.unlink()
-            except Exception as cleanup_exc:
-                record_soft_exception("settings_mixin:104", cleanup_exc)
+            return False
 
     def _settings_folders(self) -> dict:
         folders = self._settings.get("folders")

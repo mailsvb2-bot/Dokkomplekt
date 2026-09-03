@@ -5,6 +5,7 @@ from diagnostic_logging import record_soft_exception
 import hashlib
 import importlib
 import os
+import shutil
 from pathlib import Path
 import tempfile
 import zipfile
@@ -67,7 +68,8 @@ def convert_docm_to_docx(path: str | Path) -> Path:
         record_soft_exception("medical_word_format.docm_stat", exc, detail=str(source))
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    tmp_target = target.with_suffix(".tmp")
+    workspace = Path(tempfile.mkdtemp(prefix=f".{target.name}.", dir=str(target.parent)))
+    tmp_target = workspace / target.name
     macro_main_type = b"application/vnd.ms-word.document.macroEnabled.main+xml"
     docx_main_type = b"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
     try:
@@ -106,10 +108,10 @@ def convert_docm_to_docx(path: str | Path) -> Path:
         os.replace(tmp_target, target)
         return target
     except Exception as exc:
-        with suppress(Exception):
-            tmp_target.unlink()
         record_soft_exception("medical_word_format.convert_docm_to_docx", exc, detail=str(source))
         raise RuntimeError("Failed to prepare DOCM as a macro-free DOCX copy.") from exc
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
 
 
 def convert_doc_to_docx(path: str | Path) -> Path:
@@ -131,18 +133,20 @@ def convert_doc_to_docx(path: str | Path) -> Path:
         raise RuntimeError("Legacy DOC conversion requires Microsoft Word and pywin32. Save the file as DOCX and retry.") from exc
     word = None
     doc = None
+    target.parent.mkdir(parents=True, exist_ok=True)
+    workspace = Path(tempfile.mkdtemp(prefix=f".{target.name}.", dir=str(target.parent)))
+    tmp_target = workspace / target.name
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
         word = win32com_client.DispatchEx("Word.Application")
         word.Visible = False
         word.DisplayAlerts = 0
         doc = word.Documents.Open(str(source.resolve()), ReadOnly=True, AddToRecentFiles=False)
-        doc.SaveAs2(str(target.resolve()), FileFormat=16)
+        doc.SaveAs2(str(tmp_target.resolve()), FileFormat=16)
+        if not tmp_target.exists() or tmp_target.stat().st_size <= 0:
+            raise RuntimeError("Microsoft Word did not create the converted DOCX file")
+        os.replace(tmp_target, target)
         return target
     except Exception as exc:
-        with suppress(Exception):
-            if target.exists() and target.stat().st_size <= 0:
-                target.unlink()
         record_soft_exception("medical_word_format.convert_doc_to_docx", exc, detail=str(source))
         raise RuntimeError("Failed to convert DOC to DOCX. Close the file in Word or save it as DOCX manually.") from exc
     finally:
@@ -152,6 +156,7 @@ def convert_doc_to_docx(path: str | Path) -> Path:
         with suppress(Exception):
             if word is not None:
                 word.Quit()
+        shutil.rmtree(workspace, ignore_errors=True)
 
 
 def _conversion_target(source: Path) -> Path:

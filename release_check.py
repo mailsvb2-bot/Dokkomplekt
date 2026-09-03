@@ -239,14 +239,22 @@ def _assert_full_smoke_suite_is_wired() -> None:
 
 
 def _assert_settings_contract() -> None:
-    source = _project_python_source()
-    required_snippets = [
+    settings = (ROOT / "settings_mixin.py").read_text(encoding="utf-8", errors="replace")
+    paths = (ROOT / "medical_paths.py").read_text(encoding="utf-8", errors="replace")
+    required_settings = [
         "def _settings_payload_for_disk",
-        "os.replace(tmp_path, self._settings_path)",
+        "atomic_write_text(",
         "settings.broken.",
         "Production-контракт",
     ]
-    missing = [snippet for snippet in required_snippets if snippet not in source]
+    required_atomic_owner = [
+        "def atomic_write_text",
+        "tempfile.mkstemp(",
+        "os.fsync(handle.fileno())",
+        "os.replace(tmp, target)",
+    ]
+    missing = [snippet for snippet in required_settings if snippet not in settings]
+    missing.extend(snippet for snippet in required_atomic_owner if snippet not in paths)
     if missing:
         raise SystemExit("Settings persistence contract is incomplete: " + ", ".join(missing))
 
@@ -613,7 +621,7 @@ def _assert_universal_profile_contract() -> None:
         "Неизвестный документ профиля",
         "Папка результата указывает на файл",
         '"\\\\" in normalized',
-        "total_size > 100 * 1024 * 1024",
+        "MAX_MEDPACK_UNCOMPRESSED_BYTES",
         "button_specs = [",
         "class DocumentRole",
         "def classify_docx",
@@ -756,8 +764,8 @@ def _assert_medpack_export_contract() -> None:
                 raise SystemExit("Medpack export contract failed with an unexpected error") from exc
         else:
             raise SystemExit("Medpack export contract failed: dangling template was exported")
-        temp_target = dangling_target.with_name(dangling_target.name + ".tmp")
-        if dangling_target.exists() or temp_target.exists():
+        partial_targets = list(root.glob(f".{dangling_target.name}.*.tmp"))
+        if dangling_target.exists() or partial_targets:
             raise SystemExit("Medpack export contract failed: dangling export left partial output")
 
 

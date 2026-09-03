@@ -5,12 +5,17 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from diagnostic_logging import record_soft_exception
 import base64
+import json
+import os
 import sys
 import tempfile
+import time
+import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from medical_constants import TEMPLATE_FILES
 
@@ -38,7 +43,7 @@ def embedded_template_path(filename: str) -> Optional[Path]:
     if filename in _EMBEDDED_TEMPLATE_CACHE:
         return _EMBEDDED_TEMPLATE_CACHE[filename]
     try:
-        from embedded_templates import TEMPLATE_B64  # type: ignore
+        from embedded_templates import TEMPLATE_B64
     except Exception as exc:
         record_soft_exception("medical_paths.embedded_templates_import", exc, detail=filename)
         _EMBEDDED_TEMPLATE_CACHE[filename] = None
@@ -81,3 +86,123 @@ def bundled_template_path(kind: str) -> Path:
     if result.exists():
         _BUNDLED_TEMPLATE_CACHE[kind] = result
     return result
+
+
+def atomic_write_text(path: str | Path, text: str, *, encoding: str = "utf-8") -> Path:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, raw_tmp = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent))
+    tmp = Path(raw_tmp)
+    try:
+        with os.fdopen(fd, "w", encoding=encoding, newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, target)
+        return target
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def atomic_write_json(path: str | Path, payload: Mapping[str, Any], *, sort_keys: bool = False) -> Path:
+    return atomic_write_text(
+        path,
+        json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=sort_keys) + "\n",
+    )
+
+
+def prune_old_files(directory: str | Path, *, pattern: str, keep: int) -> tuple[Path, ...]:
+    """Keep the newest ``keep`` regular files matching pattern; return removed paths."""
+    root = Path(directory)
+    if keep < 1 or not root.exists():
+        return ()
+    candidates = [item for item in root.glob(pattern) if item.is_file()]
+    candidates.sort(key=lambda item: (item.stat().st_mtime_ns, item.name), reverse=True)
+    removed: list[Path] = []
+    for item in candidates[keep:]:
+        try:
+            item.unlink()
+            removed.append(item)
+        except OSError:
+            continue
+    return tuple(removed)
+
+
+def _pid_is_running(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _read_owner(path: Path) -> dict:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+@contextmanager
+def interprocess_file_lock(
+    path: str | Path,
+    *,
+    timeout_seconds: float = 10.0,
+    stale_seconds: float = 120.0,
+):
+    """Acquire an O_EXCL lock file and release only the token we created."""
+    lock_path = Path(path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    token = uuid.uuid4().hex
+    deadline = time.monotonic() + max(0.1, float(timeout_seconds))
+    fd: int | None = None
+    while fd is None:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            payload = json.dumps({"pid": os.getpid(), "token": token, "created_at": time.time()}).encode("utf-8")
+            os.write(fd, payload)
+            os.fsync(fd)
+        except FileExistsError:
+            owner = _read_owner(lock_path)
+            try:
+                age = max(0.0, time.time() - lock_path.stat().st_mtime)
+            except OSError:
+                age = 0.0
+            owner_pid = int(owner.get("pid") or 0) if str(owner.get("pid") or "").lstrip("-").isdigit() else 0
+            if age >= stale_seconds and not _pid_is_running(owner_pid):
+                try:
+                    lock_path.unlink()
+                    continue
+                except OSError:
+                    pass
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Не удалось получить блокировку состояния: {lock_path}")
+            time.sleep(0.025)
+    try:
+        yield
+    finally:
+        try:
+            if fd is not None:
+                os.close(fd)
+        finally:
+            owner = _read_owner(lock_path)
+            if str(owner.get("token") or "") == token:
+                try:
+                    lock_path.unlink()
+                except OSError:
+                    pass

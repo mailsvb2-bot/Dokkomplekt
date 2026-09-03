@@ -165,6 +165,19 @@ def diary_hourly_schedule_from_choice(choice: str):
     return DiaryScheduleSpec("hourly", (), values, 1.0, "popup_custom_time_style")
 
 
+def _explicit_duration_minutes(text: str) -> int | None:
+    """Parse one human interval such as ``2 часа 30 минут`` into total minutes."""
+    normalized = str(text or "").strip().lower().replace("ё", "е")
+    hour_matches = re.findall(r"(\d+)\s*(?:ч(?:ас(?:а|ов)?)?|hours?|hrs?)\b", normalized)
+    minute_matches = re.findall(r"(\d+)\s*(?:м(?:ин(?:ут(?:а|ы)?)?)?|minutes?|mins?)\b", normalized)
+    if not hour_matches and not minute_matches:
+        return None
+    hours = sum(int(value) for value in hour_matches)
+    minutes = sum(int(value) for value in minute_matches)
+    total = hours * 60 + minutes
+    return total if total > 0 else None
+
+
 def diary_minute_schedule_from_choice(choice: str):
     """Parse the second diary popup: intraday rhythm.
 
@@ -197,6 +210,9 @@ def diary_minute_schedule_from_choice(choice: str):
         return timed_minute_diary_schedule(15)
     if text in {"5 минут", "каждые 5 минут"} or compact in {"5мин", "5минут", "каждые5минут"}:
         return timed_minute_diary_schedule(5)
+    explicit_duration = _explicit_duration_minutes(text)
+    if explicit_duration is not None:
+        return timed_minute_diary_schedule(explicit_duration)
     values = _parse_positive_sequence(text, allow_zero=False, value_name="минуты")
     if not values:
         raise ValueError("Укажите ритм: 4 часа, 1 час, 30 минут, 15 минут, 5 минут или своё число минут.")
@@ -206,7 +222,7 @@ def diary_minute_schedule_from_choice(choice: str):
         (),
         1.0,
         "popup_custom_minute_rhythm",
-        tuple(v * 60 for v in values) if "час" in text and "мин" not in text else tuple(values),
+        tuple(values),
     )
 
 

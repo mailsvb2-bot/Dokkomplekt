@@ -188,6 +188,10 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
                     mark_pack_as_department_profile(pack, department_name=department_var.get().strip())
                 else:
                     mark_pack_as_doctor_profile(pack, doctor_name=name_var.get().strip())
+                from universal_profiles import count_managed_profiles
+                self._enforce_product_configuration_limits(
+                    profile_count=count_managed_profiles(_active_profile_dir()) + 1
+                )
                 target = available_profile_path(_active_profile_dir() / safe_profile_filename(pack.name))
                 pack.pack_id = safe_profile_pack_id(pack.name, target)
                 save_document_pack(pack, target, backup_reason="new_profile")
@@ -212,14 +216,32 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
         if not path:
             return
         try:
-            from universal_profiles import load_document_pack, save_document_pack
-            from universal_template_engine import validate_document_pack
-            opened_pack = load_document_pack(path)
-            validation = validate_document_pack(opened_pack, base_dir=Path(path).expanduser().parent)
+            from universal_profiles import count_managed_profiles, load_document_pack, save_document_pack
+            from universal_template_engine import import_document_pack_zip, validate_document_pack
+
+            source = Path(path).expanduser().resolve()
+            managed_dir = _active_profile_dir().resolve()
+            try:
+                source.relative_to(managed_dir)
+                is_managed = True
+            except ValueError:
+                is_managed = False
+            if is_managed:
+                opened_pack = load_document_pack(source)
+                working_path = source
+            else:
+                preview = load_document_pack(source)
+                self._enforce_product_configuration_limits(
+                    template_count=len(preview.documents),
+                    profile_count=count_managed_profiles(managed_dir) + 1,
+                )
+                opened_pack, working_path = import_document_pack_zip(source, managed_dir)
+
+            validation = validate_document_pack(opened_pack, base_dir=working_path.parent)
             if getattr(opened_pack, "documents", ()) and validation.ok:
                 _mark_buttons_created(opened_pack)
-                save_document_pack(opened_pack, path, backup_reason="open_profile_mark")
-            self._set_universal_profile_path(path)
+                save_document_pack(opened_pack, working_path, backup_reason="open_profile_mark")
+            self._set_universal_profile_path(working_path)
             _refresh_main_tiles("open_profile")
             if validation.ok:
                 refresh("Профиль врача открыт. Кнопки блока 03 обновлены.")
@@ -257,18 +279,22 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
             source_path = Path(source).expanduser()
             profile_dir = _active_profile_dir()
             profile_dir.mkdir(parents=True, exist_ok=True)
-            from universal_template_engine import import_document_pack_zip
-            pack, _ = import_document_pack_zip(source_path, profile_dir)
-            from universal_profiles import save_document_pack
-            from universal_template_engine import validate_document_pack
+            from universal_profiles import count_managed_profiles, save_document_pack
+            from universal_template_engine import import_document_pack_zip, inspect_document_pack_source, validate_document_pack
+
+            preview = inspect_document_pack_source(source_path)
+            self._enforce_product_configuration_limits(
+                template_count=len(preview.documents),
+                profile_count=count_managed_profiles(profile_dir) + 1,
+            )
+            pack, imported_path = import_document_pack_zip(source_path, profile_dir)
             validation = validate_document_pack(pack, base_dir=profile_dir)
             if not validation.ok:
                 raise ValueError("Импортированный профиль не прошёл проверку:\n" + validation.human_report())
-            if getattr(pack, "documents", ()): 
+            if getattr(pack, "documents", ()):
                 _mark_buttons_created(pack)
-            target = available_profile_path(profile_dir / safe_profile_filename(pack.name or source_path.stem or "imported_profile"))
-            save_document_pack(pack, target, backup_reason="import_profile")
-            self._set_universal_profile_path(target)
+                save_document_pack(pack, imported_path, backup_reason="import_profile_mark")
+            self._set_universal_profile_path(imported_path)
             _refresh_main_tiles("import_profile")
             refresh("Профиль импортирован. Кнопки блока 03 обновлены.")
         except Exception as exc:
@@ -339,6 +365,31 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
                 status_var.set("Кнопки не созданы. Доктор отменил таблицу проверки названий.")
                 return
             current_pack = self._load_or_create_universal_pack()
+            valid_review_count = 0
+            invalid_for_replace: list[str] = []
+            from universal_template_engine import validate_template
+            from universal_diary_templates import looks_like_diary_template
+            for item in review.rows:
+                requested_label = str(item.button_label or "Документ").strip() or Path(item.path).stem
+                role_id = "" if str(item.role_id or "").strip().lower() == "unknown" else str(item.role_id or "").strip().lower()
+                is_diary = looks_like_diary_template(item.path) or role_id == "daily_diary"
+                pre_validation = validate_template(
+                    item.path, registry=current_pack.registry(),
+                    role_id="daily_diary" if is_diary else role_id,
+                    category="diaries" if is_diary else "medical",
+                    button_label=requested_label,
+                )
+                if is_diary or pre_validation.ok:
+                    valid_review_count += 1
+                elif review.replace_existing:
+                    invalid_for_replace.append(requested_label)
+            if invalid_for_replace:
+                raise ValueError(
+                    "Замена кнопок отменена целиком: не прошли проверку шаблоны: "
+                    + ", ".join(invalid_for_replace[:10])
+                )
+            kept_count = sum(1 for doc in current_pack.documents if is_builtin_document_id(doc.id)) if review.replace_existing else len(current_pack.documents)
+            self._enforce_product_configuration_limits(template_count=kept_count + valid_review_count)
             if review.replace_existing:
                 current_pack.documents = tuple(doc for doc in current_pack.documents if is_builtin_document_id(doc.id))
             existing_labels = {str(doc.button_label or "").casefold() for doc in current_pack.documents}
@@ -516,6 +567,7 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
                     if not label:
                         raise ValueError("Введите понятное название кнопки.")
                     current_pack = self._load_or_create_universal_pack()
+                    self._enforce_product_configuration_limits(template_count=len(current_pack.documents) + 1)
                     original_documents = tuple(current_pack.documents)
                     existing_labels = {str(doc.button_label or "").casefold() for doc in current_pack.documents}
                     label = unique_button_label(label, existing_labels)

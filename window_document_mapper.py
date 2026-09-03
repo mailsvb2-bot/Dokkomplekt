@@ -249,8 +249,6 @@ def open_universal_document_mapper(app) -> None:
             current_pack = self._load_or_create_universal_pack()
             rule = learn_rule_from_selection(scan.blocks, field_id=field_choice, selected_text=selected, registry=current_pack.registry())
             current_pack.add_rule(rule)
-            from universal_profiles import save_document_pack
-            save_document_pack(current_pack, self._universal_profile_path(), backup_reason="document_mapper_save")
             status_var.set(f"Запомнено правило: {rule.field_id} / {rule.strategy}. Профиль сохранён: {self._universal_profile_path()}")
             self._set_status("Профиль документов обновлён")
         except Exception as exc:
@@ -351,44 +349,65 @@ def open_universal_document_mapper(app) -> None:
         dialog.wait_window(popup)
         return tuple(result["hours"])
 
-    def _attach_regular_template_button(template_path: str, *, explicit_role_id: str = "", explicit_label: str = ""):
+    def _attach_regular_template_button(
+        template_path: str, *, explicit_role_id: str = "", explicit_label: str = "", backup_reason: str = "document_mapper_save"
+    ):
         current_pack = self._load_or_create_universal_pack()
-        from personal_document_buttons import suggest_button_label_for_template
-        suggestion = suggest_button_label_for_template(
-            template_path,
-            preferred_language=_button_language_preference(),
-            ui_language=self.ui_language_var.get() if hasattr(self, "ui_language_var") else "ru",
-            explicit_specialty=current_pack.specialty,
-            explicit_role_id=explicit_role_id,
-            fallback_label=explicit_label or None,
-        )
-        label = (explicit_label.strip() or suggestion.label or Path(template_path).stem).strip()
-        existing_labels = {str(doc.button_label or "").casefold() for doc in current_pack.documents}
-        label = unique_button_label(label, existing_labels)
-        document_id = suggestion.document_id
-        from universal_diary_templates import looks_like_diary_template
-        is_diary_template = looks_like_diary_template(template_path)
-        from universal_template_engine import attach_template_to_pack, validate_template
-        spec, copied_to = attach_template_to_pack(
-            current_pack,
-            template_path,
-            self._universal_profile_path().parent,
-            button_label=label,
-            document_id=document_id,
-            category="diaries" if is_diary_template else "medical",
-            registry=current_pack.registry(),
-            role_id="daily_diary" if is_diary_template else (suggestion.role_id if suggestion.role_id != "unknown" else explicit_role_id),
-            button_language=suggestion.language_id,
-            source_language=suggestion.source_language,
-            button_label_source="diary_template" if is_diary_template else suggestion.source,
-        )
-        validation = validate_template(copied_to, required_fields=spec.required_fields, registry=current_pack.registry())
-        if is_diary_template:
-            from dataclasses import replace
-            schedule = prompt_diary_schedule_for_template(copied_to)
-            spec = replace(spec, category="diaries", role_id="daily_diary", diary_schedule=schedule.to_dict())
-            current_pack.add_document(spec)
-        return current_pack, spec, copied_to, validation, suggestion
+        self._enforce_product_configuration_limits(template_count=len(current_pack.documents) + 1)
+        original_documents = tuple(current_pack.documents)
+        copied_to = None
+        try:
+            from personal_document_buttons import suggest_button_label_for_template
+            suggestion = suggest_button_label_for_template(
+                template_path,
+                preferred_language=_button_language_preference(),
+                ui_language=self.ui_language_var.get() if hasattr(self, "ui_language_var") else "ru",
+                explicit_specialty=current_pack.specialty,
+                explicit_role_id=explicit_role_id,
+                fallback_label=explicit_label or None,
+            )
+            label = (explicit_label.strip() or suggestion.label or Path(template_path).stem).strip()
+            existing_labels = {str(doc.button_label or "").casefold() for doc in current_pack.documents}
+            label = unique_button_label(label, existing_labels)
+            document_id = suggestion.document_id
+            from universal_diary_templates import looks_like_diary_template
+            is_diary_template = looks_like_diary_template(template_path)
+            from universal_template_engine import attach_template_to_pack, validate_template
+            spec, copied_to = attach_template_to_pack(
+                current_pack,
+                template_path,
+                self._universal_profile_path().parent,
+                button_label=label,
+                document_id=document_id,
+                category="diaries" if is_diary_template else "medical",
+                registry=current_pack.registry(),
+                role_id="daily_diary" if is_diary_template else (suggestion.role_id if suggestion.role_id != "unknown" else explicit_role_id),
+                button_language=suggestion.language_id,
+                source_language=suggestion.source_language,
+                button_label_source="diary_template" if is_diary_template else suggestion.source,
+            )
+            validation = validate_template(
+                copied_to, required_fields=spec.required_fields, registry=current_pack.registry(),
+                role_id=spec.role_id, category=spec.category, button_label=spec.button_label,
+            )
+            if not is_diary_template and not validation.ok:
+                raise ValueError("Шаблон не прошёл проверку: " + "; ".join(validation.errors or ("нет заполняемых полей",)))
+            if is_diary_template:
+                from dataclasses import replace
+                schedule = prompt_diary_schedule_for_template(copied_to)
+                spec = replace(spec, category="diaries", role_id="daily_diary", diary_schedule=schedule.to_dict())
+                current_pack.add_document(spec)
+            from universal_profiles import save_document_pack
+            save_document_pack(current_pack, self._universal_profile_path(), backup_reason=backup_reason)
+            return current_pack, spec, copied_to, validation, suggestion
+        except Exception:
+            current_pack.documents = original_documents
+            if copied_to is not None:
+                try:
+                    Path(copied_to).unlink()
+                except OSError as cleanup_exc:
+                    record_soft_exception("window_document_mapper.rollback_template", cleanup_exc, detail=str(copied_to))
+            raise
 
     def add_template_to_profile() -> None:
         template_path = filedialog.askopenfilename(
@@ -493,13 +512,11 @@ def open_universal_document_mapper(app) -> None:
                 role_id = role_id_from_choice(role_var.get())
                 label = label_var.get().strip()
                 try:
-                    pack, spec, copied_to, validation, _suggestion = _attach_regular_template_button(template_path, explicit_role_id=role_id, explicit_label=label)
+                    pack, spec, copied_to, validation, _suggestion = _attach_regular_template_button(template_path, explicit_role_id=role_id, explicit_label=label, backup_reason="document_mapper_button")
                     if not validation.ok and spec.category != "diaries":
                         raise ValueError("Шаблон не прошёл проверку. Проверьте placeholders вида {{patient.fio}}.")
                     from regulatory_template_advisor import advise_template
-                    from universal_profiles import save_document_pack
                     advice = advise_template(copied_to, registry=pack.registry(), explicit_specialty=pack.specialty)
-                    save_document_pack(pack, self._universal_profile_path(), backup_reason="document_mapper_button")
                     if advice.has_suggestions:
                         show_soft_regulatory_advice(advice, source_label=spec.button_label)
                     self._refresh_custom_profile_tiles()
@@ -557,15 +574,25 @@ def open_universal_document_mapper(app) -> None:
         if not source:
             return
         try:
-            from universal_template_engine import import_document_pack_zip
-            imported_pack, _imported_path = import_document_pack_zip(source, self._universal_profile_path().parent)
-            from universal_profiles import save_document_pack
-            save_document_pack(imported_pack, self._universal_profile_path(), backup_reason="document_mapper_import")
+            profile_dir = self._universal_profile_path().parent
+            from universal_profiles import count_managed_profiles, save_document_pack
+            from universal_template_engine import import_document_pack_zip, inspect_document_pack_source
+            preview = inspect_document_pack_source(source)
+            self._enforce_product_configuration_limits(
+                template_count=len(preview.documents),
+                profile_count=count_managed_profiles(profile_dir) + 1,
+            )
+            imported_pack, imported_path = import_document_pack_zip(source, profile_dir)
+            if imported_pack.documents:
+                from layout_checklist import mark_doctor_buttons_setup_completed
+                mark_doctor_buttons_setup_completed(imported_pack)
+                save_document_pack(imported_pack, imported_path, backup_reason="document_mapper_import_mark")
+            self._set_universal_profile_path(imported_path)
             try:
                 self._refresh_custom_profile_tiles()
             except Exception as exc:
                 record_soft_exception("window_mixin:898", exc)
-            status_var.set(f"Профиль импортирован: {imported_pack.name}. Рабочий путь: {self._universal_profile_path()}")
+            status_var.set(f"Профиль импортирован: {imported_pack.name}. Рабочий путь: {imported_path}")
             self._set_status("Профиль документов импортирован")
         except Exception as exc:
             messagebox.showerror("Импорт профиля", str(exc), parent=dialog)

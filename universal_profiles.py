@@ -2,15 +2,27 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from contextlib import suppress
+from dataclasses import asdict, dataclass, field, replace
+import hashlib
 import json
-from pathlib import Path
+import os
+import shutil
+import tempfile
+import zipfile
+from pathlib import Path, PurePosixPath
 from collections.abc import Mapping as MappingABC
 from typing import Iterable, Mapping, Sequence
 
+from medical_paths import atomic_write_text, prune_old_files
 from universal_fields import FieldDefinition, FieldRegistry, default_field_registry, normalize_field_id, normalize_field_id_for_context
 
 PACK_SCHEMA_VERSION = 1
+MAX_MEDPACK_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+
+PACK_MANIFEST_NAME = "pack.json"
+TEMPLATE_DIR_NAME = "templates"
+ALLOWED_PACK_SUFFIXES = {".json", ".medpack", ".zip"}
 DEFAULT_PACK_ID = "doctor.empty_custom"
 DOCTOR_BUTTON_REVIEW_CONTRACT_VERSION = "doctor_review_v3_deep_audit_20260624"
 DEFAULT_WORKFLOW_PRINCIPLES = {
@@ -388,7 +400,8 @@ def _backup_existing_document_pack(candidate: Path, *, reason: str = "save") -> 
     while backup.exists():
         backup = backup_dir / f"{candidate.stem}_{safe_reason}_{stamp}_{counter}{candidate.suffix}"
         counter += 1
-    backup.write_text(candidate.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
+    shutil.copy2(candidate, backup)
+    prune_old_files(backup_dir, pattern=f"{candidate.stem}_*{candidate.suffix}", keep=32)
     return backup
 
 
@@ -396,11 +409,29 @@ def save_document_pack(pack: DocumentPack, path: str | Path, *, backup_reason: s
     candidate = Path(path).expanduser()
     candidate.parent.mkdir(parents=True, exist_ok=True)
     _backup_existing_document_pack(candidate, reason=backup_reason)
-    tmp = candidate.with_name(candidate.name + ".tmp")
-    tmp.write_text(json.dumps(pack.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(candidate)
+    atomic_write_text(candidate, json.dumps(pack.to_dict(), ensure_ascii=False, indent=2) + "\n")
     return candidate
 
+
+
+def count_managed_profiles(directory: str | Path) -> int:
+    """Count real user profiles; ignore the untouched bootstrap constructor."""
+    root = Path(directory).expanduser()
+    if not root.exists() or not root.is_dir():
+        return 0
+    candidates = {item for item in root.glob("*.json") if item.is_file()}
+    count = 0
+    for candidate in candidates:
+        try:
+            pack = load_document_pack(candidate)
+            if candidate.name == "default_custom.medpack.json" and not pack.documents:
+                continue
+        except Exception:
+            # Corrupt manifests still consume a profile slot until the doctor
+            # removes/repairs them; fail closed instead of creating unlimited files.
+            pass
+        count += 1
+    return count
 
 def mark_pack_as_doctor_profile(pack: DocumentPack, *, doctor_name: str = "") -> DocumentPack:
     """Mark a pack as an individual doctor profile without changing documents."""
@@ -449,3 +480,256 @@ def ensure_default_pack(path: str | Path) -> DocumentPack:
     pack = default_document_pack()
     save_document_pack(pack, candidate)
     return pack
+
+
+def resolve_pack_template_path(template_value: str, base_dir: str | Path | None) -> Path:
+    template = Path(template_value).expanduser()
+    if template.is_absolute():
+        return template
+    if base_dir:
+        base = Path(base_dir).expanduser()
+        direct = base / template
+        if direct.exists():
+            return direct
+        in_templates = base / TEMPLATE_DIR_NAME / template.name
+        if in_templates.exists():
+            return in_templates
+        return direct
+    return template
+
+
+def available_template_copy_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    for index in range(2, 1000):
+        candidate = path.with_name(f"{path.stem} ({index}){path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"Не удалось сохранить копию шаблона: {path}")
+
+
+def _available_profile_manifest_path(path: Path) -> Path:
+    candidate = Path(path).expanduser()
+    if not candidate.exists():
+        return candidate
+    stem = candidate.name[:-len(".medpack.json")] if candidate.name.endswith(".medpack.json") else candidate.stem
+    suffix = ".medpack.json" if candidate.name.endswith(".medpack.json") else candidate.suffix
+    for index in range(2, 1000):
+        next_candidate = candidate.with_name(f"{stem} ({index}){suffix}")
+        if not next_candidate.exists():
+            return next_candidate
+    raise FileExistsError(f"Не удалось сохранить импортированный профиль: {candidate}")
+
+
+def _assert_safe_zip_name(name: str) -> None:
+    path = PurePosixPath(name)
+    normalized = str(name or "")
+    first_part = path.parts[0] if path.parts else ""
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or normalized.startswith(("/", "\\"))
+        or "\\" in normalized
+        or "\x00" in normalized
+        or ":" in first_part
+    ):
+        raise ValueError(f"Небезопасный путь внутри medpack: {name}")
+
+
+def _validate_word_package(source: Path, label: str) -> None:
+    try:
+        with zipfile.ZipFile(source, "r") as probe:
+            names = set(probe.namelist())
+            required = {"[Content_Types].xml", "_rels/.rels", "word/document.xml"}
+            absent = sorted(required - names)
+            bad_member = probe.testzip()
+            if absent:
+                raise ValueError("нет обязательных частей Word: " + ", ".join(absent))
+            if bad_member:
+                raise ValueError(f"ошибка CRC в {bad_member}")
+    except Exception as exc:
+        raise ValueError(f"{label}: шаблон повреждён ({exc})") from exc
+
+
+def _copy_json_profile_templates(pack: DocumentPack, source_base: Path, target_base: Path, created_out: list[Path]) -> DocumentPack:
+    updated: list[DocumentTemplateSpec] = []
+    templates_dir = target_base / TEMPLATE_DIR_NAME
+    templates_dir.mkdir(parents=True, exist_ok=True)
+    created: list[Path] = []
+    try:
+        for document in pack.documents:
+            source = resolve_pack_template_path(document.template, source_base)
+            if not source.exists() or not source.is_file() or source.suffix.lower() not in {".docx", ".docm"}:
+                raise ValueError(f"Профиль повреждён: не найден шаблон для «{document.button_label or document.id}»: {document.template}")
+            _validate_word_package(source, document.button_label or document.id)
+            target = available_template_copy_path(templates_dir / source.name)
+            if source.resolve() != target.resolve():
+                shutil.copy2(source, target)
+                created.append(target); created_out.append(target)
+            updated.append(replace(document, template=(PurePosixPath(TEMPLATE_DIR_NAME) / target.name).as_posix()))
+        pack.documents = tuple(updated)
+        return pack
+    except Exception:
+        for item in reversed(created):
+            with suppress(OSError):
+                item.unlink()
+        raise
+
+
+def _copy_zip_profile_templates(pack: DocumentPack, zf: zipfile.ZipFile, names: set[str], target_base: Path, created_out: list[Path]) -> DocumentPack:
+    updated: list[DocumentTemplateSpec] = []
+    templates_dir = target_base / TEMPLATE_DIR_NAME
+    templates_dir.mkdir(parents=True, exist_ok=True)
+    created: list[Path] = []
+    try:
+        for document in pack.documents:
+            template_value = str(document.template or "").replace("\\", "/").strip()
+            candidates = [template_value]
+            if template_value:
+                candidates.append((PurePosixPath(TEMPLATE_DIR_NAME) / PurePosixPath(template_value).name).as_posix())
+            archive_name = next((item for item in candidates if item in names and PurePosixPath(item).suffix.lower() in {".docx", ".docm"}), "")
+            if not archive_name:
+                raise ValueError(f"medpack повреждён: нет шаблона для «{document.button_label or document.id}»: {document.template}")
+            target = available_template_copy_path(templates_dir / PurePosixPath(archive_name).name)
+            with zf.open(archive_name, "r") as source_file, target.open("wb") as target_file:
+                shutil.copyfileobj(source_file, target_file)
+            created.append(target); created_out.append(target)
+            _validate_word_package(target, document.button_label or document.id)
+            updated.append(replace(document, template=(PurePosixPath(TEMPLATE_DIR_NAME) / target.name).as_posix()))
+        pack.documents = tuple(updated)
+        return pack
+    except Exception:
+        for item in reversed(created):
+            with suppress(OSError):
+                item.unlink()
+        raise
+
+
+def export_document_pack_zip(pack: DocumentPack, target_zip: str | Path, *, template_base_dir: str | Path | None = None) -> Path:
+    target = Path(target_zip).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    base = Path(template_base_dir).expanduser() if template_base_dir else None
+    planned: list[tuple[DocumentTemplateSpec, Path, str]] = []
+    missing: list[str] = []
+    for document in pack.documents:
+        source = resolve_pack_template_path(document.template, base)
+        if not source.exists() or not source.is_file() or source.suffix.lower() not in {".docx", ".docm"}:
+            missing.append(f"{document.button_label or document.id}: {document.template or 'template не указан'}")
+            continue
+        try:
+            _validate_word_package(source, document.button_label or document.id)
+        except ValueError as exc:
+            missing.append(str(exc)); continue
+        planned.append((document, source, (PurePosixPath(TEMPLATE_DIR_NAME) / source.name).as_posix()))
+    if missing:
+        raise ValueError("Профиль нельзя экспортировать: не все Word-шаблоны доступны. " + "; ".join(missing[:10]))
+
+    used: dict[str, tuple[str, str]] = {}
+    collision_safe: list[tuple[DocumentTemplateSpec, Path, str]] = []
+    for document, source, base_arcname in planned:
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        identity = (str(source.resolve()), digest)
+        arcname = base_arcname
+        if arcname in used and used[arcname] != identity:
+            stem, suffix = source.stem, source.suffix
+            arcname = (PurePosixPath(TEMPLATE_DIR_NAME) / f"{stem}_{digest[:12]}{suffix}").as_posix()
+            index = 2
+            while arcname in used and used[arcname] != identity:
+                arcname = (PurePosixPath(TEMPLATE_DIR_NAME) / f"{stem}_{digest[:12]}_{index}{suffix}").as_posix(); index += 1
+        used[arcname] = identity
+        collision_safe.append((document, source, arcname))
+
+    manifest = pack.to_dict()
+    portable_documents: list[dict] = []
+    fd, raw_temp = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent)); os.close(fd)
+    temp_target = Path(raw_temp)
+    try:
+        with zipfile.ZipFile(temp_target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+            written: set[str] = set()
+            for document, source, arcname in collision_safe:
+                doc_data = document.to_dict()
+                if arcname not in written:
+                    zf.write(source, arcname); written.add(arcname)
+                doc_data["template"] = arcname; portable_documents.append(doc_data)
+            manifest["documents"] = portable_documents
+            zf.writestr(PACK_MANIFEST_NAME, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+        os.replace(temp_target, target)
+        return target
+    except Exception:
+        with suppress(OSError):
+            temp_target.unlink()
+        raise
+
+
+def inspect_document_pack_source(source_path: str | Path) -> DocumentPack:
+    source = Path(source_path).expanduser()
+    if source.suffix.lower() not in ALLOWED_PACK_SUFFIXES:
+        raise ValueError(f"Неподдерживаемый формат профиля: {source.suffix}")
+    if source.suffix.lower() == ".json" or source.name.endswith(".medpack.json"):
+        return load_document_pack(source)
+    with zipfile.ZipFile(source, "r") as zf:
+        infos = zf.infolist()
+        for info in infos:
+            _assert_safe_zip_name(str(getattr(info, "orig_filename", info.filename))); _assert_safe_zip_name(info.filename)
+        names = [info.filename for info in infos]
+        if PACK_MANIFEST_NAME not in names:
+            raise ValueError("В medpack-архиве нет pack.json.")
+        if len(infos) > 250:
+            raise ValueError("Слишком много файлов внутри medpack-архива.")
+        if sum(max(0, info.file_size) for info in infos) > MAX_MEDPACK_UNCOMPRESSED_BYTES:
+            raise ValueError("medpack-архив слишком большой для безопасного импорта.")
+        data = json.loads(zf.read(PACK_MANIFEST_NAME).decode("utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("pack.json внутри medpack должен содержать JSON-объект.")
+        pack = DocumentPack.from_dict(data)
+        if pack.schema_version != PACK_SCHEMA_VERSION:
+            raise ValueError(f"Неподдерживаемая версия профиля: {pack.schema_version}")
+        return pack
+
+
+def import_document_pack_zip(source_zip: str | Path, target_dir: str | Path, *, validate_pack) -> tuple[DocumentPack, Path]:
+    source = Path(source_zip).expanduser()
+    if source.suffix.lower() not in ALLOWED_PACK_SUFFIXES:
+        raise ValueError(f"Неподдерживаемый формат профиля: {source.suffix}")
+    target = Path(target_dir).expanduser(); target.mkdir(parents=True, exist_ok=True)
+    created_templates: list[Path] = []; pack_path: Path | None = None
+    try:
+        if source.suffix.lower() == ".json" or source.name.endswith(".medpack.json"):
+            pack = load_document_pack(source)
+            pack = _copy_json_profile_templates(pack, source.parent, target, created_templates)
+            pack_path = _available_profile_manifest_path(target / source.name)
+        else:
+            with zipfile.ZipFile(source, "r") as zf:
+                infos = zf.infolist()
+                for info in infos:
+                    _assert_safe_zip_name(str(getattr(info, "orig_filename", info.filename))); _assert_safe_zip_name(info.filename)
+                names = [info.filename for info in infos]
+                if PACK_MANIFEST_NAME not in names:
+                    raise ValueError("В medpack-архиве нет pack.json.")
+                if len(infos) > 250:
+                    raise ValueError("Слишком много файлов внутри medpack-архива.")
+                if sum(max(0, info.file_size) for info in infos) > MAX_MEDPACK_UNCOMPRESSED_BYTES:
+                    raise ValueError("medpack-архив слишком большой для безопасного импорта.")
+                data = json.loads(zf.read(PACK_MANIFEST_NAME).decode("utf-8"))
+                if not isinstance(data, dict):
+                    raise ValueError("pack.json внутри medpack должен содержать JSON-объект.")
+                pack = DocumentPack.from_dict(data)
+                pack = _copy_zip_profile_templates(pack, zf, set(names), target, created_templates)
+            pack_path = _available_profile_manifest_path(target / PACK_MANIFEST_NAME)
+        validation = validate_pack(pack, base_dir=target)
+        if not validation.ok:
+            raise ValueError("Импортированный профиль повреждён:\n" + validation.human_report())
+        save_document_pack(pack, pack_path)
+        return pack, pack_path
+    except Exception:
+        if pack_path is not None:
+            with suppress(OSError):
+                pack_path.unlink()
+        for item in reversed(created_templates):
+            with suppress(OSError):
+                item.unlink()
+        templates_dir = target / TEMPLATE_DIR_NAME
+        if templates_dir.exists() and not any(templates_dir.iterdir()):
+            with suppress(OSError):
+                templates_dir.rmdir()
+        raise

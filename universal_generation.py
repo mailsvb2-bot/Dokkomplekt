@@ -16,7 +16,7 @@ future fully dynamic document checklist.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Sequence
 
@@ -260,8 +260,9 @@ def render_documents_from_pack(
     output_root = Path(output_dir).expanduser()
     if output_root.exists() and not output_root.is_dir():
         raise ValueError(f"Папка результата указывает на файл, а не на папку: {output_root}")
-    output_root.mkdir(parents=True, exist_ok=True)
     selected = {str(item).strip() for item in document_ids if str(item).strip()}
+    if not selected:
+        return PackGenerationResult((), (), ("Не выбраны документы для создания.",), ())
     known_ids = {document.id for document in pack.documents}
     created: list[str] = []
     renders: list[RenderResult] = []
@@ -293,6 +294,9 @@ def render_documents_from_pack(
     # subset when one selected id/template/required field is invalid.
     if strict and skipped:
         return PackGenerationResult((), (), tuple(skipped), ())
+    if not plans:
+        return PackGenerationResult((), (), tuple(skipped), ())
+    output_root.mkdir(parents=True, exist_ok=True)
 
     def render_one(plan: tuple[DocumentTemplateSpec, Path, Path]) -> RenderResult:
         document, template_path, docx_path = plan
@@ -324,16 +328,20 @@ def render_documents_from_pack(
         raise
 
     pdf_failure = ""
+    rendered_docx_paths: list[Path] = []
     for plan, result in render_pairs:
         document, _template_path, _docx_path = plan
-        renders.append(result)
         final_path = Path(result.output_path)
+        rendered_docx_paths.append(final_path)
         if requested_format == "pdf":
             try:
                 final_path = export_docx_to_pdf(final_path)
+                result = replace(result, output_path=str(final_path))
             except Exception as exc:
                 pdf_failure = f"{document.button_label}: не удалось создать PDF: {exc}"
+                renders.append(result)
                 break
+        renders.append(result)
         created.append(str(final_path))
         if result.missing_fields:
             warnings.append(f"{document.button_label}: placeholders без значения: {', '.join(result.missing_fields)}")
@@ -345,6 +353,18 @@ def render_documents_from_pack(
                 except OSError as cleanup_exc:
                     record_soft_exception("universal_generation.rollback_pdf", cleanup_exc, detail=str(candidate))
         return PackGenerationResult((), tuple(renders), tuple([*skipped, pdf_failure]), tuple(dict.fromkeys(warnings)))
+    if requested_format == "pdf":
+        for docx_path in rendered_docx_paths:
+            try:
+                docx_path.unlink()
+            except OSError as cleanup_exc:
+                # A PDF request must not silently publish a mixed PDF+DOCX set.
+                for raw in created:
+                    try:
+                        Path(raw).unlink()
+                    except OSError:
+                        pass
+                raise RuntimeError(f"PDF создан, но временный DOCX не удалось удалить: {docx_path}") from cleanup_exc
     return PackGenerationResult(tuple(created), tuple(renders), tuple(skipped), tuple(dict.fromkeys(warnings)))
 
 
