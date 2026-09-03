@@ -99,7 +99,7 @@ def _store_completion_semantic_dates(app, inputs, values, *, popup, entries) -> 
         signature = _completion_input_signature(item)
         is_discharge = field_id in {"discharge.date", "discharge_date"} or ("дата" in signature and "выписк" in signature)
         if is_discharge and hasattr(app, "_store_discharge_date_value"):
-            if app._store_discharge_date_value(normalized, parent=popup, source_label="popup дополнения custom-документа"):
+            if app._store_discharge_date_value(normalized, parent=popup, source_label="окно дополнительных полей документа"):
                 continue
             messagebox.showwarning(
                 "Уточнить дату",
@@ -189,7 +189,7 @@ def prompt_regulatory_completion_values(app, inputs, *, parent) -> dict[str, str
         card = tk.Frame(form, bg=FIELD, padx=9, pady=7, highlightbackground=FIELD_BORDER, highlightthickness=1)
         card.grid(row=row, column=0, sticky="ew", pady=(0, 8))
         card.grid_columnconfigure(0, weight=1)
-        label_text = f"{item.label}  {item.placeholder}"
+        label_text = str(item.label)
         tk.Label(card, text=label_text, bg=FIELD, fg=ACCENT, font=self._font(9, "bold"), anchor="w").grid(row=0, column=0, sticky="ew")
         if item.reason:
             tk.Label(card, text=item.reason, bg=FIELD, fg=MUTED, font=self._font(8), anchor="w", wraplength=self._px(660, 460), justify="left").grid(row=1, column=0, sticky="ew", pady=(2, 5))

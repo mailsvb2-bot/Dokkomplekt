@@ -136,7 +136,7 @@ class PackGenerationResult:
         return not self.skipped_documents and all(result.ok for result in self.render_results)
 
     def human_report(self) -> str:
-        lines = ["Генерация custom-документов", f"Создано файлов: {len(self.created_files)}"]
+        lines = ["Создание документов из ваших шаблонов", f"Создано файлов: {len(self.created_files)}"]
         if self.created_files:
             lines.append("")
             lines.append("Файлы:")
@@ -152,7 +152,7 @@ class PackGenerationResult:
         return "\n".join(lines)
 
     def technical_report(self) -> str:
-        lines = ["Генерация custom-документов — технический обезличенный отчёт", f"Создано файлов: {len(self.created_files)}"]
+        lines = ["Создание документов из ваших шаблонов — технический обезличенный отчёт", f"Создано файлов: {len(self.created_files)}"]
         if self.created_files:
             lines.append("Пакет файлов: " + technical_ref(*self.created_files))
         if self.skipped_documents:
@@ -344,7 +344,7 @@ def render_documents_from_pack(
         renders.append(result)
         created.append(str(final_path))
         if result.missing_fields:
-            warnings.append(f"{document.button_label}: placeholders без значения: {', '.join(result.missing_fields)}")
+            warnings.append(f"{document.button_label}: метки без значения: {', '.join(result.missing_fields)}")
     if pdf_failure:
         for _document, _template_path, planned_path in plans:
             for candidate in (planned_path, planned_path.with_suffix(".pdf")):

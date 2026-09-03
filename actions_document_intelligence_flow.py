@@ -63,7 +63,7 @@ class ActionsDocumentIntelligenceFlowMixin:
             from tkinter import messagebox
             wants_pdf = messagebox.askyesno(
                 "Формат результата",
-                "Создать итоговые custom-документы в PDF?\n\nДа — PDF.\nНет — Word/DOCX.",
+                "Создать выбранные документы из ваших шаблонов в PDF?\n\nДа — PDF.\nНет — Word/DOCX.",
                 parent=getattr(self, "root", None),
             )
             return "pdf" if wants_pdf else "docx"
@@ -99,21 +99,21 @@ class ActionsDocumentIntelligenceFlowMixin:
             created_paths = self._export_custom_documents_to_pdf(created_paths)
         report_path = save_generation_report(result, technical_report_path(out_dir, "custom_profile_generation_report.txt")) if self._diagnostic_reports_enabled() else None
         if result.skipped_documents:
-            self._log("\n⚠ Custom-документы профиля пропущены:\n")
+            self._log("\n⚠ Документы из ваших шаблонов пропущены:\n")
             for item in result.skipped_documents:
                 self._log(f"- {item}\n")
         if result.warnings:
-            self._log("\n⚠ Custom-документы профиля созданы с предупреждениями:\n")
+            self._log("\n⚠ Документы из ваших шаблонов созданы с предупреждениями:\n")
             for warning in result.warnings:
                 self._log(f"- {warning}\n")
         if created_paths:
-            self._log("\n✅ Созданы custom-документы профиля:\n")
+            self._log("\n✅ Созданы документы из ваших шаблонов:\n")
             for path in created_paths:
                 self._log(f"- {path}\n")
         if result.skipped_documents:
-            raise ValueError("Неполный комплект custom-документов запрещён: " + "; ".join(str(item) for item in result.skipped_documents[:5]))
+            raise ValueError("Не удалось создать полный комплект документов из ваших шаблонов: " + "; ".join(str(item) for item in result.skipped_documents[:5]))
         if self._diagnostic_reports_enabled() and report_path is not None:
-            self._log(f"Технический отчёт custom-профиля: {report_path}\n")
+            self._log(f"Технический отчёт по вашим шаблонам: {report_path}\n")
         return created_paths
 
     def _export_custom_documents_to_pdf(self, paths: List[Path]) -> List[Path]:

@@ -125,9 +125,9 @@ def collect_installation_diagnostics(app: object | None = None) -> list[Diagnost
     if os.name == "nt":
         existing_autostart = [path for path in autostart_paths if _safe_exists(path)]
         value = ", ".join(str(path) for path in existing_autostart) if existing_autostart else "не найден"
-        rows.append(DiagnosticRow("Автозагрузка watcher", bool(existing_autostart), value, "переустановите watcher из программы" if not existing_autostart else ""))
+        rows.append(DiagnosticRow("Фоновое наблюдение: автозагрузка", bool(existing_autostart), value, "повторно включите фоновое наблюдение из программы" if not existing_autostart else ""))
     else:
-        rows.append(DiagnosticRow("Автозагрузка watcher", True, "не Windows-среда", "боевой тест нужен на Windows"))
+        rows.append(DiagnosticRow("Фоновое наблюдение: автозагрузка", True, "не Windows-среда", "боевой тест нужен на Windows"))
     lock = data / "desktop_intake_agent.lock"
     log = data / "desktop_intake_agent.log"
     lock_ok = lock.exists()
@@ -141,11 +141,11 @@ def collect_installation_diagnostics(app: object | None = None) -> list[Diagnost
                 lock_value += "; похоже, stale-lock"
     except Exception as exc:
         record_soft_exception("installation_diagnostics.lock_age", exc, detail=str(lock))
-    rows.append(DiagnosticRow("Watcher lock", lock_ok, lock_value, "перезапустите программу, чтобы watcher переустановился" if not lock_ok else ""))
-    rows.append(DiagnosticRow("Watcher log", log.exists(), str(log) if log.exists() else "лог пока не создан", "перенесите тестовый DOCX в папку" if not log.exists() else ""))
+    rows.append(DiagnosticRow("Защита фонового наблюдения", lock_ok, lock_value, "перезапустите программу, чтобы фоновое наблюдение настроилось заново" if not lock_ok else ""))
+    rows.append(DiagnosticRow("Журнал фонового наблюдения", log.exists(), str(log) if log.exists() else "лог пока не создан", "перенесите тестовый DOCX в папку" if not log.exists() else ""))
     tail = _safe_text_tail(log, limit=500)
     if tail:
-        rows.append(DiagnosticRow("Последние строки watcher", True, tail.replace("\n", " | ")))
+        rows.append(DiagnosticRow("Последние сообщения фонового наблюдения", True, tail.replace("\n", " | ")))
     rows.append(DiagnosticRow("Открытие DOCX", _has_word_or_docx_opener(), "системная ассоциация/Word/LibreOffice", "установите Word или LibreOffice" if not _has_word_or_docx_opener() else ""))
     count = _doctor_button_count(app)
     rows.append(DiagnosticRow("Кнопки документов блока 03", count > 0, f"{count} активных", "создайте кнопки документов в центре шаблонов" if count <= 0 else ""))

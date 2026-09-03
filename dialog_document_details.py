@@ -42,7 +42,7 @@ class DialogDocumentDetailsMixin:
         if not self._store_popup_date_value(
             "commission_date",
             commission_date,
-            source_label="popup совместного осмотра",
+            source_label="окно совместного осмотра",
             confirm_conflict=False,
         ):
             return False
@@ -173,7 +173,7 @@ class DialogDocumentDetailsMixin:
                 self.assigned_treatment_var.set(treatment_value)
                 if hasattr(self, "data"):
                     self.data.treatment_plan = treatment_value
-            if need_discharge_date and not self._store_discharge_date_value(discharge_var.get().strip(), parent=win, source_label="popup Акта РВК"):
+            if need_discharge_date and not self._store_discharge_date_value(discharge_var.get().strip(), parent=win, source_label="окно Акта РВК"):
                 messagebox.showwarning(
                     "Некорректная дата выписки",
                     "Дата выписки должна быть в формате ДД.ММ.ГГГГ, ДДММГГГГ, ДДММГГ или коротко ДМГГ, например 20.04.2026, 200426 или 1126.",
@@ -264,10 +264,10 @@ class DialogDocumentDetailsMixin:
         if not work_org:
             messagebox.showwarning("Не заполнено поле", "Укажите место работы.")
             return False
-        if not self._store_popup_date_value("vk_date", vk_date, source_label="popup ВК на МСЭ", confirm_conflict=False):
+        if not self._store_popup_date_value("vk_date", vk_date, source_label="окно ВК на МСЭ", confirm_conflict=False):
             return False
         self.vk_protocol_number_var.set(protocol_number)
-        if not self._store_popup_date_value("vk_protocol_date", vk_protocol_date, source_label="popup ВК на МСЭ", confirm_conflict=False):
+        if not self._store_popup_date_value("vk_protocol_date", vk_protocol_date, source_label="окно ВК на МСЭ", confirm_conflict=False):
             return False
         self._sync_shared_work_details(work_org, position)
         self._remember_committee_dates(committee_date=vk_date, protocol_date=vk_protocol_date)
@@ -315,12 +315,12 @@ class DialogDocumentDetailsMixin:
         if not work_org:
             messagebox.showwarning("Не заполнено поле", "Укажите место работы.")
             return False
-        if not self._store_popup_date_value("sick_leave_vk_date", sick_vk_date, source_label="popup ВК больничного", confirm_conflict=False):
+        if not self._store_popup_date_value("sick_leave_vk_date", sick_vk_date, source_label="окно ВК больничного", confirm_conflict=False):
             return False
         self.sick_leave_vk_protocol_number_var.set(protocol_number)
-        if not self._store_popup_date_value("sick_leave_vk_protocol_date", sick_vk_protocol_date, source_label="popup ВК больничного", confirm_conflict=False):
+        if not self._store_popup_date_value("sick_leave_vk_protocol_date", sick_vk_protocol_date, source_label="окно ВК больничного", confirm_conflict=False):
             return False
-        if not self._store_popup_date_value("sick_leave_vk_commission_date", sick_vk_commission_date, source_label="popup ВК больничного", confirm_conflict=False):
+        if not self._store_popup_date_value("sick_leave_vk_commission_date", sick_vk_commission_date, source_label="окно ВК больничного", confirm_conflict=False):
             return False
         self._sync_shared_work_details(work_org, position)
         self._remember_committee_dates(committee_date=sick_vk_commission_date or sick_vk_date, protocol_date=sick_vk_protocol_date)

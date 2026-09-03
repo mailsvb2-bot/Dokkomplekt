@@ -46,7 +46,7 @@ class SpecialtyDocumentPreset:
             required_fields=tuple(dict.fromkeys(normalize_field_id(item) for item in self.required_fields)),
             optional_fields=tuple(dict.fromkeys(normalize_field_id(item) for item in self.optional_fields)),
             category=self.category,
-            description=self.description or "Запланированный документ из пресета специальности. Добавьте DOCX-шаблон с placeholders, чтобы кнопка стала рабочей.",
+            description=self.description or "Запланированный документ из готового варианта специальности. Добавьте DOCX-шаблон с заполняемыми полями, чтобы кнопка стала рабочей.",
         )
 
 
@@ -256,7 +256,7 @@ def get_specialty_preset(preset_id: str) -> SpecialtyPreset:
         if preset.id == needle or preset.specialty == needle:
             return preset
     available = ", ".join(preset.id for preset in specialty_presets())
-    raise KeyError(f"Неизвестный пресет специальности: {preset_id}. Доступно: {available}")
+    raise KeyError(f"Неизвестный вариант специальности: {preset_id}. Доступно: {available}")
 
 
 def create_pack_from_preset(preset_id: str, *, pack_id: str | None = None, name: str | None = None) -> DocumentPack:
@@ -388,7 +388,7 @@ def build_profile_from_sources_and_templates(
     if ingestion.skipped_templates:
         warnings.append("Часть шаблонов не подключена — см. список пропущенных.")
     if not source_paths:
-        warnings.append("Исходные документы не загружены: профиль создан только по шаблонам/пресету.")
+        warnings.append("Исходные документы не загружены: профиль создан только по шаблонам и готовому варианту специальности.")
     if readiness.ready_count == 0:
         warnings.append("Нет готовых custom-кнопок: нужны значения обязательных полей или DOCX-шаблоны.")
     report = ProfileBuildReport(
@@ -420,11 +420,11 @@ def profile_setup_checklist(pack: DocumentPack, *, base_dir: str | Path | None =
         "",
         "Что нужно проверить перед продажей/передачей врачу:",
         "1. Все нужные кнопки есть в профиле.",
-        "2. Каждый пользовательский DOCX содержит обычные заполняемые поля Word (например «ФИО: ______») или точные placeholders вида {{patient.fio}}.",
+        "2. Каждый пользовательский DOCX содержит обычные заполняемые поля Word (например «ФИО: ______») или точные метки вида {{patient.fio}}.",
         "3. Разметчик находит ФИО, номер истории, дату поступления и диагноз на 3–5 примерах.",
         "4. Поля со средней/низкой уверенностью подтверждаются врачом.",
-        "5. Профиль экспортируется в .medpack.zip и импортируется на чистом компьютере.",
-        "6. Генерация custom DOCX проходит без пропущенных обязательных полей.",
+        "5. Профиль экспортируется в переносимый ZIP-архив и импортируется на чистом компьютере.",
+        "6. Документы из шаблонов создаются без пропущенных обязательных полей.",
     ]
     if validation.errors:
         lines.append("")

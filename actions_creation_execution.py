@@ -90,13 +90,13 @@ class ActionsCreationExecutionMixin:
             matched = [item for item in matched if item]
             if len(matched) > 1:
                 raise ValueError(
-                    f"Для кнопки «{kind}» в профиле найдено несколько документов с одной semantic role: "
+                    f"Для кнопки «{kind}» в профиле найдено несколько документов с одинаковым назначением: "
                     + ", ".join(matched)
-                    + ". Оставьте один role-владелец или выберите нужную пользовательскую кнопку напрямую."
+                    + ". Оставьте один документ с этим назначением или выберите нужную кнопку напрямую."
                 )
             if matched:
                 routed.append(matched[0])
-                self._log(f"\nℹ Кнопка «{kind}» создана через doctor-owned шаблон с явной semantic role.\n")
+                self._log(f"\nℹ Кнопка «{kind}» использует ваш шаблон с явно заданным назначением.\n")
             else:
                 remaining.append(kind)
         return remaining, list(dict.fromkeys([*selected_custom, *routed]))
@@ -122,8 +122,8 @@ class ActionsCreationExecutionMixin:
                     created_custom = self._create_custom_documents_impl(selected_custom)
                 except Exception as exc:
                     record_classified_error("create_custom_documents", exc, category=ErrorCategory.DOCX_RENDER)
-                    errors.append(f"Custom-документы профиля: {exc}")
-                    self._log(f"\n❌ Custom-документы профиля: {exc}\n")
+                    errors.append(f"Документы из ваших шаблонов: {exc}")
+                    self._log(f"\n❌ Документы из ваших шаблонов: {exc}\n")
             if selected_diaries:
                 try:
                     diary_result = self._create_diaries_impl()

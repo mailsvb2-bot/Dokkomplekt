@@ -54,7 +54,7 @@ class ActionsDiaryFlowMixin:
         if not diary_admission_value:
             diary_admission_value = current_semantic_date(self, "admission_date")
         if not diary_admission_value:
-            raise ValueError("Не удалось найти дату поступления в первичном документе или popup/UI.")
+            raise ValueError("Не удалось найти дату поступления в первичном документе или в введённых данных.")
 
         from diary_batch import fill_diary_batch
         from diary_creation_wizard import current_diary_calendar_schedule

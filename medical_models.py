@@ -27,7 +27,7 @@ class PatientData:
     work_org: str = ""
     position: str = ""
     sick_leave: str = ""
-    # Экспертный анамнез: заполняется из UI/popup, чтобы первичный осмотр,
+    # Экспертный анамнез: заполняется из интерфейса или окна ввода, чтобы первичный осмотр,
     # выписной эпикриз и комиссионный осмотр писали одну согласованную формулировку.
     expert_work_status: str = ""  # да / нет
     expert_work_org: str = ""
@@ -328,11 +328,11 @@ def build_patient_case_review(
     needs_treatment = _treatment_required(selected_medical, ())
 
     fields.append(PatientCaseField("fio", "ФИО пациента в документах", fio, _manual_status(fio, False, required=medical_or_diary), "из первичного документа", required=medical_or_diary))
-    fields.append(PatientCaseField("output_fio", "Имя пациента для файлов", output_fio, _manual_status(output_fio, manual_patient_name, required=medical_or_diary), "UI/карточка пациента", required=medical_or_diary))
-    fields.append(PatientCaseField("case_number", "Номер истории болезни", case_number, _manual_status(case_number, manual_case_number, required=needs_case), "первичный документ или popup", required=needs_case))
+    fields.append(PatientCaseField("output_fio", "Имя пациента для файлов", output_fio, _manual_status(output_fio, manual_patient_name, required=medical_or_diary), "карточка пациента", required=medical_or_diary))
+    fields.append(PatientCaseField("case_number", "Номер истории болезни", case_number, _manual_status(case_number, manual_case_number, required=needs_case), "первичный документ или окно ввода", required=needs_case))
     fields.append(PatientCaseField("birth", "Дата/год рождения", birth, _manual_status(birth, False, required=False), "из первичного документа", required=False))
-    fields.append(PatientCaseField("admission_date", "Дата поступления", admission_date, _date_status(admission_date, manual_admission_date, required=medical_or_diary), "заголовок/первичный документ/UI", required=medical_or_diary))
-    fields.append(PatientCaseField("discharge_date", "Дата выписки", discharge_date, _date_status(discharge_date, manual_discharge_date, required=needs_discharge), "UI/popup", required=needs_discharge))
+    fields.append(PatientCaseField("admission_date", "Дата поступления", admission_date, _date_status(admission_date, manual_admission_date, required=medical_or_diary), "заголовок, первичный документ или поле в программе", required=medical_or_diary))
+    fields.append(PatientCaseField("discharge_date", "Дата выписки", discharge_date, _date_status(discharge_date, manual_discharge_date, required=needs_discharge), "интерфейс или окно ввода", required=needs_discharge))
     diagnosis_required = bool(selected_medical or selected_diaries)
     diagnosis_requires_icd10 = bool(selected_medical)
     fields.append(PatientCaseField(
@@ -340,10 +340,10 @@ def build_patient_case_review(
         "Диагноз",
         diagnosis,
         _diagnosis_status(diagnosis, manual_diagnosis, required=diagnosis_required, require_icd10=diagnosis_requires_icd10),
-        "первичный документ/UI",
+        "первичный документ или поле в программе",
         required=diagnosis_required,
     ))
-    fields.append(PatientCaseField("treatment", "Лечение", treatment, _manual_status(treatment, manual_treatment, required=needs_treatment), "первичный документ или popup", required=needs_treatment))
+    fields.append(PatientCaseField("treatment", "Лечение", treatment, _manual_status(treatment, manual_treatment, required=needs_treatment), "первичный документ или окно ввода", required=needs_treatment))
 
     warnings = list(data.warnings or [])
     if diagnosis and not _looks_like_icd10_diagnosis(diagnosis) and selected_medical:

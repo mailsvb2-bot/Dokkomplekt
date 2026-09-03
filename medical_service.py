@@ -290,7 +290,7 @@ class MedicalDocumentService:
         template_paths = {kind: bundled_template_path(kind) for kind in selected}
         if not legacy_fixed_template_backend_enabled():
             missing_text = "\n".join(str(path) for path in template_paths.values())
-            raise FileNotFoundError("Не найдены шаблоны старого фиксированного набора. Старый fixed-template backend отключён по умолчанию; используйте doctor-owned шаблоны/профиль документов или включите DOKKOMPLEKT_ENABLE_LEGACY_FIXED_TEMPLATES=1 только для совместимости.\n" + missing_text)
+            raise FileNotFoundError("Не найдены шаблоны старого фиксированного набора. Используйте свои шаблоны в профиле документов. Режим совместимости со старым набором отключён по умолчанию.\n" + missing_text)
         missing = [path for path in template_paths.values() if not path.exists()]
         if missing:
             missing_text = "\n".join(str(path) for path in missing)

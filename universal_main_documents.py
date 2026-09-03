@@ -69,7 +69,7 @@ class MainScreenCustomDocument:
 def custom_kind(document_id: str) -> str:
     document_id = str(document_id or "").strip()
     if not document_id:
-        raise ValueError("Пустой id custom-документа")
+        raise ValueError("У документа из шаблона не задан технический идентификатор")
     return CUSTOM_DOCUMENT_KIND_PREFIX + document_id
 
 
@@ -80,10 +80,10 @@ def is_custom_kind(kind: str) -> bool:
 def custom_document_id_from_kind(kind: str) -> str:
     text = str(kind or "").strip()
     if not is_custom_kind(text):
-        raise ValueError(f"Это не custom kind: {kind}")
+        raise ValueError(f"Этот тип документа не относится к пользовательским шаблонам: {kind}")
     document_id = text[len(CUSTOM_DOCUMENT_KIND_PREFIX):].strip()
     if not document_id:
-        raise ValueError("Пустой id custom-документа")
+        raise ValueError("У документа из шаблона не задан технический идентификатор")
     return document_id
 
 

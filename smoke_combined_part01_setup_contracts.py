@@ -290,7 +290,7 @@ assert ingestion.added_document_ids and ingestion.warnings, ingestion.human_repo
 surgery_ready = analyze_pack_readiness(surgery_pack, surgery_case, base_dir=OUT / "surgery_profile")
 assert "operation_protocol_template" in " ".join(surgery_ready.ready_document_ids), surgery_ready.human_report()
 checklist = profile_setup_checklist(surgery_pack, base_dir=OUT / "surgery_profile")
-assert "3–5 примерах" in checklist and "placeholders" in checklist
+assert "3–5 примерах" in checklist and "метки" in checklist
 full_build = build_profile_from_sources_and_templates(
     source_paths=[nav, header_source],
     template_paths=[operation_template],

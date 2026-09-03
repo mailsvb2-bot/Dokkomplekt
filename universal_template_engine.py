@@ -333,7 +333,7 @@ def infer_document_spec_from_template(
         description=(
             "Создано автоматически по техническим меткам и видимым полям пользовательского DOCX-шаблона."
             if placeholders and visible_fields
-            else "Создано автоматически по placeholders в пользовательском DOCX-шаблоне."
+            else "Создано автоматически по меткам в пользовательском DOCX-шаблоне."
             if placeholders
             else "Создано автоматически по обычным видимым полям пользовательского DOCX-шаблона."
         ),
@@ -581,7 +581,7 @@ def attach_template_to_pack(
     if category != "diaries" and not final_validation.ok:
         reasons: list[str] = []
         if not final_validation.placeholders and not final_validation.visible_fields:
-            reasons.append("нет ни placeholders, ни обычных видимых полей Word")
+            reasons.append("нет ни служебных меток, ни обычных видимых заполняемых полей Word")
         if final_validation.unknown_fields:
             reasons.append("неизвестные поля: " + ", ".join(final_validation.unknown_fields))
         if final_validation.missing_required_placeholders:

@@ -144,7 +144,7 @@ class DesktopIntakeMixin:
             "Врач сможет перетащить туда первичный документ, а программа предложит "
             "создать нужные документы в отдельной подпапке пациента.\n\n"
             "Чтобы это срабатывало даже при закрытом окне программы, программа сама включит "
-            "безопасный фоновый watcher в автозагрузке Windows. Это обычный ярлык автозапуска, "
+            "безопасное фоновое наблюдение за папкой в автозагрузке Windows. Это обычный ярлык автозапуска, "
             "без службы Windows и без опасных перехватчиков мыши/клавиатуры.",
             parent=self.root,
         )
@@ -186,22 +186,22 @@ class DesktopIntakeMixin:
 
             ok, message = install_agent_autostart(start_now=start_now)
             if ok:
-                self._log("\n✅ Фоновый watcher включён в автозагрузке Windows и запущен.\n")
+                self._log("\n✅ Фоновое наблюдение за папкой включено в автозагрузке Windows и запущено.\n")
                 return True
             # Source/Linux tests legitimately return a no-op.  Keep this as a
             # diagnostic line, not a blocking popup, because the in-process
             # watcher still handles the folder while the UI is open.
-            self._log(f"\nℹ Фоновый watcher не установлен автоматически: {message}\n")
+            self._log(f"\nℹ Фоновое наблюдение за папкой не настроено автоматически: {message}\n")
             if os.name == "nt" and not os.environ.get("CI"):
                 messagebox.showwarning(
-                    "Фоновый watcher не запущен",
+                    "Фоновое наблюдение за папкой не запущено",
                     "Папка будет обрабатываться, пока программа открыта, но запуск при закрытом окне сейчас не настроен.\n\n" + str(message),
                     parent=getattr(self, "root", None),
                 )
             return False
         except Exception as exc:
             record_soft_exception("desktop_intake_mixin.install_background_agent", exc)
-            self._log(f"\n⚠ Не удалось автоматически включить watcher: {exc}\n")
+            self._log(f"\n⚠ Не удалось автоматически включить фоновое наблюдение за папкой: {exc}\n")
             return False
 
     def _start_desktop_intake_watcher(self) -> None:

@@ -422,15 +422,15 @@ def open_universal_document_mapper(app) -> None:
         try:
             current_pack, spec, copied_to, validation, suggestion = _attach_regular_template_button(template_path)
             if not validation.ok and spec.category != "diaries":
-                details = validation.to_dict()
-                raise ValueError("Шаблон не прошёл проверку. Проверьте placeholders вида {{patient.fio}}.\n\n" + str(details))
+                reason = "; ".join(validation.errors or validation.warnings or ("не найдены заполняемые поля",))
+                raise ValueError("Шаблон не прошёл проверку: " + reason)
             from regulatory_template_advisor import advise_template
             advice = advise_template(copied_to, registry=current_pack.registry(), explicit_specialty=current_pack.specialty)
             from universal_profiles import save_document_pack
             save_document_pack(current_pack, self._universal_profile_path(), backup_reason="document_mapper_save")
             status_var.set(
                 f"Добавлена кнопка: {spec.button_label}. Язык: {spec.button_language}. "
-                f"Роль: {spec.role_id or 'не определена'}. Копия: {copied_to.name}. Полей: {len(validation.placeholders)}."
+                f"Копия шаблона: {copied_to.name}. Заполняемых полей: {len(validation.field_ids())}."
             )
             if advice.has_suggestions:
                 show_soft_regulatory_advice(advice, source_label=spec.button_label)
@@ -515,7 +515,7 @@ def open_universal_document_mapper(app) -> None:
                 try:
                     pack, spec, copied_to, validation, _suggestion = _attach_regular_template_button(template_path, explicit_role_id=role_id, explicit_label=label, backup_reason="document_mapper_button")
                     if not validation.ok and spec.category != "diaries":
-                        raise ValueError("Шаблон не прошёл проверку. Проверьте placeholders вида {{patient.fio}}.")
+                        raise ValueError("Шаблон не прошёл проверку. Проверьте метки вида {{patient.fio}} или обычные заполняемые поля Word.")
                     from regulatory_template_advisor import advise_template
                     advice = advise_template(copied_to, registry=pack.registry(), explicit_specialty=pack.specialty)
                     if advice.has_suggestions:
@@ -549,8 +549,8 @@ def open_universal_document_mapper(app) -> None:
 
     def export_profile() -> None:
         target = filedialog.asksaveasfilename(
-            title="Экспорт профиля .medpack.zip",
-            initialfile="MedicalDiaryAutofill_Profile.medpack.zip",
+            title="Сохранить профиль документов для переноса",
+            initialfile="Dokkomplekt_Profile.zip",
             defaultextension=".zip",
             filetypes=[("Профиль документов", "*.zip *.medpack"), ("Все файлы", "*.*")],
             parent=dialog,
@@ -568,7 +568,7 @@ def open_universal_document_mapper(app) -> None:
 
     def import_profile() -> None:
         source = filedialog.askopenfilename(
-            title="Импортировать medpack/profile",
+            title="Импортировать профиль документов",
             filetypes=[("Профиль документов", "*.zip *.medpack *.json"), ("Все файлы", "*.*")],
             parent=dialog,
         )
@@ -622,7 +622,7 @@ def open_universal_document_mapper(app) -> None:
             messagebox.showerror("Аудит профиля", str(exc), parent=dialog)
 
     def render_custom_documents() -> None:
-        out_dir = filedialog.askdirectory(title="Куда сохранить custom DOCX из профиля", parent=dialog)
+        out_dir = filedialog.askdirectory(title="Куда сохранить документы из ваших шаблонов", parent=dialog)
         if not out_dir:
             return
         try:
@@ -648,8 +648,8 @@ def open_universal_document_mapper(app) -> None:
             )
             report_path = save_generation_report(result, technical_report_path(out_dir, "custom_generation_report.txt"))
             messagebox.showinfo("Свои документы", result.human_report(), parent=dialog)
-            status_var.set(f"Создано custom-файлов: {len(result.created_files)}. Отчёт: {report_path}")
-            self._set_status("Custom DOCX созданы из профиля")
+            status_var.set(f"Создано документов из ваших шаблонов: {len(result.created_files)}. Отчёт: {report_path}")
+            self._set_status("Документы из ваших шаблонов созданы")
         except Exception as exc:
             messagebox.showerror("Свои документы", str(exc), parent=dialog)
 
@@ -659,8 +659,8 @@ def open_universal_document_mapper(app) -> None:
             from universal_profile_builder import profile_setup_checklist, specialty_presets
             presets_text = "\n".join("• " + preset.label for preset in specialty_presets())
             checklist = profile_setup_checklist(current_pack, base_dir=self._universal_profile_path().parent)
-            messagebox.showinfo("Мастер профиля", checklist + "\n\nДоступные пресеты:\n" + presets_text, parent=dialog)
-            status_var.set("Мастер профиля: checklist сформирован. Для нового врача используйте пресет, 3–5 исходных DOCX и его шаблоны.")
+            messagebox.showinfo("Мастер профиля", checklist + "\n\nГотовые варианты специальности:\n" + presets_text, parent=dialog)
+            status_var.set("Проверка настройки готова. Для нового врача выберите готовый вариант специальности, добавьте 3–5 примеров документов и его шаблоны.")
         except Exception as exc:
             messagebox.showerror("Мастер профиля", str(exc), parent=dialog)
 
@@ -670,7 +670,7 @@ def open_universal_document_mapper(app) -> None:
             from regulatory_template_advisor import advise_document
             advice = advise_document(path, registry=current_pack.registry(), explicit_specialty=current_pack.specialty)
             show_soft_regulatory_advice(advice, source_label="Загруженный документ")
-            self._set_status("Подсказки по документу по документу показаны")
+            self._set_status("Подсказки по документу показаны")
         except Exception as exc:
             messagebox.showerror("Подсказки по документу", str(exc), parent=dialog)
 
@@ -679,12 +679,12 @@ def open_universal_document_mapper(app) -> None:
         (6, "Добавить DOCX-шаблон в профиль", add_template_to_profile, FIELD, TEXT),
         (7, "Создать кнопку документа", create_regular_document_button, FIELD, TEXT),
         (8, "Проверить профиль", validate_profile, FIELD, TEXT),
-        (9, "Экспортировать medpack", export_profile, FIELD, TEXT),
-        (10, "Импортировать medpack", import_profile, FIELD, TEXT),
+        (9, "Экспортировать профиль", export_profile, FIELD, TEXT),
+        (10, "Импортировать профиль", import_profile, FIELD, TEXT),
         (11, "Отчёт готовности кнопок", readiness_report, FIELD, TEXT),
         (12, "Аудит профиля", audit_profile_layer, FIELD, TEXT),
-        (13, "Создать custom DOCX", render_custom_documents, FIELD, TEXT),
-        (14, "Мастер профиля / checklist", profile_builder_checklist, FIELD, TEXT),
+        (13, "Создать документы из шаблонов", render_custom_documents, FIELD, TEXT),
+        (14, "Проверка настройки профиля", profile_builder_checklist, FIELD, TEXT),
         (15, "Подсказки по приказам", regulatory_advice_for_loaded_document, FIELD, TEXT),
     ]
     for row, label, command, bg, fg in button_specs:

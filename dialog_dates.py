@@ -82,7 +82,7 @@ class DialogDatesMixin:
             "Уточнить дату",
             (
                 f"В программе уже сохранена {conflict.label.lower()}: {conflict.existing}.\n\n"
-                f"В текущем popup введена другая дата: {conflict.candidate}.{source}\n\n"
+                f"В текущем окне введена другая дата: {conflict.candidate}.{source}\n\n"
                 f"Считать правильной дату {conflict.candidate} и заменить её во всех создаваемых документах?\n\n"
                 "Да — заменить общую дату.\n"
                 "Нет — оставить прежнюю дату и вернуться к полю, чтобы исправить ввод."
@@ -96,7 +96,7 @@ class DialogDatesMixin:
         value: str,
         *,
         parent=None,
-        source_label: str = "popup",
+        source_label: str = "окно ввода",
         confirm_conflict: bool = True,
     ) -> bool:
         """Normalize, conflict-check and store a patient-level date.
@@ -132,7 +132,7 @@ class DialogDatesMixin:
         value: str,
         *,
         parent=None,
-        source_label: str = "popup",
+        source_label: str = "окно ввода",
         confirm_conflict: bool = True,
     ) -> bool:
         """Store any popup-owned date through the semantic date contract."""

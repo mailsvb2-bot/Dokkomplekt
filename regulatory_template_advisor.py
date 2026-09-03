@@ -67,7 +67,7 @@ class RegulatoryTemplateAdvice:
         lines = ["Мягкие подсказки по структуре документа", self.classification.human_report(), ""]
         lines.append("Статус: подсказки не блокируют генерацию. Врач может выбрать «Нет, не буду, делай как есть».")
         if self.present_fields:
-            lines.append("\nУже есть смысловые поля/placeholders:")
+            lines.append("\nУже есть распознанные смысловые поля и метки:")
             lines.extend("• " + item for item in self.present_fields)
         if self.present_sections:
             lines.append("\nПохожие разделы в документе:")

@@ -293,7 +293,7 @@ class ActionsCreationReviewMixin:
         elif key in REQUIRED_REVIEW_DATE_KEYS:
             try:
                 if hasattr(self, "_store_popup_date_value"):
-                    self._store_popup_date_value(key, value, source_label="popup обязательных полей")
+                    self._store_popup_date_value(key, value, source_label="окно обязательных полей")
                 else:
                     var_name = {
                         "labs_explicit_date": "labs_explicit_date_var",

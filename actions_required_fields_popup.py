@@ -467,13 +467,13 @@ class _RequiredFieldsDialog:
         if field_ref is not None and _is_semantic_date_field(field_ref):
             date_key = _semantic_date_store_key_for_field(field_ref) or store_key
             if date_key == "discharge_date" and hasattr(self.app, "_store_discharge_date_value"):
-                if not self.app._store_discharge_date_value(value, parent=self._window(), source_label="popup обязательных полей"):
+                if not self.app._store_discharge_date_value(value, parent=self._window(), source_label="окно обязательных полей"):
                     self._warn_and_focus(field_key, "Уточнить дату", "Дата выписки отличается от уже сохранённой. Подтвердите замену или исправьте поле.")
                     return False
                 return True
             if hasattr(self.app, "_store_popup_date_value"):
                 label = str(getattr(field_ref, "label", "") or date_key)
-                if not self.app._store_popup_date_value(date_key, value, parent=self._window(), source_label=f"popup обязательных полей: {label}"):
+                if not self.app._store_popup_date_value(date_key, value, parent=self._window(), source_label=f"окно обязательных полей: {label}"):
                     self._warn_and_focus(field_key, "Уточнить дату", "Проверьте дату или подтвердите замену уже сохранённого значения.")
                     return False
                 return True
