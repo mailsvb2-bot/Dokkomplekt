@@ -56,7 +56,13 @@ https://license.example.ru/api/provider/yookassa/callback
 
 The server does not trust the incoming notification as payment proof. It reads the payment back from YooKassa over authenticated server-to-server API and checks the internal `order_id`, amount, status and payment method before persisting the event.
 
-`bank_invoice` remains intentionally disabled in production until a concrete bank-invoice adapter exists.
+For a bank-transfer invoice deployment, set `DOKKOMPLEKT_PAYMENT_PROVIDER=bank_invoice` and configure the validated invoice requisites required by `ServerConfig` (recipient, bank name, BIC, settlement account and tax identifiers). The order response points to `/api/orders/{order_id}/invoice`; payment confirmation is accepted only through the secret-protected bank-invoice confirmation endpoint and is persisted through the same atomic payment-event owner as other providers.
+
+The desktop may set `DOKKOMPLEKT_LICENSE_SERVER_URL=https://license.example.ru` to refresh `/api/licenses/{license_id}/status`. A cached `revoked` result always blocks the license. A previously confirmed active license may continue through its configured offline grace if the status service is temporarily unavailable; after TTL+grace it fails closed until status can be refreshed.
+
+Local product-access counters use state format v3. The integrity key is random instead of being derivable from the machine fingerprint, is protected with Windows DPAPI in production, and is stored redundantly so a single damaged key copy can be recovered without resetting usage. Existing v2 counters migrate without resetting limits.
+
+The manual `YooKassa Sandbox` workflow reads only dedicated TEST secrets (`DOKKOMPLEKT_YOOKASSA_TEST_SHOP_ID` and `DOKKOMPLEKT_YOOKASSA_TEST_SECRET_KEY`) and is intentionally not part of ordinary CI.
 
 ## Integration principle
 
