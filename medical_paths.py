@@ -174,44 +174,70 @@ def interprocess_file_lock(
     timeout_seconds: float = 10.0,
     stale_seconds: float = 120.0,
 ):
-    """Acquire an O_EXCL lock file and release only the token we created."""
+    """Own a tokenized O_EXCL lock file without holding a Windows file handle open.
+
+    The directory entry is the lock.  The descriptor used to publish the owner
+    token is closed before entering the protected section so Windows contenders
+    can inspect the lock path instead of receiving a sharing/access violation.
+    """
     lock_path = Path(path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     token = uuid.uuid4().hex
     deadline = time.monotonic() + max(0.1, float(timeout_seconds))
-    fd: int | None = None
-    while fd is None:
+    acquired = False
+    while not acquired:
+        fd: int | None = None
+        created_here = False
         try:
             fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            created_here = True
             payload = json.dumps({"pid": os.getpid(), "token": token, "created_at": time.time()}).encode("utf-8")
             os.write(fd, payload)
             os.fsync(fd)
-        except FileExistsError:
-            owner = _read_owner(lock_path)
-            try:
-                age = max(0.0, time.time() - lock_path.stat().st_mtime)
-            except OSError:
-                age = 0.0
-            owner_pid = int(owner.get("pid") or 0) if str(owner.get("pid") or "").lstrip("-").isdigit() else 0
-            if age >= stale_seconds and not _pid_is_running(owner_pid):
+            os.close(fd)
+            fd = None
+            acquired = True
+            continue
+        except (FileExistsError, PermissionError) as contention_exc:
+            if isinstance(contention_exc, PermissionError) and not lock_path.exists():
+                raise
+        except Exception:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError as close_exc:
+                    record_soft_exception("medical_paths.lock_owner_close", close_exc, detail=str(lock_path))
+            if created_here:
+                try:
+                    lock_path.unlink()
+                except OSError as cleanup_exc:
+                    record_soft_exception("medical_paths.lock_owner_publish_cleanup", cleanup_exc, detail=str(lock_path))
+            raise
+
+        owner = _read_owner(lock_path)
+        try:
+            age = max(0.0, time.time() - lock_path.stat().st_mtime)
+        except OSError:
+            age = 0.0
+        owner_pid = int(owner.get("pid") or 0) if str(owner.get("pid") or "").lstrip("-").isdigit() else 0
+        if age >= stale_seconds and not _pid_is_running(owner_pid):
+            stale_token = str(owner.get("token") or "")
+            current_owner = _read_owner(lock_path)
+            if stale_token and str(current_owner.get("token") or "") == stale_token:
                 try:
                     lock_path.unlink()
                     continue
                 except OSError as stale_cleanup_exc:
                     record_soft_exception("medical_paths.stale_lock_cleanup", stale_cleanup_exc, detail=str(lock_path))
-            if time.monotonic() >= deadline:
-                raise TimeoutError(f"Не удалось получить блокировку состояния: {lock_path}")
-            time.sleep(0.025)
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Не удалось получить блокировку состояния: {lock_path}")
+        time.sleep(0.025)
     try:
         yield
     finally:
-        try:
-            if fd is not None:
-                os.close(fd)
-        finally:
-            owner = _read_owner(lock_path)
-            if str(owner.get("token") or "") == token:
-                try:
-                    lock_path.unlink()
-                except OSError as release_exc:
-                    record_soft_exception("medical_paths.lock_release", release_exc, detail=str(lock_path))
+        owner = _read_owner(lock_path)
+        if str(owner.get("token") or "") == token:
+            try:
+                lock_path.unlink()
+            except OSError as release_exc:
+                record_soft_exception("medical_paths.lock_release", release_exc, detail=str(lock_path))

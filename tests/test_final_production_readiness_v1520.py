@@ -14,6 +14,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 import pytest
 
+import medical_paths
 from medical_paths import atomic_write_json
 from diary_schedule import diary_minute_schedule_from_choice
 from document_intelligence.form_fill import fill_docx_visible_fields, visible_fill_field_ids
@@ -237,19 +238,73 @@ def test_trial_configuration_limits_are_real_gates(tmp_path: Path) -> None:
 
 
 def test_concurrent_product_usage_has_no_lost_updates_or_shared_tmp_race(tmp_path: Path) -> None:
-    storage = tmp_path / "license"
-    manager = ProductAccessManager(storage, now=datetime(2026, 9, 3, tzinfo=timezone.utc)); manager.current_state()
     code = "from product_access import ProductAccessManager; ProductAccessManager().record_created_documents(1)"
-    env = dict(os.environ); env["DOKKOMPLEKT_LICENSE_DIR"] = str(storage); env["PYTHONPATH"] = str(Path.cwd())
-    processes = [subprocess.Popen([sys.executable, "-c", code], cwd=Path.cwd(), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(8)]
-    failures = []
-    for process in processes:
-        stdout, stderr = process.communicate(timeout=30)
-        if process.returncode:
-            failures.append((process.returncode, stdout, stderr))
-    assert not failures
-    assert ProductAccessManager(storage, now=datetime(2026, 9, 3, tzinfo=timezone.utc)).current_state().documents_used_total_trial == 8
-    assert not list(storage.glob("*.tmp"))
+    for round_index in range(3):
+        storage = tmp_path / f"license-{round_index}"
+        manager = ProductAccessManager(storage, now=datetime(2026, 9, 3, tzinfo=timezone.utc))
+        manager.current_state()
+        env = dict(os.environ)
+        env["DOKKOMPLEKT_LICENSE_DIR"] = str(storage)
+        env["PYTHONPATH"] = str(Path.cwd())
+        processes = [
+            subprocess.Popen(
+                [sys.executable, "-c", code],
+                cwd=Path.cwd(),
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for _ in range(8)
+        ]
+        failures = []
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=30)
+            if process.returncode:
+                failures.append((process.returncode, stdout, stderr))
+        assert not failures, f"concurrency round {round_index}: {failures}"
+        state = ProductAccessManager(storage, now=datetime(2026, 9, 3, tzinfo=timezone.utc)).current_state()
+        assert state.documents_used_total_trial == 8
+        assert not list(storage.glob("*.tmp"))
+
+
+def test_interprocess_lock_closes_owner_descriptor_before_critical_section(tmp_path: Path, monkeypatch) -> None:
+    closed: list[int] = []
+    real_close = medical_paths.os.close
+
+    def tracked_close(fd: int) -> None:
+        closed.append(fd)
+        real_close(fd)
+
+    monkeypatch.setattr(medical_paths.os, "close", tracked_close)
+    lock = tmp_path / "descriptor.lock"
+    with interprocess_file_lock(lock):
+        assert closed, "owner descriptor must be closed before the protected body runs"
+        assert lock.exists()
+    assert not lock.exists()
+
+
+def test_interprocess_lock_treats_windows_access_denied_on_existing_lock_as_contention(tmp_path: Path, monkeypatch) -> None:
+    lock = tmp_path / "windows-contention.lock"
+    lock.write_text(json.dumps({"pid": os.getpid(), "token": "other", "created_at": 0}), encoding="utf-8")
+    real_open = medical_paths.os.open
+    open_calls = 0
+
+    def windows_style_open(path, flags, mode=0o777):
+        nonlocal open_calls
+        open_calls += 1
+        if open_calls == 1:
+            raise PermissionError(13, "access denied while another process owns the lock", str(path))
+        return real_open(path, flags, mode)
+
+    def release_other_owner(_seconds: float) -> None:
+        lock.unlink(missing_ok=True)
+
+    monkeypatch.setattr(medical_paths.os, "open", windows_style_open)
+    monkeypatch.setattr(medical_paths.time, "sleep", release_other_owner)
+    with interprocess_file_lock(lock, timeout_seconds=1):
+        assert open_calls >= 2
+    assert not lock.exists()
 
 
 def test_atomic_json_concurrent_writers_never_share_fixed_temp(tmp_path: Path) -> None:
