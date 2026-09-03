@@ -159,12 +159,76 @@ def _pid_is_running(pid: int) -> bool:
     return True
 
 
+_LOCK_OWNER_NAME = "owner.json"
+_LOCK_DEAD_OWNER_GRACE_SECONDS = 0.25
+_LOCK_UNOWNED_GRACE_SECONDS = 2.0
+
+
+def _lock_owner_path(path: Path) -> Path:
+    return path / _LOCK_OWNER_NAME if path.is_dir() else path
+
+
 def _read_owner(path: Path) -> dict:
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(_lock_owner_path(path).read_text(encoding="utf-8"))
         return raw if isinstance(raw, dict) else {}
     except Exception:
         return {}
+
+
+def _lock_age_seconds(path: Path) -> float:
+    try:
+        return max(0.0, time.time() - path.stat().st_mtime)
+    except OSError:
+        return 0.0
+
+
+def _cleanup_quarantined_lock(path: Path, *, context: str) -> None:
+    try:
+        if path.is_dir():
+            owner_path = path / _LOCK_OWNER_NAME
+            owner_path.unlink(missing_ok=True)
+            path.rmdir()
+        else:
+            path.unlink()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        # Quarantine names never participate in acquisition, so failure here is
+        # diagnostic debt only and cannot keep the live state locked.
+        record_soft_exception(context, exc, detail=str(path))
+
+
+def _quarantine_owned_lock(path: Path, token: str, *, context: str, retries: int = 20) -> bool:
+    """Atomically move one verified lock owner out of the acquisition path."""
+    for attempt in range(max(1, retries)):
+        owner = _read_owner(path)
+        if str(owner.get("token") or "") != token:
+            return False
+        quarantine = path.with_name(f".{path.name}.{token}.{uuid.uuid4().hex}.released")
+        try:
+            os.replace(path, quarantine)
+        except FileNotFoundError:
+            return True
+        except OSError as exc:
+            if attempt + 1 >= max(1, retries):
+                record_soft_exception(context, exc, detail=str(path))
+                return False
+            time.sleep(0.025)
+            continue
+        _cleanup_quarantined_lock(quarantine, context=f"{context}.quarantine_cleanup")
+        return True
+    return False
+
+
+def _publish_lock_owner(lock_path: Path, token: str) -> None:
+    """Create the owner record inside an already-exclusive lock directory."""
+    owner_path = lock_path / _LOCK_OWNER_NAME
+    payload = json.dumps({"pid": os.getpid(), "token": token, "created_at": time.time()})
+    with owner_path.open("x", encoding="utf-8", newline="\n") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 @contextmanager
@@ -174,11 +238,12 @@ def interprocess_file_lock(
     timeout_seconds: float = 10.0,
     stale_seconds: float = 120.0,
 ):
-    """Own a tokenized O_EXCL lock file without holding a Windows file handle open.
+    """Own one cross-platform lock directory and recover legacy lock files safely.
 
-    The directory entry is the lock.  The descriptor used to publish the owner
-    token is closed before entering the protected section so Windows contenders
-    can inspect the lock path instead of receiving a sharing/access violation.
+    ``mkdir`` is the acquisition primitive.  No file handle stays open across
+    the protected section.  Release and stale recovery atomically rename the
+    complete lock path to a unique quarantine before cleanup, preventing a
+    contender from ever deleting a newly acquired owner's lock.
     """
     lock_path = Path(path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -186,58 +251,69 @@ def interprocess_file_lock(
     deadline = time.monotonic() + max(0.1, float(timeout_seconds))
     acquired = False
     while not acquired:
-        fd: int | None = None
-        created_here = False
+        created_directory = False
         try:
-            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            created_here = True
-            payload = json.dumps({"pid": os.getpid(), "token": token, "created_at": time.time()}).encode("utf-8")
-            os.write(fd, payload)
-            os.fsync(fd)
-            os.close(fd)
-            fd = None
+            os.mkdir(lock_path)
+            created_directory = True
+            _publish_lock_owner(lock_path, token)
             acquired = True
             continue
         except (FileExistsError, PermissionError) as contention_exc:
             if isinstance(contention_exc, PermissionError) and not lock_path.exists():
                 raise
         except Exception:
-            if fd is not None:
-                try:
-                    os.close(fd)
-                except OSError as close_exc:
-                    record_soft_exception("medical_paths.lock_owner_close", close_exc, detail=str(lock_path))
-            if created_here:
-                try:
-                    lock_path.unlink()
-                except OSError as cleanup_exc:
-                    record_soft_exception("medical_paths.lock_owner_publish_cleanup", cleanup_exc, detail=str(lock_path))
+            if created_directory:
+                owner = _read_owner(lock_path)
+                if str(owner.get("token") or "") == token:
+                    _quarantine_owned_lock(
+                        lock_path,
+                        token,
+                        context="medical_paths.lock_owner_publish_cleanup",
+                    )
+                else:
+                    try:
+                        lock_path.rmdir()
+                    except OSError as cleanup_exc:
+                        record_soft_exception(
+                            "medical_paths.lock_owner_publish_cleanup",
+                            cleanup_exc,
+                            detail=str(lock_path),
+                        )
             raise
 
         owner = _read_owner(lock_path)
-        try:
-            age = max(0.0, time.time() - lock_path.stat().st_mtime)
-        except OSError:
-            age = 0.0
+        owner_token = str(owner.get("token") or "")
         owner_pid = int(owner.get("pid") or 0) if str(owner.get("pid") or "").lstrip("-").isdigit() else 0
-        if age >= stale_seconds and not _pid_is_running(owner_pid):
-            stale_token = str(owner.get("token") or "")
-            current_owner = _read_owner(lock_path)
-            if stale_token and str(current_owner.get("token") or "") == stale_token:
-                try:
-                    lock_path.unlink()
+        age = _lock_age_seconds(lock_path)
+        dead_owner = bool(owner_token and owner_pid and not _pid_is_running(owner_pid))
+        unowned = not owner_token
+        can_recover = (
+            dead_owner and age >= min(float(stale_seconds), _LOCK_DEAD_OWNER_GRACE_SECONDS)
+        ) or (
+            unowned and age >= min(float(stale_seconds), _LOCK_UNOWNED_GRACE_SECONDS)
+        )
+        if can_recover and owner_token:
+            if _quarantine_owned_lock(lock_path, owner_token, context="medical_paths.stale_lock_cleanup"):
+                continue
+        elif can_recover and unowned and lock_path.is_dir():
+            # A process can die after mkdir but before owner.json is published.
+            # An empty directory older than the grace period is safe to quarantine
+            # only if it is still empty at the atomic rename boundary.
+            try:
+                if not any(lock_path.iterdir()):
+                    quarantine = lock_path.with_name(f".{lock_path.name}.unowned.{uuid.uuid4().hex}.released")
+                    os.replace(lock_path, quarantine)
+                    _cleanup_quarantined_lock(quarantine, context="medical_paths.unowned_lock_cleanup")
                     continue
-                except OSError as stale_cleanup_exc:
-                    record_soft_exception("medical_paths.stale_lock_cleanup", stale_cleanup_exc, detail=str(lock_path))
+            except OSError as cleanup_exc:
+                record_soft_exception("medical_paths.unowned_lock_cleanup", cleanup_exc, detail=str(lock_path))
         if time.monotonic() >= deadline:
             raise TimeoutError(f"Не удалось получить блокировку состояния: {lock_path}")
         time.sleep(0.025)
     try:
         yield
     finally:
-        owner = _read_owner(lock_path)
-        if str(owner.get("token") or "") == token:
-            try:
-                lock_path.unlink()
-            except OSError as release_exc:
-                record_soft_exception("medical_paths.lock_release", release_exc, detail=str(lock_path))
+        if not _quarantine_owned_lock(lock_path, token, context="medical_paths.lock_release"):
+            owner = _read_owner(lock_path)
+            if str(owner.get("token") or "") == token:
+                raise RuntimeError(f"Не удалось освободить блокировку состояния: {lock_path}")
