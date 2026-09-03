@@ -1,0 +1,49 @@
+name: Rustfmt Maintenance
+
+on:
+  push:
+    branches:
+      - fix/complete-commercial-license-backlog
+    paths:
+      - "rust/**"
+      - ".github/workflows/rustfmt-maintenance.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rustfmt-maintenance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/complete-commercial-license-backlog
+          fetch-depth: 0
+
+      - name: Set up Rustfmt
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Format workspace
+        working-directory: rust
+        run: cargo fmt --all
+
+      - name: Commit canonical rustfmt output
+        shell: bash
+        run: |
+          if git diff --quiet -- rust; then
+            echo "Rust workspace already formatted"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust
+          git commit -m "Apply canonical rustfmt to workspace"
+          git push origin HEAD:fix/complete-commercial-license-backlog
