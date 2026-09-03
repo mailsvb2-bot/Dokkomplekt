@@ -121,9 +121,10 @@ class AppInitializationMixin:
         # Prevents one dialog from silently using a different discharge date than another.
         self._semantic_date_state: dict[str, str] = {}
         self.output_dir_var = tk.StringVar()
-        # Папка результата по умолчанию должна следовать за первичным
-        # документом пациента. Ручной выбор через кнопку/ручной ввод
-        # сохраняется и не перетирается автоматикой.
+        # Папка результата по умолчанию — Desktop/«Выписанные пациенты».
+        # Ручной выбор через кнопку/ручной ввод сохраняется и не перетирается
+        # автоматикой; desktop-intake может временно зафиксировать готовую
+        # подпапку конкретного пациента.
         self._suspend_output_dir_tracking = False
         self._manual_output_dir = False
         # True only for a folder that was chosen automatically for one detected

@@ -50,16 +50,22 @@ class ActionsSelectionMixin:
     def _base_output_dir(self) -> Path:
         explicit = self.output_dir_var.get().strip()
         primary_path = selected_primary_document_path(self)
-        navigation = str(primary_path) if primary_path is not None else ""
-        if primary_path is not None and not self._manual_output_dir:
-            return primary_path.parent
+        # Явный ручной выбор и desktop-intake patient lock имеют абсолютный
+        # приоритет. Обычный primary selection никогда не должен направлять
+        # результаты обратно в произвольную папку исходного DOCX.
+        if explicit and self._manual_output_dir:
+            return Path(explicit)
+        if primary_path is not None:
+            from desktop_intake import default_intake_folder
+
+            return default_intake_folder()
         if explicit:
             return Path(explicit)
-        if navigation:
-            return Path(navigation).parent
         if self.diary_files:
             return Path(self.diary_files[0]).parent
-        return Path.cwd()
+        from desktop_intake import default_intake_folder
+
+        return default_intake_folder()
 
     def _result_output_dir(self) -> Path:
         override = getattr(self, "_active_patient_output_dir", None)
