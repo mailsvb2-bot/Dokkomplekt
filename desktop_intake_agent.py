@@ -28,9 +28,11 @@ import uuid
 from typing import Iterable
 
 from diagnostic_logging import record_soft_exception
+from medical_paths import atomic_write_json
 from desktop_intake import (
     DESKTOP_INTAKE_FOLDER_NAME,
     DESKTOP_INTAKE_SETUP_PROMPT_VERSION,
+    DESKTOP_INTAKE_MAX_SEEN_SIGNATURES,
     default_intake_folder,
     is_desktop_intake_folder_path,
     mark_seen,
@@ -47,6 +49,7 @@ GUI_ACTIVE_SECONDS = 45.0
 GUI_LEGACY_LIVE_PID_MAX_STALE_SECONDS = 300.0
 PENDING_RETRY_SECONDS = 75.0
 MAX_LOG_BYTES = 512 * 1024
+MAX_SEEN_SIGNATURES = DESKTOP_INTAKE_MAX_SEEN_SIGNATURES
 STATE_FILE_NAME = "desktop_intake_agent_state.json"
 LOCK_FILE_NAME = "desktop_intake_agent.lock"
 HANDOFF_FILE_NAME = "desktop_intake_agent_handoff.json"
@@ -146,11 +149,7 @@ def _write_agent_handoff(gui_command: list[str]) -> None:
         "installed_at": time.time(),
         "version": AGENT_VERSION,
     }
-    path = _handoff_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)
+    atomic_write_json(_handoff_path(), payload)
 
 
 def _read_agent_handoff() -> dict:
@@ -243,15 +242,42 @@ def _gui_lock_payload() -> dict:
     }
 
 
+def claim_gui_runtime_lock() -> bool:
+    """Atomically claim the foreground-GUI slot; same process may refresh it."""
+    path = _gui_lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _gui_lock_payload()
+    encoded = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    for _attempt in range(2):
+        try:
+            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            existing = _load_json(path)
+            if _safe_int(existing.get("pid"), -1) == os.getpid():
+                write_gui_runtime_lock()
+                return True
+            if is_gui_runtime_active():
+                return False
+            # ``is_gui_runtime_active`` removes stale/corrupt ownership. Retry O_EXCL.
+            continue
+        try:
+            os.write(fd, encoded)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        return True
+    return False
+
+
 def write_gui_runtime_lock() -> None:
-    """Refresh the foreground GUI heartbeat used by the background agent.
-
-    The file contains only technical runtime data.  It prevents the background
-    watcher from launching a second GUI while the doctor already has the main
-    window open and the in-process watcher can handle the dropped DOCX.
-    """
-    _save_json(_gui_lock_path(), _gui_lock_payload())
-
+    """Refresh only this process' foreground GUI heartbeat."""
+    path = _gui_lock_path()
+    existing = _load_json(path)
+    owner_pid = _safe_int(existing.get("pid"), -1)
+    if existing and owner_pid not in {-1, os.getpid()}:
+        if is_gui_runtime_active():
+            raise RuntimeError("Другой экземпляр Dokkomplekt уже владеет GUI-блокировкой")
+    _save_json(path, _gui_lock_payload())
 
 def release_gui_runtime_lock() -> None:
     """Remove this process' GUI heartbeat on normal shutdown."""
@@ -321,10 +347,7 @@ def _load_json(path: Path) -> dict:
 
 def _save_json(path: Path, payload: dict) -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        os.replace(tmp, path)
+        atomic_write_json(path, payload)
     except Exception as exc:
         record_soft_exception("desktop_intake_agent.save_json", exc, detail=str(path))
 
@@ -623,7 +646,8 @@ def _safe_float(value: object, default: float = 0.0) -> float:
 
 
 def _save_state(seen: set[str], *, last_launch: float, pending: dict | None = None) -> None:
-    payload = {"version": AGENT_VERSION, "seen_signatures": sorted(seen), "last_launch": last_launch}
+    bounded_seen = sorted(seen)[-MAX_SEEN_SIGNATURES:]
+    payload = {"version": AGENT_VERSION, "seen_signatures": bounded_seen, "last_launch": last_launch}
     if pending:
         payload["pending"] = pending
     _save_json(_state_path(), payload)

@@ -20,6 +20,8 @@ from typing import Any, Iterable, Mapping
 import uuid
 
 from diagnostic_logging import record_soft_exception
+from medical_paths import atomic_write_json as durable_atomic_write_json
+from medical_paths import interprocess_file_lock
 
 PRODUCT_ACCESS_CONTRACT_VERSION = "v1.0"
 WATERMARK_CONTRACT_VERSION = "v1.0"
@@ -264,13 +266,23 @@ class UsageReservation:
 
 class ProductAccessManager:
     def __init__(self, storage_dir: str | Path | None = None, now: datetime | None = None):
+        explicit_storage = storage_dir is not None or bool(os.getenv("DOKKOMPLEKT_LICENSE_DIR"))
         self.storage_dir = Path(storage_dir) if storage_dir else self.default_storage_dir()
+        # The machine-wide HKCU guard is an anti-tamper owner for the normal
+        # production location.  Explicit/portable storage is an intentionally
+        # isolated namespace (tests, recovery, portable diagnostics) and must not
+        # inherit or overwrite another storage root's machine-wide trial state.
+        self._registry_guard_enabled = os.name == "nt" and not explicit_storage
         self.now = now
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.state_path = self.storage_dir / "product_access_state.json"
         self.state_guard_path = self.storage_dir / "product_access_guard.json"
         self.license_path = Path(os.getenv("DOKKOMPLEKT_LICENSE_FILE") or self.storage_dir / "license.json")
+        self.state_lock_path = self.storage_dir / "product_access_state.lock"
         self._live_usage_reservations: set[str] = set()
+
+    def _state_mutation_lock(self):
+        return interprocess_file_lock(self.state_lock_path, timeout_seconds=10.0, stale_seconds=120.0)
 
     @staticmethod
     def default_storage_dir() -> Path:
@@ -358,7 +370,10 @@ class ProductAccessManager:
     def _load_state_payload(self) -> dict[str, Any]:
         primary, primary_corrupt = self._read_state_copy(self.state_path)
         guard, guard_corrupt = self._read_state_copy(self.state_guard_path)
-        registry, registry_corrupt = self._read_registry_guard()
+        if self._registry_guard_enabled:
+            registry, registry_corrupt = self._read_registry_guard()
+        else:
+            registry, registry_corrupt = None, False
         valid = [item for item in (primary, guard, registry) if item is not None]
         if valid:
             merged = self._merge_state_copies(valid)
@@ -371,13 +386,7 @@ class ProductAccessManager:
 
     @staticmethod
     def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = path.with_suffix(path.suffix + ".tmp")
-        with tmp_path.open("w", encoding="utf-8", newline="\n") as handle:
-            json.dump(dict(payload), handle, ensure_ascii=False, indent=2, sort_keys=True)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
+        durable_atomic_write_json(path, payload, sort_keys=True)
 
     def _write_registry_guard(self, payload: Mapping[str, Any]) -> None:
         if os.name != "nt":
@@ -394,7 +403,8 @@ class ProductAccessManager:
         protected = self._with_state_integrity(payload)
         self._atomic_write_json(self.state_path, protected)
         self._atomic_write_json(self.state_guard_path, protected)
-        self._write_registry_guard(protected)
+        if self._registry_guard_enabled:
+            self._write_registry_guard(protected)
 
     def _ensure_trial_started(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("_state_corrupt"):
@@ -434,12 +444,9 @@ class ProductAccessManager:
             raise ValueError("Файл лицензии должен быть JSON-объектом.")
         entitlement = LicenseEntitlement.from_mapping(payload)
         self._validate_license(entitlement, require_not_expired=False)
-        tmp_path = self.license_path.with_suffix(".tmp")
-        tmp_path.parent.mkdir(parents=True, exist_ok=True)
         stored = entitlement.unsigned_payload()
         stored["signature"] = entitlement.signature
-        tmp_path.write_text(json.dumps(stored, ensure_ascii=False, indent=2, sort_keys=True), "utf-8")
-        os.replace(tmp_path, self.license_path)
+        durable_atomic_write_json(self.license_path, stored, sort_keys=True)
         return self.current_state()
 
     def _validate_license(self, entitlement: LicenseEntitlement, *, require_not_expired: bool = True) -> None:
@@ -458,8 +465,7 @@ class ProductAccessManager:
         if entitlement.allowed_machines and machine_fingerprint() not in entitlement.allowed_machines:
             raise ValueError("Лицензия не привязана к этому компьютеру.")
 
-    def current_state(self) -> LicenseState:
-        payload = self._ensure_trial_started(self._load_state_payload())
+    def _state_from_payload(self, payload: Mapping[str, Any]) -> LicenseState:
         usage = payload.get("usage_by_month") if isinstance(payload.get("usage_by_month"), dict) else {}
         used = int(usage.get(month_key(self._now()), 0) or 0)
         trial_total = int(payload.get("trial_created_total", 0) or 0)
@@ -480,6 +486,11 @@ class ProductAccessManager:
                 trial_total,
             )
         return self._trial_state(payload, used, trial_total)
+
+    def current_state(self) -> LicenseState:
+        with self._state_mutation_lock():
+            payload = self._ensure_trial_started(self._load_state_payload())
+            return self._state_from_payload(payload)
 
     def _paid_state(self, entitlement: LicenseEntitlement, used: int) -> LicenseState:
         limits = entitlement.plan_limits()
@@ -536,13 +547,20 @@ class ProductAccessManager:
     def _blocked_state(self, reason: str, used: int, trial_total: int) -> LicenseState:
         return LicenseState("blocked", "Лицензия не активна", False, "blocked", documents_used_month=used, documents_used_total_trial=trial_total, watermark_mode="expired_demo", warning=reason)
 
-    def check_document_creation(self, requested_count: int, *, template_count: int | None = None, profile_count: int | None = None) -> AccessDecision:
+    def _check_document_creation_for_state(
+        self,
+        state: LicenseState,
+        requested_count: int,
+        *,
+        template_count: int | None = None,
+        profile_count: int | None = None,
+        enforce_per_run: bool = True,
+    ) -> AccessDecision:
         count = max(1, int(requested_count or 1))
-        state = self.current_state()
         if not state.active:
             return AccessDecision(False, "license_inactive", "Лицензия не активна", state.warning or "Создание рабочих документов заблокировано.", state)
         limits = PLAN_LIMITS.get(state.plan, PLAN_LIMITS["trial"])
-        if count > limits.max_documents_per_run:
+        if enforce_per_run and count > limits.max_documents_per_run:
             return AccessDecision(False, "per_run_limit", "Слишком много документов за один запуск", f"Тариф разрешает до {limits.max_documents_per_run} документов за один запуск. Выбрано: {count}.", state)
         if template_count is not None and int(template_count) > state.template_limit:
             return AccessDecision(False, "template_limit", "Превышен лимит шаблонов", f"Лимит тарифа: {state.template_limit} шаблонов.", state)
@@ -563,42 +581,66 @@ class ProductAccessManager:
             warning = f"Использовано более 80% месячного лимита: после создания будет {projected}/{state.documents_limit_month}."
         return AccessDecision(True, "ok", "Доступ разрешён", "Создание документов разрешено.", state, warning)
 
+    def check_document_creation(self, requested_count: int, *, template_count: int | None = None, profile_count: int | None = None) -> AccessDecision:
+        state = self.current_state()
+        return self._check_document_creation_for_state(
+            state, requested_count, template_count=template_count, profile_count=profile_count
+        )
+
+    def check_configuration_limits(self, *, template_count: int | None = None, profile_count: int | None = None) -> AccessDecision:
+        state = self.current_state()
+        if not state.active:
+            return AccessDecision(False, "license_inactive", "Лицензия не активна", state.warning or "Изменение рабочего профиля заблокировано.", state)
+        if template_count is not None and int(template_count) > state.template_limit:
+            return AccessDecision(False, "template_limit", "Превышен лимит шаблонов", f"Лимит тарифа: {state.template_limit} шаблонов.", state)
+        if profile_count is not None and int(profile_count) > state.profile_limit:
+            return AccessDecision(False, "profile_limit", "Превышен лимит профилей", f"Лимит тарифа: {state.profile_limit} профилей.", state)
+        return AccessDecision(True, "ok", "Доступ разрешён", "Изменение профиля разрешено.", state, state.warning)
+
+    @staticmethod
+    def _increment_usage_payload(payload: dict[str, Any], *, month: str, count: int, trial: bool, now_text: str) -> None:
+        usage = payload.get("usage_by_month") if isinstance(payload.get("usage_by_month"), dict) else {}
+        usage[month] = int(usage.get(month, 0) or 0) + count
+        payload["usage_by_month"] = usage
+        if trial:
+            payload["trial_created_total"] = int(payload.get("trial_created_total", 0) or 0) + count
+        payload["updated_at"] = now_text
+
     def record_created_documents(self, count: int) -> None:
         delta = max(0, int(count or 0))
         if not delta:
             return
-        state = self.current_state()
-        payload = self._ensure_trial_started(self._load_state_payload())
-        usage = payload.get("usage_by_month") if isinstance(payload.get("usage_by_month"), dict) else {}
-        key = month_key(self._now())
-        usage[key] = int(usage.get(key, 0) or 0) + delta
-        payload["usage_by_month"] = usage
-        if state.plan == "trial":
-            payload["trial_created_total"] = int(payload.get("trial_created_total", 0) or 0) + delta
-        payload["updated_at"] = iso(self._now())
-        self._save_state_payload(payload)
+        with self._state_mutation_lock():
+            payload = self._ensure_trial_started(self._load_state_payload())
+            state = self._state_from_payload(payload)
+            # record_created_documents is the accounting primitive for already-created
+            # legacy outputs and migration/tests. Per-run size is a pre-creation
+            # policy; at this point we must only prevent exceeding the global
+            # trial/monthly allowance atomically.
+            decision = self._check_document_creation_for_state(state, delta, enforce_per_run=False)
+            if not decision.allowed:
+                raise PermissionError(decision.message)
+            self._increment_usage_payload(
+                payload, month=month_key(self._now()), count=delta, trial=state.plan == "trial", now_text=iso(self._now())
+            )
+            self._save_state_payload(payload)
 
     def reserve_created_documents(self, count: int) -> UsageReservation | None:
-        """Charge staged output exactly once and return a rollback reservation.
-
-        The charge is intentionally fail-closed before the filesystem commit.
-        A known commit failure releases it; an ambiguous process crash keeps the
-        charge rather than allowing documents to escape without accounting.
-        """
-
+        """Atomically validate and charge the actual staged output count."""
         delta = max(0, int(count or 0))
         if not delta:
             return None
-        state = self.current_state()
-        reservation = UsageReservation(uuid.uuid4().hex, delta, month_key(self._now()), state.plan == "trial")
-        payload = self._ensure_trial_started(self._load_state_payload())
-        usage = payload.get("usage_by_month") if isinstance(payload.get("usage_by_month"), dict) else {}
-        usage[reservation.month] = int(usage.get(reservation.month, 0) or 0) + reservation.count
-        payload["usage_by_month"] = usage
-        if reservation.trial:
-            payload["trial_created_total"] = int(payload.get("trial_created_total", 0) or 0) + reservation.count
-        payload["updated_at"] = iso(self._now())
-        self._save_state_payload(payload)
+        with self._state_mutation_lock():
+            payload = self._ensure_trial_started(self._load_state_payload())
+            state = self._state_from_payload(payload)
+            decision = self._check_document_creation_for_state(state, delta)
+            if not decision.allowed:
+                raise PermissionError(decision.message)
+            reservation = UsageReservation(uuid.uuid4().hex, delta, month_key(self._now()), state.plan == "trial")
+            self._increment_usage_payload(
+                payload, month=reservation.month, count=reservation.count, trial=reservation.trial, now_text=iso(self._now())
+            )
+            self._save_state_payload(payload)
         self._live_usage_reservations.add(reservation.token)
         return reservation
 
@@ -609,18 +651,16 @@ class ProductAccessManager:
     def release_created_documents(self, reservation: UsageReservation | None) -> None:
         if reservation is None or reservation.token not in self._live_usage_reservations:
             return
-        payload = self._ensure_trial_started(self._load_state_payload())
-        usage = payload.get("usage_by_month") if isinstance(payload.get("usage_by_month"), dict) else {}
-        current = int(usage.get(reservation.month, 0) or 0)
-        usage[reservation.month] = max(0, current - reservation.count)
-        payload["usage_by_month"] = usage
-        if reservation.trial:
-            payload["trial_created_total"] = max(
-                0,
-                int(payload.get("trial_created_total", 0) or 0) - reservation.count,
-            )
-        payload["updated_at"] = iso(self._now())
-        self._save_state_payload(payload)
+        with self._state_mutation_lock():
+            payload = self._ensure_trial_started(self._load_state_payload())
+            usage = payload.get("usage_by_month") if isinstance(payload.get("usage_by_month"), dict) else {}
+            current = int(usage.get(reservation.month, 0) or 0)
+            usage[reservation.month] = max(0, current - reservation.count)
+            payload["usage_by_month"] = usage
+            if reservation.trial:
+                payload["trial_created_total"] = max(0, int(payload.get("trial_created_total", 0) or 0) - reservation.count)
+            payload["updated_at"] = iso(self._now())
+            self._save_state_payload(payload)
         self._live_usage_reservations.discard(reservation.token)
 
     def current_watermark_text(self) -> str:
@@ -700,6 +740,31 @@ class ProductAccessMixin:
 
     def _product_access_manager(self) -> ProductAccessManager:
         return ProductAccessManager()
+
+    def _enforce_product_configuration_limits(self, *, template_count: int | None = None, profile_count: int | None = None) -> None:
+        if not product_access_enforcement_enabled():
+            return
+        decision = self._product_access_manager().check_configuration_limits(
+            template_count=template_count, profile_count=profile_count
+        )
+        if not decision.allowed:
+            raise PermissionError(f"{decision.title}: {decision.message}")
+
+    def _product_configuration_allowed(self, *, template_count: int | None = None, profile_count: int | None = None, show_warning: bool = True) -> bool:
+        if not product_access_enforcement_enabled():
+            return True
+        decision = self._product_access_manager().check_configuration_limits(
+            template_count=template_count, profile_count=profile_count
+        )
+        if decision.allowed:
+            return True
+        if show_warning:
+            try:
+                from tkinter import messagebox
+                messagebox.showwarning(decision.title, decision.message, parent=getattr(self, "root", None))
+            except Exception as exc:
+                record_soft_exception("product_access.configuration_warning", exc)
+        return False
 
     def _apply_product_watermark_to_docx(self, created_files: Iterable[str | Path]) -> list[Path]:
         paths = [Path(item) for item in created_files]

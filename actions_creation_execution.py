@@ -343,6 +343,15 @@ class ActionsCreationExecutionMixin:
             self._set_status("Создание отменено: готовые документы не изменены")
             return False
 
+        try:
+            transaction.validate_reported_files(staged_files)
+        except Exception as exc:
+            transaction.rollback()
+            self._active_patient_output_dir = final_dir
+            record_classified_error("validate_staged_output_manifest", exc, category=ErrorCategory.DOCX_RENDER)
+            messagebox.showerror("Документы не созданы", f"Нарушена граница безопасной транзакции:\n\n{exc}")
+            return False
+
         access_reservation = None
         reserve_access = getattr(self, "_reserve_product_access_for_staged_files", None)
         if callable(reserve_access):
@@ -356,7 +365,7 @@ class ActionsCreationExecutionMixin:
                 return False
 
         try:
-            mapping = transaction.commit()
+            mapping = transaction.commit(expected_files=staged_files)
         except Exception as exc:
             transaction.rollback()
             release_access = getattr(self, "_release_product_access_reservation", None)
@@ -390,10 +399,10 @@ class ActionsCreationExecutionMixin:
             direct = mapping.get(candidate)
             if direct is not None:
                 return direct
-            try:
-                return final_dir / candidate.relative_to(staging_dir)
-            except ValueError:
-                return candidate
+            # Ancillary reports are committed by the same transaction but are not
+            # part of the billable created-file manifest. Resolve them only when
+            # they were actually mapped.
+            raise RuntimeError(f"Транзакция не опубликовала заявленный файл: {candidate}")
 
         created_medical = [committed_path(path) for path in created_medical]
         created_custom = [committed_path(path) for path in created_custom]

@@ -274,13 +274,49 @@ class OutputTransaction:
             index += 1
         return candidate
 
-    def commit(self) -> dict[Path, Path]:
+    def validate_reported_files(self, reported_files) -> tuple[Path, ...]:
+        if self.stage_dir is None or not self.stage_dir.exists():
+            raise RuntimeError("Output transaction has not been started.")
+        stage = self.stage_dir.resolve()
+        validated: list[Path] = []
+        for raw in reported_files:
+            candidate = Path(raw)
+            if not candidate.exists() or not candidate.is_file():
+                raise FileNotFoundError(f"Генератор сообщил о файле, которого нет: {candidate}")
+            resolved = candidate.resolve()
+            try:
+                resolved.relative_to(stage)
+            except ValueError as exc:
+                raise RuntimeError(f"Генератор попытался выдать файл вне staging-транзакции: {candidate}") from exc
+            validated.append(candidate)
+        if not validated:
+            raise RuntimeError("Генератор не сообщил ни одного итогового файла.")
+        return tuple(dict.fromkeys(validated))
+
+    @staticmethod
+    def _allowed_ancillary_file(path: Path) -> bool:
+        name = path.name.casefold()
+        return path.suffix.casefold() == ".txt" and ("report" in name or "отч" in name)
+
+    def commit(self, *, expected_files=None) -> dict[Path, Path]:
+        """Publish the complete staged output atomically or restore the prior final directory state."""
         if self.stage_dir is None or not self.stage_dir.exists():
             raise RuntimeError("Output transaction has not been started.")
         stage = self.stage_dir
         files = sorted((p for p in stage.rglob("*") if p.is_file()), key=lambda p: str(p.relative_to(stage)).casefold())
         if not files:
             raise RuntimeError("Output transaction contains no files to commit.")
+        if expected_files is not None:
+            expected = {self._path_key(path) for path in self.validate_reported_files(expected_files)}
+            unexpected = [
+                path for path in files
+                if self._path_key(path) not in expected and not self._allowed_ancillary_file(path)
+            ]
+            if unexpected:
+                raise RuntimeError(
+                    "Staging содержит неучтённые файлы; комплект не опубликован: "
+                    + ", ".join(path.name for path in unexpected[:10])
+                )
 
         overwrite = {self._path_key(Path(p)) for p in self.overwrite_paths}
         targets = [(source, self.final_dir / source.relative_to(stage)) for source in files]

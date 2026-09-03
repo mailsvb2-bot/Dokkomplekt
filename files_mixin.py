@@ -198,6 +198,7 @@ class FilesMixin:
             self.primary_selected_status_var.set(" ")
         self.data = PatientData()
 
+    @staticmethod
     def _primary_type_from_parsed_data(data: PatientData) -> str:
         kind = (data.input_document_kind or "").lower().replace("ё", "е")
         if "направ" in kind or "госпитализируется" in kind:
@@ -221,20 +222,26 @@ class FilesMixin:
                     "В блок 01 нужно выбрать первичный документ Word в формате DOC/DOCX/DOCM.",
                 )
             return
+        # Parse before committing any patient-scoped UI/runtime state.  A corrupt
+        # or unreadable candidate must not evict a valid patient already open in
+        # the application.
+        try:
+            parsed = self._parse_primary_document(candidate)
+        except Exception as exc:
+            record_soft_exception("files_mixin.apply_primary_document_parse", exc, detail=str(candidate))
+            messagebox.showerror(
+                "Первичный документ не прочитан",
+                "Выбранный Word-документ не удалось прочитать. Текущий пациент и его данные оставлены без изменений.\n\n"
+                + str(exc),
+            )
+            return
+
         path = sync_selected_primary_document_path(self, candidate)
         self._remember_dialog_directory(DIR_PRIMARY_DOCUMENTS, path)
         self._release_patient_scoped_output_dir_before_new_primary()
         self._reset_primary_document_runtime_state()
         self._set_output_dir_from_primary_default(path)
-
-        try:
-            parsed = self._parse_primary_document(path)
-            self._set_primary_document_type(self._primary_type_from_parsed_data(parsed))
-        except Exception as exc:
-            # Если файл формально выбран, но тип не удалось понять до основного
-            # разбора, оставляем безопасный режим первичного осмотра без popup.
-            record_soft_exception("files_mixin.apply_primary_document_type", exc, detail=path)
-            self._set_primary_document_type("primary_exam")
+        self._set_primary_document_type(self._primary_type_from_parsed_data(parsed))
 
         if hasattr(self, "_set_primary_drop_selected"):
             self._set_primary_drop_selected(path)

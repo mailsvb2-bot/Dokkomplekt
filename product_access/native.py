@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 from typing import Any, Mapping
 
+from medical_paths import atomic_write_text
 from product_access import AccessDecision, LicenseEntitlement, ProductAccessManager
 
 try:
@@ -116,10 +117,7 @@ class NativeProductAccessManager(ProductAccessManager):
         payload: Any = json.loads(text or "{}")
         if isinstance(payload, dict) and is_rust_license_document(payload):
             _entitlement_payload(text)
-            tmp_path = self.license_path.with_suffix(".tmp")
-            tmp_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path.write_text(text, "utf-8")
-            os.replace(tmp_path, self.license_path)
+            atomic_write_text(self.license_path, text)
             return self.current_state()
         entitlement = LicenseEntitlement.from_mapping(payload) if isinstance(payload, dict) else None
         if entitlement and entitlement.signature == "rust-ed25519":

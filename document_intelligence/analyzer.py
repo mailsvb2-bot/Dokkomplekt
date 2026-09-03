@@ -12,12 +12,9 @@ from medical_docx_xml_fragments import ensure_docx_compatible
 from .models import DocumentBlueprint, DocumentSource, FieldSpec, PopupField, SectionSpec, SignatureSpec
 from .pdf_reader import read_pdf_text
 from .text_utils import custom_field_id, field_id_from_placeholder, normalize, value_kind
+from .form_fill import BLANK_RE, SIGNATURE_RE, iter_all_story_paragraphs, iter_document_tables, unique_cells, visible_blank_slot
 
 PLACEHOLDER_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
-LABEL_BLANK_RE = re.compile(r"^\s*(?P<label>[^:：\n]{2,90}?)\s*[:：]\s*[_—–\-.\s]{3,}\s*$")
-LABEL_UNDERLINE_RE = re.compile(r"^\s*(?P<label>[^_—–\n]{2,90}?)\s+[_—–-]{3,}\s*$")
-BLANK_RE = re.compile(r"[_—–-]{3,}|\.{4,}")
-SIGNATURE_RE = re.compile(r"(?i)(подпись|директор|бухгалтер|врач|зав\.?\s*отдел|исполнитель|составил|утверждаю|signature|accountant|director|approved)")
 ACCOUNTING_RE = re.compile(r"(?i)(счет|счёт|инн|кпп|ндс|банк|бухгалтер|контрагент|invoice|vat|accountant)")
 MEDICAL_RE = re.compile(r"(?i)(пациент|диагноз|лечение|анамнез|выпис|эпикриз|patient|diagnosis)")
 LEGAL_RE = re.compile(r"(?i)(договор|иск|претензи|истец|ответчик|суд|contract|claim|court)")
@@ -30,11 +27,11 @@ def _read_docx(source: DocumentSource) -> tuple[tuple[str, ...], tuple[tuple[str
     doc = Document(str(path))
     lines: list[str] = []
     rows: list[tuple[str, ...]] = []
-    for paragraph in doc.paragraphs:
+    for paragraph in iter_all_story_paragraphs(doc):
         text = normalize(paragraph.text)
         if text:
             lines.append(text)
-    for table in doc.tables:
+    for table in iter_document_tables(doc):
         for row in table.rows:
             cells: list[str] = []
             seen: set[int] = set()
@@ -45,8 +42,6 @@ def _read_docx(source: DocumentSource) -> tuple[tuple[str, ...], tuple[tuple[str
                 seen.add(tc_id)
                 text = normalize(" ".join(paragraph.text for paragraph in cell.paragraphs))
                 cells.append(text)
-                if text:
-                    lines.append(text)
             if any(cells):
                 rows.append(tuple(cells))
     return tuple(lines), tuple(rows)
@@ -100,9 +95,9 @@ def _infer_fields(lines: Sequence[str], rows: Sequence[Sequence[str]]) -> tuple[
         for match in PLACEHOLDER_RE.finditer(line):
             raw = match.group(1)
             add(raw, "placeholder", 0.98, field_id_from_placeholder(raw))
-        match = LABEL_BLANK_RE.match(line) or LABEL_UNDERLINE_RE.match(line)
-        if match:
-            add(match.group("label"), "visible_blank", 0.82)
+        slot = visible_blank_slot(line)
+        if slot is not None:
+            add(slot.label, "visible_blank", 0.82)
     for row in rows:
         for idx, cell in enumerate(row[:-1]):
             if normalize(cell) and (not normalize(row[idx + 1]) or BLANK_RE.search(normalize(row[idx + 1]))):

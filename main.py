@@ -103,11 +103,32 @@ def main() -> None:
     from tkinter import messagebox
     from app import CombinedMedicalDiaryApp
     from startup import _create_root, _startup_log_path, _write_startup_error
+    gui_lock_claimed = False
     try:
         root = _create_root()
+        from desktop_intake_agent import claim_gui_runtime_lock
+        gui_lock_claimed = claim_gui_runtime_lock()
+        if not gui_lock_claimed:
+            try:
+                root.withdraw()
+            except Exception as withdraw_exc:
+                record_soft_exception("main.second_instance_withdraw", withdraw_exc)
+            messagebox.showinfo(
+                "Dokkomplekt уже открыт",
+                "Главное окно Dokkomplekt уже запущено. Используйте существующее окно — второй экземпляр не будет открыт.",
+                parent=root,
+            )
+            root.destroy()
+            return
         CombinedMedicalDiaryApp(root)
         root.mainloop()
     except Exception as exc:
+        if gui_lock_claimed:
+            try:
+                from desktop_intake_agent import release_gui_runtime_lock
+                release_gui_runtime_lock()
+            except Exception as release_exc:
+                record_soft_exception("main.release_gui_runtime_lock_on_startup_failure", release_exc)
         details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
         _write_startup_error(details)
         try:

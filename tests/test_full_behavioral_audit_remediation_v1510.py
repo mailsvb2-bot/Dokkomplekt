@@ -173,6 +173,16 @@ def test_visual_marker_preserves_runs_and_rejects_ambiguous_selection(tmp_path: 
         replace_selection_with_placeholder(dup,"Диагноз","diagnosis.main",create_backup=False)
 
 
+def test_primary_type_helper_is_callable_through_mixin_instance_without_binding_self():
+    from files_mixin import FilesMixin
+    from medical_models import PatientData
+
+    app = object.__new__(FilesMixin)
+    data = PatientData()
+    data.input_document_kind = "первичный осмотр"
+    assert app._primary_type_from_parsed_data(data) == "primary_exam"
+
+
 def test_patient_reset_clears_external_sources_and_undo_history():
     from files_mixin import FilesMixin
     names = [

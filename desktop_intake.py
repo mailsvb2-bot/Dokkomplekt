@@ -51,6 +51,7 @@ DESKTOP_INTAKE_RELAXED_PRIMARY_THRESHOLD_FOR_DOCTOR_FOLDER = True
 DESKTOP_INTAKE_TOP_LEVEL_DOCX_DROP_STARTS_APP = True
 DESKTOP_INTAKE_REJECTS_UNREADABLE_DOCX_FALLBACKS = True
 DESKTOP_INTAKE_REASKS_AFTER_FOLDER_NAMING_REGRESSION = True
+DESKTOP_INTAKE_MAX_SEEN_SIGNATURES = 1000
 
 _ALLOWED_PRIMARY_SUFFIXES = {".docx", ".docm"}
 _PRIMARY_MARKERS = (
@@ -264,7 +265,7 @@ def normalize_intake_settings(raw: Mapping[str, object] | None) -> dict:
         "enabled": _setting_bool(data.get("enabled", False)),
         "folder": folder,
         "prompt_version": prompt_version,
-        "seen_signatures": tuple(dict.fromkeys(seen)),
+        "seen_signatures": tuple(dict.fromkeys(seen))[-DESKTOP_INTAKE_MAX_SEEN_SIGNATURES:],
     }
 
 

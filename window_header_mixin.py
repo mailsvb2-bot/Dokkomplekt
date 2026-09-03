@@ -227,8 +227,16 @@ class WindowHeaderMixin:
         from pathlib import Path
         candidate = Path(path).expanduser()
         candidate.parent.mkdir(parents=True, exist_ok=True)
+        previous = self._settings.get("active_universal_profile")
         self._settings["active_universal_profile"] = str(candidate)
-        self._save_settings()
+        if not self._save_settings():
+            if previous is None:
+                self._settings.pop("active_universal_profile", None)
+            else:
+                self._settings["active_universal_profile"] = previous
+            raise OSError(
+                "Не удалось сохранить выбранный профиль. Переключение отменено, чтобы после перезапуска не открылся другой профиль."
+            )
         try:
             self._refresh_custom_profile_tiles()
         except Exception as exc:
