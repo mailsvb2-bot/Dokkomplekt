@@ -5,7 +5,7 @@ use crate::storage::StoreError;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::{get, post},
+    routing::post,
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -31,14 +31,6 @@ pub struct CreateOrderResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub struct OrderStatusResponse {
-    pub order_id: Uuid,
-    pub plan: String,
-    pub amount_rub: u64,
-    pub status: OrderStatus,
-}
-
-#[derive(Debug, Serialize)]
 pub struct PaymentRetryResponse {
     pub order_id: Uuid,
     pub provider: String,
@@ -49,7 +41,6 @@ pub struct PaymentRetryResponse {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/orders", post(create_order))
-        .route("/api/orders/:order_id/status", get(order_status))
         .route("/api/orders/:order_id/payment", post(retry_payment))
 }
 
@@ -103,24 +94,6 @@ async fn create_order(
         payment_ready,
         payment_url: payment.payment_url,
         qr_url: payment.qr_url,
-    }))
-}
-
-async fn order_status(
-    State(state): State<AppState>,
-    Path(order_id): Path<Uuid>,
-) -> Result<Json<OrderStatusResponse>, StatusCode> {
-    let order = state
-        .store
-        .get_order_async(order_id)
-        .await
-        .map_err(store_error_status)?
-        .ok_or(StatusCode::NOT_FOUND)?;
-    Ok(Json(OrderStatusResponse {
-        order_id: order.id,
-        plan: order.plan,
-        amount_rub: order.amount_rub,
-        status: order.status,
     }))
 }
 
