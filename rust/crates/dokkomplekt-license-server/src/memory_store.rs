@@ -5,6 +5,7 @@ use crate::storage::{
 };
 use std::mem::discriminant;
 use std::sync::{Arc, RwLock};
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 impl LicenseStore for Arc<RwLock<MemoryStore>> {
@@ -101,6 +102,32 @@ impl LicenseStore for Arc<RwLock<MemoryStore>> {
         Ok(())
     }
 
+    fn get_license_by_id(&self, license_id: &str) -> Result<Option<LicenseRecord>, StoreError> {
+        let store = self.read().map_err(|_| StoreError::Poisoned)?;
+        Ok(store
+            .licenses
+            .values()
+            .find(|record| record.license_id == license_id)
+            .cloned())
+    }
+
+    fn revoke_license(
+        &self,
+        license_id: &str,
+        revoked_at: OffsetDateTime,
+    ) -> Result<LicenseRecord, StoreError> {
+        let mut store = self.write().map_err(|_| StoreError::Poisoned)?;
+        let record = store
+            .licenses
+            .values_mut()
+            .find(|record| record.license_id == license_id)
+            .ok_or(StoreError::NotFound)?;
+        if record.revoked_at.is_none() {
+            record.revoked_at = Some(revoked_at);
+        }
+        Ok(record.clone())
+    }
+
     fn audit(&self, record: AuditEventRecord) -> Result<(), StoreError> {
         let mut store = self.write().map_err(|_| StoreError::Poisoned)?;
         if store.audit_events.contains_key(&record.id) {
@@ -118,7 +145,6 @@ fn same_provider(left: &PaymentProvider, right: &PaymentProvider) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use time::OffsetDateTime;
 
     fn memory_store() -> Arc<RwLock<MemoryStore>> {
         Arc::new(RwLock::new(MemoryStore::default()))
