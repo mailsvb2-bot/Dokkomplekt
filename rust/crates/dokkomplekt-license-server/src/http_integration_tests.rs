@@ -1,8 +1,15 @@
-use super::{build_app, config::ServerConfig, state::AppState, storage::PostgresStore};
+use super::{
+    build_app,
+    config::ServerConfig,
+    state::AppState,
+    storage::{LicenseRecord, LicenseStore, PostgresStore},
+};
 use axum::{body::{to_bytes, Body}, http::{header::CONTENT_TYPE, Method, Request, StatusCode}, Router};
 use postgres::{Client, NoTls};
 use serde_json::{json, Value};
+use time::OffsetDateTime;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 fn base_config(database_url: Option<String>) -> ServerConfig {
     ServerConfig {
@@ -139,4 +146,159 @@ fn postgres_runtime_migration_records_schema_version_when_database_url_is_presen
     assert!(applied);
     assert_eq!(checksum.len(), 64);
     assert!(checksum.chars().all(|value| value.is_ascii_hexdigit()));
+}
+
+#[tokio::test]
+async fn bank_invoice_confirmation_is_secret_protected_and_idempotent() {
+    let mut config = base_config(None);
+    config.payment_provider = "bank_invoice".to_string();
+    config.provider_callback_secret = Some("bank-secret".to_string());
+    let app = build_app(AppState::try_new(config).unwrap());
+
+    let (status, order) = call(
+        app.clone(),
+        Method::POST,
+        "/api/orders".to_string(),
+        Some(json!({ "plan": "doctor_pro", "amount_rub": 3900, "machine_hash": "machine-bank" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let order_id = order["order_id"].as_str().unwrap().to_string();
+
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        "/api/provider/bank-invoice/confirm".to_string(),
+        Some(json!({
+            "order_id": order_id,
+            "transaction_id": "bank-tx-1",
+            "amount_rub": 3900,
+            "confirmation_secret": "wrong"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let body = json!({
+        "order_id": order_id,
+        "transaction_id": "bank-tx-1",
+        "amount_rub": 3900,
+        "confirmation_secret": "bank-secret"
+    });
+    let (status, accepted) = call(
+        app.clone(),
+        Method::POST,
+        "/api/provider/bank-invoice/confirm".to_string(),
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(accepted["duplicate"], false);
+
+    let (status, duplicate) = call(
+        app.clone(),
+        Method::POST,
+        "/api/provider/bank-invoice/confirm".to_string(),
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(duplicate["duplicate"], true);
+
+    let (status, state) = call(
+        app,
+        Method::GET,
+        format!("/api/orders/{order_id}/status"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(state["status"], "paid");
+}
+
+#[tokio::test]
+async fn license_revocation_is_unavailable_without_configured_admin_secret() {
+    let state = AppState::try_new(base_config(None)).unwrap();
+    let license_id = "license-no-admin-secret";
+    state
+        .store
+        .store_license(LicenseRecord {
+            id: Uuid::new_v4(),
+            order_id: Uuid::new_v4(),
+            license_id: license_id.to_string(),
+            document_json: "{}".to_string(),
+            issued_at: OffsetDateTime::now_utc(),
+            revoked_at: None,
+        })
+        .unwrap();
+    let app = build_app(state);
+
+    let (status, _) = call(
+        app,
+        Method::POST,
+        format!("/api/licenses/{license_id}/revoke"),
+        Some(json!({ "admin_token": "anything" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn license_status_and_revocation_are_persistent_and_secret_protected() {
+    let mut config = base_config(None);
+    config.license_issue_secret = Some("admin-secret".to_string());
+    let state = AppState::try_new(config).unwrap();
+    let license_id = "license-status-test";
+    state
+        .store
+        .store_license(LicenseRecord {
+            id: Uuid::new_v4(),
+            order_id: Uuid::new_v4(),
+            license_id: license_id.to_string(),
+            document_json: "{}".to_string(),
+            issued_at: OffsetDateTime::now_utc(),
+            revoked_at: None,
+        })
+        .unwrap();
+    let app = build_app(state);
+
+    let (status, active) = call(
+        app.clone(),
+        Method::GET,
+        format!("/api/licenses/{license_id}/status"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(active["status"], "active");
+
+    let (status, _) = call(
+        app.clone(),
+        Method::POST,
+        format!("/api/licenses/{license_id}/revoke"),
+        Some(json!({ "admin_token": "wrong", "reason": "test" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (status, revoked) = call(
+        app.clone(),
+        Method::POST,
+        format!("/api/licenses/{license_id}/revoke"),
+        Some(json!({ "admin_token": "admin-secret", "reason": "test" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(revoked["status"], "revoked");
+
+    let (status, cached) = call(
+        app,
+        Method::GET,
+        format!("/api/licenses/{license_id}/status"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cached["status"], "revoked");
+    assert!(cached["revoked_at"].is_string());
 }
