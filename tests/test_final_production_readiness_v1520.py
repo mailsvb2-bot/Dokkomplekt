@@ -112,9 +112,16 @@ def test_primary_default_output_root_is_vypisannye_pacienty_not_source_folder(tm
     app.diary_files = []
     assert app._base_output_dir() == desktop / desktop_intake.DESKTOP_INTAKE_FOLDER_NAME
 
+    locked_patient = desktop / desktop_intake.DESKTOP_INTAKE_FOLDER_NAME / "Иванов И.И."
+    app.output_dir_var.set(locked_patient)
+    app._manual_output_dir = False
+    app._output_dir_auto_locked_to_patient = True
+    assert app._base_output_dir() == locked_patient
+
     manual = tmp_path / "doctor-selected-output"
     app.output_dir_var.set(manual)
     app._manual_output_dir = True
+    app._output_dir_auto_locked_to_patient = False
     assert app._base_output_dir() == manual
 
 def test_visible_fullwidth_colon_and_no_colon_are_fillable(tmp_path: Path) -> None:

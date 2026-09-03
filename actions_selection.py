@@ -53,7 +53,7 @@ class ActionsSelectionMixin:
         # Явный ручной выбор и desktop-intake patient lock имеют абсолютный
         # приоритет. Обычный primary selection никогда не должен направлять
         # результаты обратно в произвольную папку исходного DOCX.
-        if explicit and self._manual_output_dir:
+        if explicit and (self._manual_output_dir or getattr(self, "_output_dir_auto_locked_to_patient", False)):
             return Path(explicit)
         if primary_path is not None:
             from desktop_intake import default_intake_folder
