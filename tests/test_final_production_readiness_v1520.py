@@ -268,6 +268,28 @@ def test_concurrent_product_usage_has_no_lost_updates_or_shared_tmp_race(tmp_pat
         assert not list(storage.glob("*.tmp"))
 
 
+def test_windows_pid_probe_never_uses_posix_kill(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[int] = []
+
+    def forbidden_kill(pid: int, signal: int) -> None:
+        raise AssertionError(f"Windows PID probe must not call os.kill({pid}, {signal})")
+
+    monkeypatch.setattr(medical_paths.os, "name", "nt")
+    monkeypatch.setattr(medical_paths.os, "kill", forbidden_kill)
+    monkeypatch.setattr(medical_paths, "_windows_pid_is_running", lambda pid: calls.append(pid) or True)
+    assert medical_paths._pid_is_running(424242)
+    assert calls == [424242]
+
+
+def test_current_pid_probe_short_circuits_without_os_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        medical_paths,
+        "_windows_pid_is_running",
+        lambda pid: (_ for _ in ()).throw(AssertionError("current PID must short-circuit")),
+    )
+    assert medical_paths._pid_is_running(os.getpid())
+
+
 def test_interprocess_lock_uses_owner_directory_without_open_handle(tmp_path: Path) -> None:
     lock = tmp_path / "descriptor.lock"
     with interprocess_file_lock(lock):

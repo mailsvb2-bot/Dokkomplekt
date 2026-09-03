@@ -145,9 +145,44 @@ def prune_old_files(directory: str | Path, *, pattern: str, keep: int) -> tuple[
     return tuple(removed)
 
 
+def _windows_pid_is_running(pid: int) -> bool:
+    """Probe a Windows PID without sending it any signal or termination code."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        process_query_limited_information = 0x1000
+        still_active = 259
+        error_access_denied = 5
+        win_dll = getattr(ctypes, "WinDLL", None)
+        get_last_error = getattr(ctypes, "get_last_error", None)
+        if win_dll is None or get_last_error is None:
+            return True
+        kernel32 = win_dll("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+        if not handle:
+            return int(get_last_error()) == error_access_denied
+        try:
+            exit_code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                # We did open the process, so a transient query failure must not
+                # authorize stale-lock deletion.
+                return True
+            return int(exit_code.value) == still_active
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception as exc:
+        record_soft_exception("medical_paths.pid_probe_windows", exc, detail=str(pid))
+        return True  # fail closed: never delete a lock because the OS probe failed
+
+
 def _pid_is_running(pid: int) -> bool:
     if pid <= 0:
         return False
+    if pid == os.getpid():
+        return True
+    if os.name == "nt":
+        return _windows_pid_is_running(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
