@@ -81,6 +81,12 @@ pub trait LicenseStore: Send + Sync + 'static {
     fn record_payment_event(&self, record: PaymentEventRecord) -> Result<(), StoreError>;
     fn record_payment_event_for_order(&self, record: PaymentEventRecord) -> Result<PaymentEventWriteOutcome, StoreError>;
     fn store_license(&self, record: LicenseRecord) -> Result<(), StoreError>;
+    fn get_license_by_id(&self, license_id: &str) -> Result<Option<LicenseRecord>, StoreError>;
+    fn revoke_license(
+        &self,
+        license_id: &str,
+        revoked_at: OffsetDateTime,
+    ) -> Result<LicenseRecord, StoreError>;
     fn audit(&self, record: AuditEventRecord) -> Result<(), StoreError>;
 }
 
@@ -195,6 +201,39 @@ impl StoreBackend {
         }
     }
 
+    pub async fn get_license_by_id_async(
+        &self,
+        license_id: &str,
+    ) -> Result<Option<LicenseRecord>, StoreError> {
+        let license_id = license_id.to_string();
+        match self {
+            Self::Memory(store) => store.get_license_by_id(&license_id),
+            Self::Postgres(store) => {
+                let store = store.clone();
+                tokio::task::spawn_blocking(move || store.get_license_by_id(&license_id))
+                    .await
+                    .map_err(|_| StoreError::Poisoned)?
+            }
+        }
+    }
+
+    pub async fn revoke_license_async(
+        &self,
+        license_id: &str,
+        revoked_at: OffsetDateTime,
+    ) -> Result<LicenseRecord, StoreError> {
+        let license_id = license_id.to_string();
+        match self {
+            Self::Memory(store) => store.revoke_license(&license_id, revoked_at),
+            Self::Postgres(store) => {
+                let store = store.clone();
+                tokio::task::spawn_blocking(move || store.revoke_license(&license_id, revoked_at))
+                    .await
+                    .map_err(|_| StoreError::Poisoned)?
+            }
+        }
+    }
+
     pub async fn issue_license_for_paid_order_async(&self, record: LicenseRecord) -> Result<LicenseIssueOutcome, StoreError> {
         match self {
             Self::Memory(store) => issue_license_for_memory(store, record),
@@ -260,6 +299,24 @@ impl LicenseStore for StoreBackend {
         match self {
             Self::Memory(store) => store.store_license(record),
             Self::Postgres(store) => store.store_license(record),
+        }
+    }
+
+    fn get_license_by_id(&self, license_id: &str) -> Result<Option<LicenseRecord>, StoreError> {
+        match self {
+            Self::Memory(store) => store.get_license_by_id(license_id),
+            Self::Postgres(store) => store.get_license_by_id(license_id),
+        }
+    }
+
+    fn revoke_license(
+        &self,
+        license_id: &str,
+        revoked_at: OffsetDateTime,
+    ) -> Result<LicenseRecord, StoreError> {
+        match self {
+            Self::Memory(store) => store.revoke_license(license_id, revoked_at),
+            Self::Postgres(store) => store.revoke_license(license_id, revoked_at),
         }
     }
 
