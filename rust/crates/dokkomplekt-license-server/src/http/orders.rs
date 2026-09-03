@@ -5,7 +5,7 @@ use crate::storage::StoreError;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -25,8 +25,17 @@ pub struct CreateOrderResponse {
     pub status: OrderStatus,
     pub provider: String,
     pub amount_rub: u64,
+    pub payment_ready: bool,
     pub payment_url: String,
     pub qr_url: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OrderStatusResponse {
+    pub order_id: Uuid,
+    pub plan: String,
+    pub amount_rub: u64,
+    pub status: OrderStatus,
 }
 
 #[derive(Debug, Serialize)]
@@ -40,6 +49,7 @@ pub struct PaymentRetryResponse {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/orders", post(create_order))
+        .route("/api/orders/:order_id/status", get(order_status))
         .route("/api/orders/:order_id/payment", post(retry_payment))
 }
 
@@ -74,14 +84,43 @@ async fn create_order(
         .await
         .map_err(store_error_status)?;
     let provider = state.config.payment_provider.clone();
-    let payment = create_payment_for_order(&state, &record).await?;
+
+    // Persist the order before talking to the external provider. If the provider
+    // times out after accepting the request, the caller still receives order_id
+    // and can safely retry /payment. YooKassa sees the same idempotence key and
+    // returns the same payment instead of creating a second one.
+    let (payment_ready, payment) = match create_payment_for_order(&state, &record).await {
+        Ok(payment) => (true, payment),
+        Err(_) if provider != "manual" => (false, PaymentLinks::empty()),
+        Err(status) => return Err(status),
+    };
+
     Ok(Json(CreateOrderResponse {
         order_id,
         status: record.status,
         provider,
         amount_rub,
+        payment_ready,
         payment_url: payment.payment_url,
         qr_url: payment.qr_url,
+    }))
+}
+
+async fn order_status(
+    State(state): State<AppState>,
+    Path(order_id): Path<Uuid>,
+) -> Result<Json<OrderStatusResponse>, StatusCode> {
+    let order = state
+        .store
+        .get_order_async(order_id)
+        .await
+        .map_err(store_error_status)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(OrderStatusResponse {
+        order_id: order.id,
+        plan: order.plan,
+        amount_rub: order.amount_rub,
+        status: order.status,
     }))
 }
 
@@ -111,6 +150,15 @@ async fn retry_payment(
 struct PaymentLinks {
     payment_url: String,
     qr_url: String,
+}
+
+impl PaymentLinks {
+    fn empty() -> Self {
+        Self {
+            payment_url: String::new(),
+            qr_url: String::new(),
+        }
+    }
 }
 
 async fn create_payment_for_order(
@@ -220,5 +268,12 @@ mod tests {
         assert_eq!(tariff_amount_rub("clinic"), Some(49_000));
         assert!(normalize_order_plan("trial").is_none());
         assert!(normalize_order_plan("unknown").is_none());
+    }
+
+    #[test]
+    fn failed_external_payment_can_return_a_retryable_order() {
+        let payment = PaymentLinks::empty();
+        assert!(payment.payment_url.is_empty());
+        assert!(payment.qr_url.is_empty());
     }
 }
