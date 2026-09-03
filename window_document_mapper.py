@@ -26,7 +26,7 @@ def open_universal_document_mapper(app) -> None:
     path = filedialog.askopenfilename(
         title="Выберите DOCX для разметки профиля",
         initialdir=self._dialog_initial_dir(DIR_PRIMARY_DOCUMENTS),
-        filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("All files", "*.*")],
+        filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("Все файлы", "*.*")],
     )
     if not path:
         return
@@ -414,7 +414,7 @@ def open_universal_document_mapper(app) -> None:
         template_path = filedialog.askopenfilename(
             title="Выберите пользовательский DOCX-шаблон",
             initialdir=self._dialog_initial_dir(DIR_PRIMARY_DOCUMENTS),
-            filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("All files", "*.*")],
+            filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("Все файлы", "*.*")],
             parent=dialog,
         )
         if not template_path:
@@ -447,7 +447,7 @@ def open_universal_document_mapper(app) -> None:
         template_path = filedialog.askopenfilename(
             title="Выберите DOCX-шаблон для новой кнопки",
             initialdir=self._dialog_initial_dir(DIR_PRIMARY_DOCUMENTS),
-            filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("All files", "*.*")],
+            filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("Все файлы", "*.*")],
             parent=dialog,
         )
         if not template_path:
@@ -552,7 +552,7 @@ def open_universal_document_mapper(app) -> None:
             title="Экспорт профиля .medpack.zip",
             initialfile="MedicalDiaryAutofill_Profile.medpack.zip",
             defaultextension=".zip",
-            filetypes=[("Medical profile", "*.zip *.medpack"), ("All files", "*.*")],
+            filetypes=[("Профиль документов", "*.zip *.medpack"), ("Все файлы", "*.*")],
             parent=dialog,
         )
         if not target:
@@ -569,7 +569,7 @@ def open_universal_document_mapper(app) -> None:
     def import_profile() -> None:
         source = filedialog.askopenfilename(
             title="Импортировать medpack/profile",
-            filetypes=[("Medical profile", "*.zip *.medpack *.json"), ("All files", "*.*")],
+            filetypes=[("Профиль документов", "*.zip *.medpack *.json"), ("Все файлы", "*.*")],
             parent=dialog,
         )
         if not source:
@@ -647,11 +647,11 @@ def open_universal_document_mapper(app) -> None:
                 strict=True,
             )
             report_path = save_generation_report(result, technical_report_path(out_dir, "custom_generation_report.txt"))
-            messagebox.showinfo("Custom DOCX", result.human_report(), parent=dialog)
+            messagebox.showinfo("Свои документы", result.human_report(), parent=dialog)
             status_var.set(f"Создано custom-файлов: {len(result.created_files)}. Отчёт: {report_path}")
             self._set_status("Custom DOCX созданы из профиля")
         except Exception as exc:
-            messagebox.showerror("Custom DOCX", str(exc), parent=dialog)
+            messagebox.showerror("Свои документы", str(exc), parent=dialog)
 
     def profile_builder_checklist() -> None:
         try:

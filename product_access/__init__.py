@@ -938,7 +938,7 @@ class ProductLicenseMixin:
                 messagebox.showerror("Лицензия не установлена", str(exc))
 
         def load_file() -> None:
-            path = filedialog.askopenfilename(title="Выберите файл лицензии", filetypes=(("License JSON", "*.json"), ("All files", "*.*")))
+            path = filedialog.askopenfilename(title="Выберите файл лицензии", filetypes=(("Файл лицензии JSON", "*.json"), ("Все файлы", "*.*")))
             if not path:
                 return
             try:

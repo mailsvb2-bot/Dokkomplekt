@@ -251,7 +251,7 @@ class DiaryTemplateSelectionMixin:
             selected_file = filedialog.askopenfilename(
                 title="Выберите любой DOCX из папки «шаблоны дневников»",
                 initialdir=self._dialog_initial_dir(DIR_NUMBERED_DIARY_TEMPLATES, self._get_saved_directory(DIR_DIARY_TEMPLATES)),
-                filetypes=[("Word DOCX", "*.docx *.docm"), ("All files", "*.*")],
+                filetypes=[("Word DOCX", "*.docx *.docm"), ("Все файлы", "*.*")],
             )
             if selected_file:
                 folder = str(Path(selected_file).parent)

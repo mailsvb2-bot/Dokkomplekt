@@ -9,8 +9,8 @@ from window_mapper_dialog import open_template_setup_center, open_universal_docu
 def _open_pdf_template_import_dialog(app, *, parent=None) -> None:
     target_parent = parent or getattr(app, "root", None)
     source_paths = filedialog.askopenfilenames(
-        title="Select PDF document examples",
-        filetypes=[("PDF", "*.pdf"), ("All files", "*.*")],
+        title="Выберите примеры документов PDF",
+        filetypes=[("PDF", "*.pdf"), ("Все файлы", "*.*")],
         parent=target_parent,
     )
     if not source_paths:
