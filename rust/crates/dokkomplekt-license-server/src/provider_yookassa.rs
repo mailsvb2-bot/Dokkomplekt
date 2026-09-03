@@ -39,9 +39,7 @@ impl YooKassaProvider {
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECONDS))
             .build()
             .map_err(|error| {
-                ProviderError::Transport(format!(
-                    "failed to build YooKassa HTTP client: {error}"
-                ))
+                ProviderError::Transport(format!("failed to build YooKassa HTTP client: {error}"))
             })
     }
 
@@ -140,9 +138,7 @@ impl PaymentProvider for YooKassaProvider {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| {
-                ProviderError::BadRequest(
-                    "YooKassa response has no confirmation_url".to_string(),
-                )
+                ProviderError::BadRequest("YooKassa response has no confirmation_url".to_string())
             })?
             .to_string();
         let qr_url = self.sbp_only.then(|| confirmation_url.clone());
@@ -156,9 +152,7 @@ impl PaymentProvider for YooKassaProvider {
 
     fn parse_callback(&self, raw_body: &[u8]) -> Result<ProviderEvent, ProviderError> {
         let notification: Value = serde_json::from_slice(raw_body).map_err(|error| {
-            ProviderError::BadRequest(format!(
-                "invalid YooKassa notification JSON: {error}"
-            ))
+            ProviderError::BadRequest(format!("invalid YooKassa notification JSON: {error}"))
         })?;
         if notification.get("type").and_then(Value::as_str) != Some("notification") {
             return Err(ProviderError::BadRequest(
@@ -180,9 +174,7 @@ impl PaymentProvider for YooKassaProvider {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| {
-                ProviderError::BadRequest(
-                    "YooKassa notification has no payment id".to_string(),
-                )
+                ProviderError::BadRequest("YooKassa notification has no payment id".to_string())
             })?;
 
         // The callback body is only a notification. Payment proof comes from
@@ -278,9 +270,9 @@ fn payment_amount_rub(payment: &Value) -> Result<u64, ProviderError> {
             "YooKassa payment has non-zero kopecks".to_string(),
         ));
     }
-    rubles.parse::<u64>().map_err(|_| {
-        ProviderError::BadRequest("YooKassa payment amount is invalid".to_string())
-    })
+    rubles
+        .parse::<u64>()
+        .map_err(|_| ProviderError::BadRequest("YooKassa payment amount is invalid".to_string()))
 }
 
 fn payment_order_id(payment: &Value) -> Result<Uuid, ProviderError> {
@@ -293,9 +285,8 @@ fn payment_order_id(payment: &Value) -> Result<Uuid, ProviderError> {
         .ok_or_else(|| {
             ProviderError::BadRequest("YooKassa payment has no metadata.order_id".to_string())
         })?;
-    Uuid::parse_str(raw).map_err(|_| {
-        ProviderError::BadRequest("YooKassa metadata.order_id is invalid".to_string())
-    })
+    Uuid::parse_str(raw)
+        .map_err(|_| ProviderError::BadRequest("YooKassa metadata.order_id is invalid".to_string()))
 }
 
 fn payment_method_type(payment: &Value) -> Option<String> {

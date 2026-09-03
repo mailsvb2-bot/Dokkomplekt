@@ -25,7 +25,10 @@ impl LicenseStore for Arc<RwLock<MemoryStore>> {
 
     fn update_order_status(&self, order_id: Uuid, status: OrderStatus) -> Result<(), StoreError> {
         let mut store = self.write().map_err(|_| StoreError::Poisoned)?;
-        let order = store.orders.get_mut(&order_id).ok_or(StoreError::NotFound)?;
+        let order = store
+            .orders
+            .get_mut(&order_id)
+            .ok_or(StoreError::NotFound)?;
         order.status = status;
         Ok(())
     }
@@ -39,12 +42,20 @@ impl LicenseStore for Arc<RwLock<MemoryStore>> {
         Ok(())
     }
 
-    fn create_activation_for_order(&self, record: ActivationRecord, max_machines: u32) -> Result<OrderRecord, StoreError> {
+    fn create_activation_for_order(
+        &self,
+        record: ActivationRecord,
+        max_machines: u32,
+    ) -> Result<OrderRecord, StoreError> {
         let mut store = self.write().map_err(|_| StoreError::Poisoned)?;
         if store.activations.contains_key(&record.id) {
             return Err(StoreError::Conflict);
         }
-        let order = store.orders.get(&record.order_id).ok_or(StoreError::NotFound)?.clone();
+        let order = store
+            .orders
+            .get(&record.order_id)
+            .ok_or(StoreError::NotFound)?
+            .clone();
         if !matches!(order.status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
             return Err(StoreError::Conflict);
         }
@@ -72,7 +83,10 @@ impl LicenseStore for Arc<RwLock<MemoryStore>> {
         Ok(())
     }
 
-    fn record_payment_event_for_order(&self, record: PaymentEventRecord) -> Result<PaymentEventWriteOutcome, StoreError> {
+    fn record_payment_event_for_order(
+        &self,
+        record: PaymentEventRecord,
+    ) -> Result<PaymentEventWriteOutcome, StoreError> {
         let mut store = self.write().map_err(|_| StoreError::Poisoned)?;
         if store.payment_events.values().any(|existing| {
             same_provider(&existing.provider, &record.provider)
@@ -80,7 +94,10 @@ impl LicenseStore for Arc<RwLock<MemoryStore>> {
         }) {
             return Ok(PaymentEventWriteOutcome::Duplicate);
         }
-        let order = store.orders.get_mut(&record.order_id).ok_or(StoreError::NotFound)?;
+        let order = store
+            .orders
+            .get_mut(&record.order_id)
+            .ok_or(StoreError::NotFound)?;
         if order.amount_rub != record.amount_rub {
             return Err(StoreError::Invalid("amount_mismatch".to_string()));
         }
@@ -94,7 +111,10 @@ impl LicenseStore for Arc<RwLock<MemoryStore>> {
     fn store_license(&self, record: LicenseRecord) -> Result<(), StoreError> {
         let mut store = self.write().map_err(|_| StoreError::Poisoned)?;
         if store.licenses.contains_key(&record.id)
-            || store.licenses.values().any(|existing| existing.license_id == record.license_id)
+            || store
+                .licenses
+                .values()
+                .any(|existing| existing.license_id == record.license_id)
         {
             return Err(StoreError::Conflict);
         }
@@ -165,7 +185,9 @@ mod tests {
     fn provider_callback_store_method_marks_order_paid_and_deduplicates() {
         let store = memory_store();
         let order_id = Uuid::new_v4();
-        store.create_order(order_record(order_id, OrderStatus::WaitingPayment)).unwrap();
+        store
+            .create_order(order_record(order_id, OrderStatus::WaitingPayment))
+            .unwrap();
 
         let record = PaymentEventRecord {
             id: Uuid::new_v4(),
@@ -179,12 +201,20 @@ mod tests {
         };
 
         assert_eq!(
-            store.record_payment_event_for_order(record.clone()).unwrap(),
+            store
+                .record_payment_event_for_order(record.clone())
+                .unwrap(),
             PaymentEventWriteOutcome::Recorded,
         );
-        assert!(matches!(store.get_order(order_id).unwrap().unwrap().status, OrderStatus::Paid));
+        assert!(matches!(
+            store.get_order(order_id).unwrap().unwrap().status,
+            OrderStatus::Paid
+        ));
 
-        let duplicate = PaymentEventRecord { id: Uuid::new_v4(), ..record };
+        let duplicate = PaymentEventRecord {
+            id: Uuid::new_v4(),
+            ..record
+        };
         assert_eq!(
             store.record_payment_event_for_order(duplicate).unwrap(),
             PaymentEventWriteOutcome::Duplicate,
@@ -195,7 +225,9 @@ mod tests {
     fn activation_store_method_checks_paid_order_and_slot_capacity_under_one_write_lock() {
         let store = memory_store();
         let order_id = Uuid::new_v4();
-        store.create_order(order_record(order_id, OrderStatus::Paid)).unwrap();
+        store
+            .create_order(order_record(order_id, OrderStatus::Paid))
+            .unwrap();
 
         let first = ActivationRecord {
             id: Uuid::new_v4(),
@@ -211,6 +243,9 @@ mod tests {
             machine_hash: "machine-b".to_string(),
             created_at: OffsetDateTime::now_utc(),
         };
-        assert_eq!(store.create_activation_for_order(second, 1).unwrap_err(), StoreError::Conflict);
+        assert_eq!(
+            store.create_activation_for_order(second, 1).unwrap_err(),
+            StoreError::Conflict
+        );
     }
 }

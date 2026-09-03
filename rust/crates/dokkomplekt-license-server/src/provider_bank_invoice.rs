@@ -25,9 +25,7 @@ impl BankInvoiceProvider {
             account: required_env("DOKKOMPLEKT_BANK_INVOICE_ACCOUNT")?,
             bank_name: required_env("DOKKOMPLEKT_BANK_INVOICE_BANK_NAME")?,
             bic: required_env("DOKKOMPLEKT_BANK_INVOICE_BIC")?,
-            correspondent_account: required_env(
-                "DOKKOMPLEKT_BANK_INVOICE_CORRESPONDENT_ACCOUNT",
-            )?,
+            correspondent_account: required_env("DOKKOMPLEKT_BANK_INVOICE_CORRESPONDENT_ACCOUNT")?,
         })
     }
 
@@ -110,6 +108,8 @@ mod tests {
             response.confirmation_url,
             "https://lic.example/api/orders/00000000-0000-0000-0000-000000000000/bank-invoice"
         );
-        assert!(provider.payment_purpose(order_id).contains(&order_id.to_string()));
+        assert!(provider
+            .payment_purpose(order_id)
+            .contains(&order_id.to_string()));
     }
 }

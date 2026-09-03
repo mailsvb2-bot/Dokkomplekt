@@ -225,7 +225,9 @@ async fn create_payment_for_order(
                 description: format!("Dokkomplekt: {}", order.plan),
                 return_url: None,
             };
-            let response = provider.create_payment(request).map_err(provider_error_status)?;
+            let response = provider
+                .create_payment(request)
+                .map_err(provider_error_status)?;
             Ok(PaymentLinks {
                 payment_url: response.confirmation_url,
                 qr_url: response.qr_url.unwrap_or_default(),

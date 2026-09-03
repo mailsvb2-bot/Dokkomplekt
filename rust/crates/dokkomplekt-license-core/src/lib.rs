@@ -16,5 +16,7 @@ pub use crypto::{verify_license_signature, PublicKeyBytes};
 pub use machine::{MachineFacts, MachineFingerprint};
 pub use models::{Feature, LicenseDocument, LicensePayload, PlanId, SignedLicense};
 pub use policy::{evaluate_access, AccessDecision, AccessRequest, AccessStatus};
-pub use revocation::{evaluate_revocation_cache, LicenseStatusCache, RevocationDecision, RevocationState};
+pub use revocation::{
+    evaluate_revocation_cache, LicenseStatusCache, RevocationDecision, RevocationState,
+};
 pub use usage::{UsageCounter, UsageLedger};

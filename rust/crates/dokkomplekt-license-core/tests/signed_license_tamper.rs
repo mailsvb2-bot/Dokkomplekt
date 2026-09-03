@@ -2,8 +2,8 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use dokkomplekt_license_core::canonical::canonical_json;
 use dokkomplekt_license_core::models::WatermarkMode;
 use dokkomplekt_license_core::{
-    evaluate_access, verify_license_signature, AccessRequest, AccessStatus, Feature, LicensePayload,
-    MachineFingerprint, PlanId, PublicKeyBytes, UsageLedger,
+    evaluate_access, verify_license_signature, AccessRequest, AccessStatus, Feature,
+    LicensePayload, MachineFingerprint, PlanId, PublicKeyBytes, UsageLedger,
 };
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use time::macros::datetime;

@@ -40,10 +40,7 @@ pub struct BankInvoiceConfirmRequest {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/provider/callback", post(provider_callback))
-        .route(
-            "/api/provider/yookassa/callback",
-            post(yookassa_callback),
-        )
+        .route("/api/provider/yookassa/callback", post(yookassa_callback))
         .route(
             "/api/provider/bank-invoice/confirm",
             post(bank_invoice_confirm),

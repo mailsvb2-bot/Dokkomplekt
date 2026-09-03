@@ -77,9 +77,16 @@ pub trait LicenseStore: Send + Sync + 'static {
     fn get_order(&self, order_id: Uuid) -> Result<Option<OrderRecord>, StoreError>;
     fn update_order_status(&self, order_id: Uuid, status: OrderStatus) -> Result<(), StoreError>;
     fn create_activation(&self, record: ActivationRecord) -> Result<(), StoreError>;
-    fn create_activation_for_order(&self, record: ActivationRecord, max_machines: u32) -> Result<OrderRecord, StoreError>;
+    fn create_activation_for_order(
+        &self,
+        record: ActivationRecord,
+        max_machines: u32,
+    ) -> Result<OrderRecord, StoreError>;
     fn record_payment_event(&self, record: PaymentEventRecord) -> Result<(), StoreError>;
-    fn record_payment_event_for_order(&self, record: PaymentEventRecord) -> Result<PaymentEventWriteOutcome, StoreError>;
+    fn record_payment_event_for_order(
+        &self,
+        record: PaymentEventRecord,
+    ) -> Result<PaymentEventWriteOutcome, StoreError>;
     fn store_license(&self, record: LicenseRecord) -> Result<(), StoreError>;
     fn get_license_by_id(&self, license_id: &str) -> Result<Option<LicenseRecord>, StoreError>;
     fn revoke_license(
@@ -114,10 +121,17 @@ pub enum StoreBackend {
 
 impl StoreBackend {
     pub fn from_config(config: &ServerConfig) -> anyhow::Result<Self> {
-        Ok(match config.database_url.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
-            Some(url) => Self::Postgres(PostgresStore::connect(url)?),
-            None => Self::Memory(Arc::new(RwLock::new(MemoryStore::default()))),
-        })
+        Ok(
+            match config
+                .database_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                Some(url) => Self::Postgres(PostgresStore::connect(url)?),
+                None => Self::Memory(Arc::new(RwLock::new(MemoryStore::default()))),
+            },
+        )
     }
 
     pub fn backend_name(&self) -> &'static str {
@@ -136,7 +150,9 @@ impl StoreBackend {
             Self::Memory(_) => false,
             Self::Postgres(store) => {
                 let store = store.clone();
-                tokio::task::spawn_blocking(move || store.check_ready().is_ok()).await.unwrap_or(false)
+                tokio::task::spawn_blocking(move || store.check_ready().is_ok())
+                    .await
+                    .unwrap_or(false)
             }
         }
     }
@@ -146,7 +162,9 @@ impl StoreBackend {
             Self::Memory(store) => store.create_order(record),
             Self::Postgres(store) => {
                 let store = store.clone();
-                tokio::task::spawn_blocking(move || store.create_order(record)).await.map_err(|_| StoreError::Poisoned)?
+                tokio::task::spawn_blocking(move || store.create_order(record))
+                    .await
+                    .map_err(|_| StoreError::Poisoned)?
             }
         }
     }
@@ -156,37 +174,58 @@ impl StoreBackend {
             Self::Memory(store) => store.get_order(order_id),
             Self::Postgres(store) => {
                 let store = store.clone();
-                tokio::task::spawn_blocking(move || store.get_order(order_id)).await.map_err(|_| StoreError::Poisoned)?
+                tokio::task::spawn_blocking(move || store.get_order(order_id))
+                    .await
+                    .map_err(|_| StoreError::Poisoned)?
             }
         }
     }
 
-    pub async fn update_order_status_async(&self, order_id: Uuid, status: OrderStatus) -> Result<(), StoreError> {
+    pub async fn update_order_status_async(
+        &self,
+        order_id: Uuid,
+        status: OrderStatus,
+    ) -> Result<(), StoreError> {
         match self {
             Self::Memory(store) => store.update_order_status(order_id, status),
             Self::Postgres(store) => {
                 let store = store.clone();
-                tokio::task::spawn_blocking(move || store.update_order_status(order_id, status)).await.map_err(|_| StoreError::Poisoned)?
+                tokio::task::spawn_blocking(move || store.update_order_status(order_id, status))
+                    .await
+                    .map_err(|_| StoreError::Poisoned)?
             }
         }
     }
 
-    pub async fn create_activation_for_order_async(&self, record: ActivationRecord, max_machines: u32) -> Result<OrderRecord, StoreError> {
+    pub async fn create_activation_for_order_async(
+        &self,
+        record: ActivationRecord,
+        max_machines: u32,
+    ) -> Result<OrderRecord, StoreError> {
         match self {
             Self::Memory(store) => store.create_activation_for_order(record, max_machines),
             Self::Postgres(store) => {
                 let store = store.clone();
-                tokio::task::spawn_blocking(move || store.create_activation_for_order(record, max_machines)).await.map_err(|_| StoreError::Poisoned)?
+                tokio::task::spawn_blocking(move || {
+                    store.create_activation_for_order(record, max_machines)
+                })
+                .await
+                .map_err(|_| StoreError::Poisoned)?
             }
         }
     }
 
-    pub async fn record_payment_event_for_order_async(&self, record: PaymentEventRecord) -> Result<PaymentEventWriteOutcome, StoreError> {
+    pub async fn record_payment_event_for_order_async(
+        &self,
+        record: PaymentEventRecord,
+    ) -> Result<PaymentEventWriteOutcome, StoreError> {
         match self {
             Self::Memory(store) => store.record_payment_event_for_order(record),
             Self::Postgres(store) => {
                 let store = store.clone();
-                tokio::task::spawn_blocking(move || store.record_payment_event_for_order(record)).await.map_err(|_| StoreError::Poisoned)?
+                tokio::task::spawn_blocking(move || store.record_payment_event_for_order(record))
+                    .await
+                    .map_err(|_| StoreError::Poisoned)?
             }
         }
     }
@@ -196,7 +235,9 @@ impl StoreBackend {
             Self::Memory(store) => store.store_license(record),
             Self::Postgres(store) => {
                 let store = store.clone();
-                tokio::task::spawn_blocking(move || store.store_license(record)).await.map_err(|_| StoreError::Poisoned)?
+                tokio::task::spawn_blocking(move || store.store_license(record))
+                    .await
+                    .map_err(|_| StoreError::Poisoned)?
             }
         }
     }
@@ -234,12 +275,17 @@ impl StoreBackend {
         }
     }
 
-    pub async fn issue_license_for_paid_order_async(&self, record: LicenseRecord) -> Result<LicenseIssueOutcome, StoreError> {
+    pub async fn issue_license_for_paid_order_async(
+        &self,
+        record: LicenseRecord,
+    ) -> Result<LicenseIssueOutcome, StoreError> {
         match self {
             Self::Memory(store) => issue_license_for_memory(store, record),
             Self::Postgres(store) => {
                 let store = store.clone();
-                tokio::task::spawn_blocking(move || store.issue_license_for_paid_order(record)).await.map_err(|_| StoreError::Poisoned)?
+                tokio::task::spawn_blocking(move || store.issue_license_for_paid_order(record))
+                    .await
+                    .map_err(|_| StoreError::Poisoned)?
             }
         }
     }
@@ -274,7 +320,11 @@ impl LicenseStore for StoreBackend {
         }
     }
 
-    fn create_activation_for_order(&self, record: ActivationRecord, max_machines: u32) -> Result<OrderRecord, StoreError> {
+    fn create_activation_for_order(
+        &self,
+        record: ActivationRecord,
+        max_machines: u32,
+    ) -> Result<OrderRecord, StoreError> {
         match self {
             Self::Memory(store) => store.create_activation_for_order(record, max_machines),
             Self::Postgres(store) => store.create_activation_for_order(record, max_machines),
@@ -288,7 +338,10 @@ impl LicenseStore for StoreBackend {
         }
     }
 
-    fn record_payment_event_for_order(&self, record: PaymentEventRecord) -> Result<PaymentEventWriteOutcome, StoreError> {
+    fn record_payment_event_for_order(
+        &self,
+        record: PaymentEventRecord,
+    ) -> Result<PaymentEventWriteOutcome, StoreError> {
         match self {
             Self::Memory(store) => store.record_payment_event_for_order(record),
             Self::Postgres(store) => store.record_payment_event_for_order(record),
@@ -328,24 +381,49 @@ impl LicenseStore for StoreBackend {
     }
 }
 
-fn issue_license_for_memory(store: &Arc<RwLock<MemoryStore>>, record: LicenseRecord) -> Result<LicenseIssueOutcome, StoreError> {
+fn issue_license_for_memory(
+    store: &Arc<RwLock<MemoryStore>>,
+    record: LicenseRecord,
+) -> Result<LicenseIssueOutcome, StoreError> {
     let mut store = store.write().map_err(|_| StoreError::Poisoned)?;
-    let status = store.orders.get(&record.order_id).ok_or(StoreError::NotFound)?.status.clone();
+    let status = store
+        .orders
+        .get(&record.order_id)
+        .ok_or(StoreError::NotFound)?
+        .status
+        .clone();
     if !matches!(status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
         return Err(StoreError::Conflict);
     }
-    if let Some(existing) = store.licenses.values().find(|license| license.order_id == record.order_id).cloned() {
-        return Ok(LicenseIssueOutcome { record: existing, reused: true });
+    if let Some(existing) = store
+        .licenses
+        .values()
+        .find(|license| license.order_id == record.order_id)
+        .cloned()
+    {
+        return Ok(LicenseIssueOutcome {
+            record: existing,
+            reused: true,
+        });
     }
     if store.licenses.contains_key(&record.id)
-        || store.licenses.values().any(|existing| existing.license_id == record.license_id)
+        || store
+            .licenses
+            .values()
+            .any(|existing| existing.license_id == record.license_id)
     {
         return Err(StoreError::Conflict);
     }
-    let order = store.orders.get_mut(&record.order_id).ok_or(StoreError::NotFound)?;
+    let order = store
+        .orders
+        .get_mut(&record.order_id)
+        .ok_or(StoreError::NotFound)?;
     order.status = OrderStatus::LicenseIssued;
     store.licenses.insert(record.id, record.clone());
-    Ok(LicenseIssueOutcome { record, reused: false })
+    Ok(LicenseIssueOutcome {
+        record,
+        reused: false,
+    })
 }
 
 #[cfg(test)]
@@ -399,30 +477,65 @@ mod tests {
 
     fn assert_license_store_contract(store: StoreBackend) {
         let order_id = Uuid::new_v4();
-        store.create_order(order_record(order_id, OrderStatus::WaitingPayment)).unwrap();
-        assert!(matches!(store.get_order(order_id).unwrap().unwrap().status, OrderStatus::WaitingPayment));
+        store
+            .create_order(order_record(order_id, OrderStatus::WaitingPayment))
+            .unwrap();
+        assert!(matches!(
+            store.get_order(order_id).unwrap().unwrap().status,
+            OrderStatus::WaitingPayment
+        ));
 
         let event_id = format!("evt-{order_id}");
         let event = payment_event(order_id, event_id);
-        assert_eq!(store.record_payment_event_for_order(event.clone()).unwrap(), PaymentEventWriteOutcome::Recorded);
         assert_eq!(
-            store.record_payment_event_for_order(PaymentEventRecord { id: Uuid::new_v4(), ..event }).unwrap(),
+            store.record_payment_event_for_order(event.clone()).unwrap(),
+            PaymentEventWriteOutcome::Recorded
+        );
+        assert_eq!(
+            store
+                .record_payment_event_for_order(PaymentEventRecord {
+                    id: Uuid::new_v4(),
+                    ..event
+                })
+                .unwrap(),
             PaymentEventWriteOutcome::Duplicate,
         );
-        assert!(matches!(store.get_order(order_id).unwrap().unwrap().status, OrderStatus::Paid));
+        assert!(matches!(
+            store.get_order(order_id).unwrap().unwrap().status,
+            OrderStatus::Paid
+        ));
 
-        store.create_activation_for_order(activation(order_id, "machine-a"), 1).unwrap();
-        assert_eq!(store.create_activation_for_order(activation(order_id, "machine-b"), 1).unwrap_err(), StoreError::Conflict);
+        store
+            .create_activation_for_order(activation(order_id, "machine-a"), 1)
+            .unwrap();
+        assert_eq!(
+            store
+                .create_activation_for_order(activation(order_id, "machine-b"), 1)
+                .unwrap_err(),
+            StoreError::Conflict
+        );
 
         let unpaid_order_id = Uuid::new_v4();
-        store.create_order(order_record(unpaid_order_id, OrderStatus::WaitingPayment)).unwrap();
-        assert_eq!(store.create_activation_for_order(activation(unpaid_order_id, "machine-c"), 1).unwrap_err(), StoreError::Conflict);
+        store
+            .create_order(order_record(unpaid_order_id, OrderStatus::WaitingPayment))
+            .unwrap();
+        assert_eq!(
+            store
+                .create_activation_for_order(activation(unpaid_order_id, "machine-c"), 1)
+                .unwrap_err(),
+            StoreError::Conflict
+        );
 
         let license_id = format!("license-{order_id}");
         let license = license_record(order_id, &license_id);
         store.store_license(license.clone()).unwrap();
         assert_eq!(
-            store.store_license(LicenseRecord { id: Uuid::new_v4(), ..license }).unwrap_err(),
+            store
+                .store_license(LicenseRecord {
+                    id: Uuid::new_v4(),
+                    ..license
+                })
+                .unwrap_err(),
             StoreError::Conflict,
         );
 
@@ -439,26 +552,38 @@ mod tests {
 
     #[test]
     fn memory_backend_obeys_license_store_contract() {
-        assert_license_store_contract(StoreBackend::Memory(Arc::new(RwLock::new(MemoryStore::default()))));
+        assert_license_store_contract(StoreBackend::Memory(Arc::new(RwLock::new(
+            MemoryStore::default(),
+        ))));
     }
 
     #[test]
     fn memory_license_issue_is_atomic_and_idempotent() {
         let store = Arc::new(RwLock::new(MemoryStore::default()));
         let order_id = Uuid::new_v4();
-        store.create_order(order_record(order_id, OrderStatus::Paid)).unwrap();
-        let issued = issue_license_for_memory(&store, license_record(order_id, "license-issued")).unwrap();
+        store
+            .create_order(order_record(order_id, OrderStatus::Paid))
+            .unwrap();
+        let issued =
+            issue_license_for_memory(&store, license_record(order_id, "license-issued")).unwrap();
         assert!(!issued.reused);
         assert_eq!(issued.record.license_id, "license-issued");
-        assert!(matches!(store.get_order(order_id).unwrap().unwrap().status, OrderStatus::LicenseIssued));
-        let reused = issue_license_for_memory(&store, license_record(order_id, "license-new-but-ignored")).unwrap();
+        assert!(matches!(
+            store.get_order(order_id).unwrap().unwrap().status,
+            OrderStatus::LicenseIssued
+        ));
+        let reused =
+            issue_license_for_memory(&store, license_record(order_id, "license-new-but-ignored"))
+                .unwrap();
         assert!(reused.reused);
         assert_eq!(reused.record.license_id, "license-issued");
     }
 
     #[test]
     fn postgres_backend_obeys_license_store_contract_when_database_url_is_present() {
-        let Ok(database_url) = std::env::var("DATABASE_URL") else { return; };
+        let Ok(database_url) = std::env::var("DATABASE_URL") else {
+            return;
+        };
         let store = StoreBackend::Postgres(PostgresStore::connect(&database_url).unwrap());
         assert_license_store_contract(store);
     }
