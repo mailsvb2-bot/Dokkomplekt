@@ -208,6 +208,19 @@ def test_mixed_hour_minute_rhythm_is_total_duration() -> None:
     assert diary_minute_schedule_from_choice("1 час 45 минут").minute_offsets == (105,)
 
 
+def test_explicit_license_storage_is_isolated_from_machine_registry_guard(tmp_path: Path, monkeypatch) -> None:
+    manager = ProductAccessManager(tmp_path, now=datetime(2026, 9, 3, tzinfo=timezone.utc))
+
+    def forbidden_registry(*_args, **_kwargs):
+        raise AssertionError("explicit storage must not touch the machine-wide registry guard")
+
+    monkeypatch.setattr(manager, "_read_registry_guard", forbidden_registry)
+    monkeypatch.setattr(manager, "_write_registry_guard", forbidden_registry)
+    state = manager.current_state()
+    assert state.plan == "trial"
+    assert state.active
+
+
 def test_trial_reservation_cannot_cross_total_limit(tmp_path: Path) -> None:
     manager = ProductAccessManager(tmp_path, now=datetime(2026, 9, 3, tzinfo=timezone.utc))
     manager.record_created_documents(29)

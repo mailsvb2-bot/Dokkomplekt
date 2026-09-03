@@ -400,7 +400,8 @@ def open_universal_document_mapper(app) -> None:
             from universal_profiles import save_document_pack
             save_document_pack(current_pack, self._universal_profile_path(), backup_reason=backup_reason)
             return current_pack, spec, copied_to, validation, suggestion
-        except Exception:
+        except Exception as exc:
+            record_soft_exception("window_document_mapper.add_template_transaction", exc, detail=str(template_path))
             current_pack.documents = original_documents
             if copied_to is not None:
                 try:

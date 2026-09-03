@@ -266,7 +266,13 @@ class UsageReservation:
 
 class ProductAccessManager:
     def __init__(self, storage_dir: str | Path | None = None, now: datetime | None = None):
+        explicit_storage = storage_dir is not None or bool(os.getenv("DOKKOMPLEKT_LICENSE_DIR"))
         self.storage_dir = Path(storage_dir) if storage_dir else self.default_storage_dir()
+        # The machine-wide HKCU guard is an anti-tamper owner for the normal
+        # production location.  Explicit/portable storage is an intentionally
+        # isolated namespace (tests, recovery, portable diagnostics) and must not
+        # inherit or overwrite another storage root's machine-wide trial state.
+        self._registry_guard_enabled = os.name == "nt" and not explicit_storage
         self.now = now
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.state_path = self.storage_dir / "product_access_state.json"
@@ -364,7 +370,10 @@ class ProductAccessManager:
     def _load_state_payload(self) -> dict[str, Any]:
         primary, primary_corrupt = self._read_state_copy(self.state_path)
         guard, guard_corrupt = self._read_state_copy(self.state_guard_path)
-        registry, registry_corrupt = self._read_registry_guard()
+        if self._registry_guard_enabled:
+            registry, registry_corrupt = self._read_registry_guard()
+        else:
+            registry, registry_corrupt = None, False
         valid = [item for item in (primary, guard, registry) if item is not None]
         if valid:
             merged = self._merge_state_copies(valid)
@@ -394,7 +403,8 @@ class ProductAccessManager:
         protected = self._with_state_integrity(payload)
         self._atomic_write_json(self.state_path, protected)
         self._atomic_write_json(self.state_guard_path, protected)
-        self._write_registry_guard(protected)
+        if self._registry_guard_enabled:
+            self._write_registry_guard(protected)
 
     def _ensure_trial_started(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("_state_corrupt"):
