@@ -333,7 +333,7 @@ def build_labs_popup_block(app, body: tk.Frame, *, row: int, columnspan: int, pa
         app.labs_date_policy_var.set("without_labs")
 
     def load_labs() -> None:
-        path = filedialog.askopenfilename(title="Выберите файл с анализами", filetypes=[("Word/Text/PDF", "*.doc *.docx *.docm *.txt *.pdf"), ("All files", "*.*")], parent=parent)
+        path = filedialog.askopenfilename(title="Выберите файл с анализами", filetypes=[("Word/Text/PDF", "*.doc *.docx *.docm *.txt *.pdf"), ("Все файлы", "*.*")], parent=parent)
         if not path:
             return
         try:
@@ -499,7 +499,7 @@ def attach_additional_info_buttons(app, parent, body: tk.Frame, *, row: int, col
             app.additional_info_source_path_var.set("manual")
 
     def load_info() -> None:
-        path = filedialog.askopenfilename(title="Выберите файл с дополнительной информацией", filetypes=[("Word/Text/PDF", "*.doc *.docx *.docm *.txt *.pdf"), ("All files", "*.*")], parent=parent)
+        path = filedialog.askopenfilename(title="Выберите файл с дополнительной информацией", filetypes=[("Word/Text/PDF", "*.doc *.docx *.docm *.txt *.pdf"), ("Все файлы", "*.*")], parent=parent)
         if not path:
             return
         try:
@@ -518,7 +518,7 @@ def attach_additional_info_buttons(app, parent, body: tk.Frame, *, row: int, col
 
 
 def choose_epi_file_for_app(app, *, parent=None) -> bool:
-    path = filedialog.askopenfilename(title="Выберите файл ЭПИ", filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docx *.docm"), ("Text", "*.txt"), ("All files", "*.*")], parent=parent)
+    path = filedialog.askopenfilename(title="Выберите файл ЭПИ", filetypes=[("Word DOC/DOCX/DOCM", "*.doc *.docx *.docm"), ("Текст", "*.txt"), ("Все файлы", "*.*")], parent=parent)
     if not path:
         return False
     try:

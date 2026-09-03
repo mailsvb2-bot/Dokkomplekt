@@ -598,3 +598,35 @@ with zipfile.ZipFile(result) as archive:
     assert not failures
     assert target.exists() and target.stat().st_size > 0
     assert not list(target.parent.glob(f".{target.name}.*"))
+
+
+def test_doctor_facing_file_dialogs_and_license_label_stay_russian() -> None:
+    root = Path(__file__).resolve().parents[1]
+    sources = {
+        name: (root / name).read_text(encoding='utf-8')
+        for name in (
+            'app.py',
+            'window_universal_dialogs_mixin.py',
+            'window_setup_center.py',
+            'window_document_mapper.py',
+            'product_access/__init__.py',
+            'files_mixin.py',
+            'dialog_fields_core.py',
+            'diary_template_selection.py',
+            'medical_docx_xml_fragments.py',
+        )
+    }
+    combined = '\n'.join(sources.values())
+    for stale in (
+        'text="License"',
+        '("All files", "*.*")',
+        '("Medical profile",',
+        '("License JSON",',
+        'title="Select PDF document examples"',
+        'messagebox.showinfo("Custom DOCX"',
+        'messagebox.showerror("Custom DOCX"',
+    ):
+        assert stale not in combined
+    assert 'text="Лицензия"' in sources['app.py']
+    assert 'title="Выберите примеры документов PDF"' in sources['window_universal_dialogs_mixin.py']
+    assert '("Все файлы", "*.*")' in combined

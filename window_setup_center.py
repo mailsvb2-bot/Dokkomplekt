@@ -210,7 +210,7 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
         path = filedialog.askopenfilename(
             title="Открыть профиль врача",
             initialdir=_active_profile_dir(),
-            filetypes=[("Профиль врача", "*.medpack.json *.json"), ("All files", "*.*")],
+            filetypes=[("Профиль врача", "*.medpack.json *.json"), ("Все файлы", "*.*")],
             parent=dialog,
         )
         if not path:
@@ -255,7 +255,7 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
             title="Сохранить профиль врача для переноса",
             initialfile="MedicalDiaryAutofill_Profile.medpack.zip",
             defaultextension=".zip",
-            filetypes=[("Medical profile", "*.zip *.medpack"), ("All files", "*.*")],
+            filetypes=[("Профиль документов", "*.zip *.medpack"), ("Все файлы", "*.*")],
             parent=dialog,
         )
         if not target:
@@ -270,7 +270,7 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
     def import_profile() -> None:
         source = filedialog.askopenfilename(
             title="Импортировать профиль врача",
-            filetypes=[("Medical profile", "*.zip *.medpack *.json"), ("All files", "*.*")],
+            filetypes=[("Профиль документов", "*.zip *.medpack *.json"), ("Все файлы", "*.*")],
             parent=dialog,
         )
         if not source:
@@ -327,7 +327,7 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
         template_paths = filedialog.askopenfilenames(
             title="Выберите Word-шаблоны врача — можно сразу несколько",
             initialdir=self._dialog_initial_dir(DIR_PRIMARY_DOCUMENTS),
-            filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("All files", "*.*")],
+            filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("Все файлы", "*.*")],
             parent=dialog,
         )
         if not template_paths:
@@ -500,7 +500,7 @@ def open_template_setup_center(app, *, first_run: bool = False) -> None:
         template_path = filedialog.askopenfilename(
             title="Выберите Word-шаблон, который должен стать кнопкой в блоке 03",
             initialdir=self._dialog_initial_dir(DIR_PRIMARY_DOCUMENTS),
-            filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("All files", "*.*")],
+            filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("Все файлы", "*.*")],
             parent=dialog,
         )
         if not template_path:
