@@ -94,23 +94,27 @@ def atomic_write_bytes(path: str | Path, data: bytes) -> Path:
     with interprocess_file_lock(publish_lock, timeout_seconds=10.0, stale_seconds=120.0):
         fd, raw_tmp = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent))
         tmp = Path(raw_tmp)
+        raw_fd_open = True
         try:
-            with os.fdopen(fd, "wb") as handle:
+            handle = os.fdopen(fd, "wb")
+            raw_fd_open = False
+            with handle:
                 handle.write(data)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(tmp, target)
             return target
-        except Exception:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
+        except Exception as exc:
+            if raw_fd_open:
+                try:
+                    os.close(fd)
+                except OSError as close_exc:
+                    record_soft_exception("medical_paths.atomic_write_close_fd", close_exc, detail=str(target))
             try:
                 tmp.unlink()
-            except OSError:
-                pass
-            raise
+            except OSError as cleanup_exc:
+                record_soft_exception("medical_paths.atomic_write_temp_cleanup", cleanup_exc, detail=str(tmp))
+            raise exc
 
 
 def atomic_write_text(path: str | Path, text: str, *, encoding: str = "utf-8") -> Path:
@@ -193,8 +197,8 @@ def interprocess_file_lock(
                 try:
                     lock_path.unlink()
                     continue
-                except OSError:
-                    pass
+                except OSError as stale_cleanup_exc:
+                    record_soft_exception("medical_paths.stale_lock_cleanup", stale_cleanup_exc, detail=str(lock_path))
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"Не удалось получить блокировку состояния: {lock_path}")
             time.sleep(0.025)
@@ -209,5 +213,5 @@ def interprocess_file_lock(
             if str(owner.get("token") or "") == token:
                 try:
                     lock_path.unlink()
-                except OSError:
-                    pass
+                except OSError as release_exc:
+                    record_soft_exception("medical_paths.lock_release", release_exc, detail=str(lock_path))

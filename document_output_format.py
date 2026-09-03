@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from diagnostic_logging import record_soft_exception
+
 DOCUMENT_OUTPUT_FORMAT_LOCK_VERSION = "v1.1"
 SUPPORTED_OUTPUT_FORMATS = ("docx", "pdf")
 
@@ -60,8 +62,8 @@ def export_docx_to_pdf(docx_path: str | Path, pdf_path: str | Path | None = None
         try:
             if target.exists():
                 target.unlink()
-        except OSError:
-            pass
+        except OSError as cleanup_exc:
+            record_soft_exception("document_output_format.partial_pdf_cleanup", cleanup_exc, detail=str(target))
         raise
     finally:  # pragma: no cover - Windows/Office specific
         if document is not None:

@@ -362,8 +362,8 @@ def render_documents_from_pack(
                 for raw in created:
                     try:
                         Path(raw).unlink()
-                    except OSError:
-                        pass
+                    except OSError as rollback_exc:
+                        record_soft_exception("universal_generation.pdf_cleanup_after_docx_failure", rollback_exc, detail=str(raw))
                 raise RuntimeError(f"PDF создан, но временный DOCX не удалось удалить: {docx_path}") from cleanup_exc
     return PackGenerationResult(tuple(created), tuple(renders), tuple(skipped), tuple(dict.fromkeys(warnings)))
 

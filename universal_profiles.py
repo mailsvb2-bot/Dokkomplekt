@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 from collections.abc import Mapping as MappingABC
 from typing import Iterable, Mapping, Sequence
 
+from diagnostic_logging import record_soft_exception
 from medical_paths import atomic_write_text, prune_old_files
 from universal_fields import FieldDefinition, FieldRegistry, default_field_registry, normalize_field_id, normalize_field_id_for_context
 
@@ -426,10 +427,10 @@ def count_managed_profiles(directory: str | Path) -> int:
             pack = load_document_pack(candidate)
             if candidate.name == "default_custom.medpack.json" and not pack.documents:
                 continue
-        except Exception:
+        except Exception as exc:
             # Corrupt manifests still consume a profile slot until the doctor
             # removes/repairs them; fail closed instead of creating unlimited files.
-            pass
+            record_soft_exception("universal_profiles.count_corrupt_manifest", exc, detail=str(candidate))
         count += 1
     return count
 
