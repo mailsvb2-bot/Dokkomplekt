@@ -1,7 +1,12 @@
 use crate::issuer::{issue_license, IssueLicenseInput};
 use crate::state::{AppState, OrderStatus};
 use crate::storage::{LicenseRecord, StoreError};
-use axum::{extract::{Path, State}, http::StatusCode, routing::post, Json, Router};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    routing::post,
+    Json, Router,
+};
 use dokkomplekt_license_core::models::{LicenseDocument, PlanId};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -27,10 +32,18 @@ async fn issue_for_order(
     if requested_machine.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
-    if !issue_token_matches(state.config.license_issue_secret.as_deref(), request.issue_token.as_deref()) {
+    if !issue_token_matches(
+        state.config.license_issue_secret.as_deref(),
+        request.issue_token.as_deref(),
+    ) {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    let order = state.store.get_order_async(order_id).await.map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
+    let order = state
+        .store
+        .get_order_async(order_id)
+        .await
+        .map_err(store_error_status)?
+        .ok_or(StatusCode::NOT_FOUND)?;
     if !matches!(order.status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
         return Err(StatusCode::CONFLICT);
     }
@@ -38,7 +51,11 @@ async fn issue_for_order(
         return Err(StatusCode::CONFLICT);
     }
     let plan = parse_plan(&order.plan).ok_or(StatusCode::BAD_REQUEST)?;
-    let issuer_key = state.config.issuer_key_b64.clone().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let issuer_key = state
+        .config
+        .issuer_key_b64
+        .clone()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     let document = issue_license(
         IssueLicenseInput {
             order_id,
@@ -56,23 +73,41 @@ async fn issue_for_order(
         id: Uuid::new_v4(),
         order_id,
         license_id: document.license.payload.license_id.clone(),
-        document_json: serde_json::to_string(&document).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+        document_json: serde_json::to_string(&document)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
         issued_at: document.license.payload.issued_at,
         revoked_at: None,
     };
-    let outcome = state.store.issue_license_for_paid_order_async(record).await.map_err(store_error_status)?;
-    let response = serde_json::from_str(&outcome.record.document_json).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let outcome = state
+        .store
+        .issue_license_for_paid_order_async(record)
+        .await
+        .map_err(store_error_status)?;
+    let response = serde_json::from_str(&outcome.record.document_json)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(response))
 }
 
-
 pub fn issue_token_matches(configured_secret: Option<&str>, supplied_token: Option<&str>) -> bool {
-    let Some(expected) = configured_secret.map(str::trim).filter(|value| !value.is_empty()) else { return true; };
-    supplied_token.map(str::trim).filter(|value| !value.is_empty()).is_some_and(|actual| constant_time_eq(actual.as_bytes(), expected.as_bytes()))
+    let Some(expected) = configured_secret
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return true;
+    };
+    supplied_token
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some_and(|actual| constant_time_eq(actual.as_bytes(), expected.as_bytes()))
 }
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() { return false; }
-    left.iter().zip(right.iter()).fold(0u8, |acc, (a,b)| acc | (a ^ b)) == 0
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right.iter())
+        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+        == 0
 }
 
 fn store_error_status(error: StoreError) -> StatusCode {

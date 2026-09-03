@@ -1,60 +1,139 @@
-use crate::issuer::{issue_license, IssueLicenseInput};
-use crate::state::{AppState, OrderStatus};
+use crate::license_issue::issue_token_matches;
+use crate::state::AppState;
 use crate::storage::{LicenseRecord, StoreError};
-use axum::{extract::{Path, State}, http::StatusCode, routing::post, Json, Router};
-use dokkomplekt_license_core::models::PlanId;
-use serde::Deserialize;
-use uuid::Uuid;
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    routing::{get, post},
+    Json, Router,
+};
+use serde::{Deserialize, Serialize};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+
+const DEFAULT_STATUS_CACHE_TTL_SECONDS: u32 = 24 * 60 * 60;
+
+#[derive(Debug, Serialize)]
+pub struct LicenseStatusResponse {
+    pub schema: &'static str,
+    pub license_id: String,
+    pub status: &'static str,
+    pub checked_at: String,
+    pub revoked_at: Option<String>,
+    pub cache_ttl_seconds: u32,
+}
 
 #[derive(Debug, Deserialize)]
-pub struct IssueRequest {
-    pub owner_name: Option<String>,
-    pub organization_name: Option<String>,
-    pub machine_hash: String,
+pub struct RevokeLicenseRequest {
+    pub admin_token: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RevokeLicenseResponse {
+    pub license_id: String,
+    pub status: &'static str,
+    pub revoked_at: String,
 }
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/api/orders/:order_id/license", post(issue_for_order))
+    Router::new()
+        .route("/api/licenses/:license_id/status", get(license_status))
+        .route("/api/licenses/:license_id/revoke", post(revoke_license))
 }
 
-async fn issue_for_order(
+async fn license_status(
     State(state): State<AppState>,
-    Path(order_id): Path<Uuid>,
-    Json(request): Json<IssueRequest>,
-) -> Result<Json<dokkomplekt_license_core::LicenseDocument>, StatusCode> {
-    if request.machine_hash.trim().is_empty() {
+    Path(license_id): Path<String>,
+) -> Result<Json<LicenseStatusResponse>, StatusCode> {
+    let license_id = normalized_license_id(&license_id)?;
+    let record = state
+        .store
+        .get_license_by_id_async(&license_id)
+        .await
+        .map_err(store_error_status)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(status_response(record, OffsetDateTime::now_utc())?))
+}
+
+async fn revoke_license(
+    State(state): State<AppState>,
+    Path(license_id): Path<String>,
+    Json(request): Json<RevokeLicenseRequest>,
+) -> Result<Json<RevokeLicenseResponse>, StatusCode> {
+    let license_id = normalized_license_id(&license_id)?;
+    let configured_admin_secret = state
+        .config
+        .license_issue_secret
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    if !issue_token_matches(
+        Some(configured_admin_secret),
+        request.admin_token.as_deref(),
+    ) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    if request
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|reason| reason.len() > 500)
+    {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let order = state.store.get_order_async(order_id).await.map_err(store_error_status)?.ok_or(StatusCode::NOT_FOUND)?;
-    if !matches!(order.status, OrderStatus::Paid | OrderStatus::LicenseIssued) {
-        return Err(StatusCode::CONFLICT);
-    }
-    let plan = parse_plan(&order.plan).ok_or(StatusCode::BAD_REQUEST)?;
-    let issuer_key = state.config.issuer_key_b64.clone().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-    let document = issue_license(
-        IssueLicenseInput {
-            order_id,
-            plan,
-            owner_name: request.owner_name,
-            organization_name: request.organization_name,
-            allowed_machines: vec![request.machine_hash],
-            valid_days: state.config.default_license_days,
+    let record = state
+        .store
+        .revoke_license_async(&license_id, OffsetDateTime::now_utc())
+        .await
+        .map_err(store_error_status)?;
+    let revoked_at = record.revoked_at.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(RevokeLicenseResponse {
+        license_id: record.license_id,
+        status: "revoked",
+        revoked_at: format_time(revoked_at)?,
+    }))
+}
+
+fn status_response(
+    record: LicenseRecord,
+    checked_at: OffsetDateTime,
+) -> Result<LicenseStatusResponse, StatusCode> {
+    let revoked_at = record.revoked_at.map(format_time).transpose()?;
+    Ok(LicenseStatusResponse {
+        schema: "dokkomplekt.license-status.v1",
+        license_id: record.license_id,
+        status: if revoked_at.is_some() {
+            "revoked"
+        } else {
+            "active"
         },
-        &state.config.issuer_id,
-        &issuer_key,
-    )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let license_record = LicenseRecord {
-        id: Uuid::new_v4(),
-        order_id,
-        license_id: document.license.payload.license_id.clone(),
-        document_json: serde_json::to_string(&document).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
-        issued_at: document.license.payload.issued_at,
-        revoked_at: None,
-    };
-    state.store.store_license_async(license_record).await.map_err(store_error_status)?;
-    state.store.update_order_status_async(order_id, OrderStatus::LicenseIssued).await.map_err(store_error_status)?;
-    Ok(Json(document))
+        checked_at: format_time(checked_at)?,
+        revoked_at,
+        cache_ttl_seconds: status_cache_ttl_seconds(),
+    })
+}
+
+fn normalized_license_id(value: &str) -> Result<String, StatusCode> {
+    let value = value.trim();
+    if value.is_empty() || value.len() > 200 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    Ok(value.to_string())
+}
+
+fn format_time(value: OffsetDateTime) -> Result<String, StatusCode> {
+    value
+        .format(&Rfc3339)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+fn status_cache_ttl_seconds() -> u32 {
+    std::env::var("DOKKOMPLEKT_LICENSE_STATUS_CACHE_TTL_SECONDS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_STATUS_CACHE_TTL_SECONDS)
 }
 
 fn store_error_status(error: StoreError) -> StatusCode {
@@ -66,14 +145,27 @@ fn store_error_status(error: StoreError) -> StatusCode {
     }
 }
 
-fn parse_plan(value: &str) -> Option<PlanId> {
-    match value.trim() {
-        "trial" => Some(PlanId::Trial),
-        "doctor_start" => Some(PlanId::DoctorStart),
-        "doctor_pro" => Some(PlanId::DoctorPro),
-        "department" => Some(PlanId::Department),
-        "clinic" => Some(PlanId::Clinic),
-        "enterprise" => Some(PlanId::Enterprise),
-        _ => None,
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn status_response_is_revoked_when_revoked_at_exists() {
+        let now = OffsetDateTime::now_utc();
+        let response = status_response(
+            LicenseRecord {
+                id: Uuid::new_v4(),
+                order_id: Uuid::new_v4(),
+                license_id: "license-a".to_string(),
+                document_json: "{}".to_string(),
+                issued_at: now,
+                revoked_at: Some(now),
+            },
+            now,
+        )
+        .unwrap();
+        assert_eq!(response.status, "revoked");
+        assert!(response.revoked_at.is_some());
     }
 }

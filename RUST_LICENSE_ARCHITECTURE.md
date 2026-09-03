@@ -37,7 +37,12 @@ Rust license server = orders, provider payments/callbacks, machine activation, l
 - Native Python binding module `dokkomplekt_license_native`.
 - Python product-access bridge with fail-closed paid access.
 - Windows CI step that prebuilds and installs the native verifier into `.venv_build` before PyInstaller.
-- Rust CI with PostgreSQL migration validation, storage-boundary locks, `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings`.
+- Rust CI with strict `cargo fmt --all -- --check`, PostgreSQL migration validation, storage-boundary locks, `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings`.
+- Concrete bank-invoice provider with order-scoped invoice details and secret-protected, idempotent bank-transfer confirmation.
+- Persistent license status/revocation in Memory and PostgreSQL plus a public minimal status endpoint and fail-closed administrative revoke endpoint.
+- Desktop revocation cache with TTL/offline-grace semantics; cached revocation is always fail-closed.
+- Product-access state v3 with a random integrity key, Windows DPAPI protection, redundant key copies, monotonic usage sequence, and lossless v2 migration.
+- Manual YooKassa sandbox workflow that uses dedicated TEST secrets only and never production credentials.
 
 ## Production configuration
 
@@ -47,20 +52,16 @@ For a production license server, configure at least:
 - `DATABASE_URL`;
 - `DOKKOMPLEKT_LICENSE_ISSUER_KEY_B64`;
 - `DOKKOMPLEKT_LICENSE_ISSUE_SECRET`;
-- `DOKKOMPLEKT_PAYMENT_PROVIDER=yookassa` or `sbp`;
-- `DOKKOMPLEKT_YOOKASSA_SHOP_ID`;
-- `DOKKOMPLEKT_YOOKASSA_SECRET_KEY`;
+- `DOKKOMPLEKT_PAYMENT_PROVIDER=yookassa`, `sbp` or `bank_invoice`;
+- for YooKassa/SBP: `DOKKOMPLEKT_YOOKASSA_SHOP_ID` and `DOKKOMPLEKT_YOOKASSA_SECRET_KEY`;
+- for bank invoice: the validated bank-requisite environment variables documented in `rust/README.md`;
 - `DOKKOMPLEKT_LICENSE_PUBLIC_URL` pointing to the externally reachable HTTPS service.
 
 The YooKassa webhook endpoint is `/api/provider/yookassa/callback` for both normal YooKassa and SBP mode. The generic `/api/provider/callback` is the manual/development path and cannot mark external-provider production orders as paid.
 
-## Remaining commercial-server work
+## Remaining operational work
 
-1. Add a concrete bank-invoice adapter before enabling `bank_invoice` in production.
-2. Add revocation/status cache semantics for already issued licenses.
-3. Add a signed/tamper-evident local usage ledger if offline usage accounting must be cryptographically protected beyond the current state controls.
-4. Add a live sandbox-provider integration job when dedicated YooKassa test credentials are available; unit/CI tests must never depend on production secrets.
-5. Restore a repository-wide strict rustfmt gate once the existing Rust source tree is normalized without unrelated formatting churn.
+No known repository-side commercial-license runtime item remains intentionally enabled-but-unimplemented. Production rollout still requires deployment-specific secrets/requisites, an externally reachable HTTPS license service, and a real YooKassa sandbox execution when dedicated test credentials are supplied. Those are environment/operations prerequisites rather than missing runtime code.
 
 ## Signature model
 

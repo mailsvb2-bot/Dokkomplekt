@@ -1,0 +1,40 @@
+name: YooKassa TEST Sandbox Probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yookassa-test-sandbox
+  cancel-in-progress: false
+
+jobs:
+  test-sandbox-probe:
+    runs-on: ubuntu-latest
+    env:
+      DOKKOMPLEKT_YOOKASSA_TEST_SHOP_ID: ${{ secrets.DOKKOMPLEKT_YOOKASSA_TEST_SHOP_ID }}
+      DOKKOMPLEKT_YOOKASSA_TEST_SECRET_KEY: ${{ secrets.DOKKOMPLEKT_YOOKASSA_TEST_SECRET_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          show-progress: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify probe code without network
+        run: python rust/tools/yookassa_sandbox_probe.py --self-test
+
+      - name: Require TEST-only YooKassa credentials
+        shell: bash
+        run: |
+          test -n "$DOKKOMPLEKT_YOOKASSA_TEST_SHOP_ID" || { echo "Missing DOKKOMPLEKT_YOOKASSA_TEST_SHOP_ID"; exit 2; }
+          test -n "$DOKKOMPLEKT_YOOKASSA_TEST_SECRET_KEY" || { echo "Missing DOKKOMPLEKT_YOOKASSA_TEST_SECRET_KEY"; exit 2; }
+
+      - name: Create uncaptured 1 RUB TEST payment and validate response
+        run: python rust/tools/yookassa_sandbox_probe.py

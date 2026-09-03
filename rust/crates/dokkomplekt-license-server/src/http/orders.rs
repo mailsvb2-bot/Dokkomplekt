@@ -1,3 +1,4 @@
+use crate::provider_bank_invoice::BankInvoiceProvider;
 use crate::provider_yookassa::YooKassaProvider;
 use crate::providers::{CreatePaymentRequest, PaymentProvider, ProviderError};
 use crate::state::{AppState, OrderRecord, OrderStatus};
@@ -5,7 +6,7 @@ use crate::storage::StoreError;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -38,10 +39,26 @@ pub struct PaymentRetryResponse {
     pub qr_url: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct BankInvoiceResponse {
+    pub order_id: Uuid,
+    pub amount_rub: u64,
+    pub currency: &'static str,
+    pub recipient: String,
+    pub inn: String,
+    pub kpp: Option<String>,
+    pub account: String,
+    pub bank_name: String,
+    pub bic: String,
+    pub correspondent_account: String,
+    pub payment_purpose: String,
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/orders", post(create_order))
         .route("/api/orders/:order_id/payment", post(retry_payment))
+        .route("/api/orders/:order_id/bank-invoice", get(bank_invoice))
 }
 
 async fn create_order(
@@ -120,6 +137,39 @@ async fn retry_payment(
     }))
 }
 
+async fn bank_invoice(
+    State(state): State<AppState>,
+    Path(order_id): Path<Uuid>,
+) -> Result<Json<BankInvoiceResponse>, StatusCode> {
+    if state.config.payment_provider != "bank_invoice" {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let order = state
+        .store
+        .get_order_async(order_id)
+        .await
+        .map_err(store_error_status)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    if !matches!(order.status, OrderStatus::WaitingPayment) {
+        return Err(StatusCode::CONFLICT);
+    }
+    let provider = BankInvoiceProvider::from_env(&state.config.public_base_url)
+        .map_err(provider_error_status)?;
+    Ok(Json(BankInvoiceResponse {
+        order_id,
+        amount_rub: order.amount_rub,
+        currency: "RUB",
+        recipient: provider.recipient.clone(),
+        inn: provider.inn.clone(),
+        kpp: provider.kpp.clone(),
+        account: provider.account.clone(),
+        bank_name: provider.bank_name.clone(),
+        bic: provider.bic.clone(),
+        correspondent_account: provider.correspondent_account.clone(),
+        payment_purpose: provider.payment_purpose(order_id),
+    }))
+}
+
 struct PaymentLinks {
     payment_url: String,
     qr_url: String,
@@ -166,7 +216,23 @@ async fn create_payment_for_order(
                 qr_url: response.qr_url.unwrap_or_default(),
             })
         }
-        "bank_invoice" => Err(StatusCode::NOT_IMPLEMENTED),
+        "bank_invoice" => {
+            let provider = BankInvoiceProvider::from_env(&state.config.public_base_url)
+                .map_err(provider_error_status)?;
+            let request = CreatePaymentRequest {
+                order_id: order.id,
+                amount_rub: order.amount_rub,
+                description: format!("Dokkomplekt: {}", order.plan),
+                return_url: None,
+            };
+            let response = provider
+                .create_payment(request)
+                .map_err(provider_error_status)?;
+            Ok(PaymentLinks {
+                payment_url: response.confirmation_url,
+                qr_url: response.qr_url.unwrap_or_default(),
+            })
+        }
         _ => Err(StatusCode::SERVICE_UNAVAILABLE),
     }
 }

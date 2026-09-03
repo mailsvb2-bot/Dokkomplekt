@@ -6,6 +6,7 @@ pub mod crypto;
 pub mod machine;
 pub mod models;
 pub mod policy;
+pub mod revocation;
 pub mod usage;
 
 pub use activation::{evaluate_machine_activation, max_machines_for_plan, ActivationDecision};
@@ -15,4 +16,7 @@ pub use crypto::{verify_license_signature, PublicKeyBytes};
 pub use machine::{MachineFacts, MachineFingerprint};
 pub use models::{Feature, LicenseDocument, LicensePayload, PlanId, SignedLicense};
 pub use policy::{evaluate_access, AccessDecision, AccessRequest, AccessStatus};
+pub use revocation::{
+    evaluate_revocation_cache, LicenseStatusCache, RevocationDecision, RevocationState,
+};
 pub use usage::{UsageCounter, UsageLedger};

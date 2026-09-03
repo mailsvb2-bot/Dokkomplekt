@@ -29,12 +29,21 @@ pub struct ProviderCallbackResponse {
     pub order_id: Uuid,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct BankInvoiceConfirmRequest {
+    pub order_id: Uuid,
+    pub transaction_id: String,
+    pub amount_rub: u64,
+    pub confirmation_secret: Option<String>,
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/provider/callback", post(provider_callback))
+        .route("/api/provider/yookassa/callback", post(yookassa_callback))
         .route(
-            "/api/provider/yookassa/callback",
-            post(yookassa_callback),
+            "/api/provider/bank-invoice/confirm",
+            post(bank_invoice_confirm),
         )
 }
 
@@ -78,6 +87,45 @@ async fn provider_callback(
         provider_payment_id: event.provider_payment_id,
         status,
         amount_rub: event.amount_rub,
+        received_at: OffsetDateTime::now_utc(),
+    };
+    persist_payment_event(&state, record).await
+}
+
+async fn bank_invoice_confirm(
+    State(state): State<AppState>,
+    Json(request): Json<BankInvoiceConfirmRequest>,
+) -> Result<Json<ProviderCallbackResponse>, StatusCode> {
+    if state.config.payment_provider != "bank_invoice" {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let transaction_id = request.transaction_id.trim();
+    if transaction_id.is_empty() || request.amount_rub == 0 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if !callback_secret_matches(
+        state.config.provider_callback_secret.as_deref(),
+        request.confirmation_secret.as_deref(),
+    ) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let order = state
+        .store
+        .get_order_async(request.order_id)
+        .await
+        .map_err(store_error_status)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    if order.amount_rub != request.amount_rub {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let record = PaymentEventRecord {
+        id: Uuid::new_v4(),
+        order_id: request.order_id,
+        provider: PaymentProvider::BankInvoice,
+        provider_event_id: transaction_id.to_string(),
+        provider_payment_id: Some(transaction_id.to_string()),
+        status: PaymentEventStatus::Succeeded,
+        amount_rub: request.amount_rub,
         received_at: OffsetDateTime::now_utc(),
     };
     persist_payment_event(&state, record).await

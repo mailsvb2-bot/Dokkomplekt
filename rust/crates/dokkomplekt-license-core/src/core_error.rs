@@ -12,6 +12,7 @@ pub enum CoreError {
     Expired,
     UnknownPlan(String),
     BadUsageLedger(String),
+    BadRevocationCache(String),
     ClockRollback,
 }
 

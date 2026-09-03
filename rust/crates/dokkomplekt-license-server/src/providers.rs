@@ -48,7 +48,10 @@ pub enum ProviderPaymentStatus {
 }
 
 pub trait PaymentProvider: Send + Sync + 'static {
-    fn create_payment(&self, request: CreatePaymentRequest) -> Result<CreatePaymentResponse, ProviderError>;
+    fn create_payment(
+        &self,
+        request: CreatePaymentRequest,
+    ) -> Result<CreatePaymentResponse, ProviderError>;
     fn parse_callback(&self, raw_body: &[u8]) -> Result<ProviderEvent, ProviderError>;
 }
 

@@ -1,3 +1,4 @@
+use crate::provider_bank_invoice::BankInvoiceProvider;
 use std::net::SocketAddr;
 
 #[derive(Debug, Clone)]
@@ -28,18 +29,16 @@ impl ServerConfig {
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(365);
-        let payment_provider_raw = std::env::var("DOKKOMPLEKT_PAYMENT_PROVIDER")
-            .unwrap_or_else(|_| "manual".to_string());
-        let payment_provider = normalize_payment_provider(&payment_provider_raw)
-            .ok_or_else(|| anyhow::anyhow!("unsupported DOKKOMPLEKT_PAYMENT_PROVIDER: {payment_provider_raw}"))?;
+        let payment_provider_raw =
+            std::env::var("DOKKOMPLEKT_PAYMENT_PROVIDER").unwrap_or_else(|_| "manual".to_string());
+        let payment_provider =
+            normalize_payment_provider(&payment_provider_raw).ok_or_else(|| {
+                anyhow::anyhow!("unsupported DOKKOMPLEKT_PAYMENT_PROVIDER: {payment_provider_raw}")
+            })?;
         let strict_runtime = strict_runtime_required();
         if strict_runtime && payment_provider == "manual" {
             anyhow::bail!("manual payment provider is not allowed for license server runtime");
         }
-        if strict_runtime && payment_provider == "bank_invoice" {
-            anyhow::bail!("bank_invoice payment provider is not implemented for production runtime");
-        }
-
         let database_url = non_empty_env("DATABASE_URL");
         if database_url
             .as_ref()
@@ -53,18 +52,33 @@ impl ServerConfig {
         let provider_callback_secret = non_empty_env("DOKKOMPLEKT_PROVIDER_CALLBACK_SECRET");
         let license_issue_secret = non_empty_env("DOKKOMPLEKT_LICENSE_ISSUE_SECRET");
         if strict_runtime && issuer_key_b64.is_none() {
-            anyhow::bail!("DOKKOMPLEKT_LICENSE_ISSUER_KEY_B64 is required for license server runtime");
+            anyhow::bail!(
+                "DOKKOMPLEKT_LICENSE_ISSUER_KEY_B64 is required for license server runtime"
+            );
         }
         if strict_runtime && license_issue_secret.is_none() {
-            anyhow::bail!("DOKKOMPLEKT_LICENSE_ISSUE_SECRET is required for license server runtime");
+            anyhow::bail!(
+                "DOKKOMPLEKT_LICENSE_ISSUE_SECRET is required for license server runtime"
+            );
         }
         if matches!(payment_provider.as_str(), "yookassa" | "sbp") {
             if non_empty_env("DOKKOMPLEKT_YOOKASSA_SHOP_ID").is_none() {
                 anyhow::bail!("DOKKOMPLEKT_YOOKASSA_SHOP_ID is required for YooKassa/SBP payments");
             }
             if non_empty_env("DOKKOMPLEKT_YOOKASSA_SECRET_KEY").is_none() {
-                anyhow::bail!("DOKKOMPLEKT_YOOKASSA_SECRET_KEY is required for YooKassa/SBP payments");
+                anyhow::bail!(
+                    "DOKKOMPLEKT_YOOKASSA_SECRET_KEY is required for YooKassa/SBP payments"
+                );
             }
+        }
+        if payment_provider == "bank_invoice" {
+            if provider_callback_secret.is_none() {
+                anyhow::bail!(
+                    "DOKKOMPLEKT_PROVIDER_CALLBACK_SECRET is required for bank_invoice confirmation"
+                );
+            }
+            BankInvoiceProvider::validate_env()
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         }
 
         let storage_mode = match database_url
@@ -132,8 +146,14 @@ mod tests {
 
     #[test]
     fn payment_provider_names_are_normalized() {
-        assert_eq!(normalize_payment_provider(" manual ").as_deref(), Some("manual"));
-        assert_eq!(normalize_payment_provider("YooKassa").as_deref(), Some("yookassa"));
+        assert_eq!(
+            normalize_payment_provider(" manual ").as_deref(),
+            Some("manual")
+        );
+        assert_eq!(
+            normalize_payment_provider("YooKassa").as_deref(),
+            Some("yookassa")
+        );
         assert_eq!(normalize_payment_provider("SBP").as_deref(), Some("sbp"));
         assert_eq!(
             normalize_payment_provider("bank_invoice").as_deref(),
