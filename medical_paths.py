@@ -86,11 +86,17 @@ def bundled_template_path(kind: str) -> Path:
     return result
 
 
+def atomic_publish_lock_path(path: str | Path) -> Path:
+    """Return the single cross-process lock that owns publication and reads of one file."""
+    target = Path(path)
+    return target.with_name(f".{target.name}.write.lock")
+
+
 def atomic_write_bytes(path: str | Path, data: bytes) -> Path:
     """Durably publish bytes with unique temp storage and one target-scoped writer lock."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    publish_lock = target.with_name(f".{target.name}.write.lock")
+    publish_lock = atomic_publish_lock_path(target)
     with interprocess_file_lock(publish_lock, timeout_seconds=10.0, stale_seconds=120.0):
         fd, raw_tmp = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent))
         tmp = Path(raw_tmp)
@@ -119,6 +125,13 @@ def atomic_write_bytes(path: str | Path, data: bytes) -> Path:
 
 def atomic_write_text(path: str | Path, text: str, *, encoding: str = "utf-8") -> Path:
     return atomic_write_bytes(path, str(text).encode(encoding))
+
+
+def atomic_read_text(path: str | Path, *, encoding: str = "utf-8") -> str:
+    """Read one atomically-published file while excluding concurrent Windows replacement."""
+    target = Path(path)
+    with interprocess_file_lock(atomic_publish_lock_path(target), timeout_seconds=10.0, stale_seconds=120.0):
+        return target.read_text(encoding=encoding)
 
 
 def atomic_write_json(path: str | Path, payload: Mapping[str, Any], *, sort_keys: bool = False) -> Path:

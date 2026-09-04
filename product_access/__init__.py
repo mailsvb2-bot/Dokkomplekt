@@ -22,7 +22,7 @@ from typing import Any, Iterable, Mapping
 import uuid
 
 from diagnostic_logging import record_soft_exception
-from medical_paths import atomic_write_json as durable_atomic_write_json
+from medical_paths import atomic_read_text, atomic_write_json as durable_atomic_write_json
 from medical_paths import interprocess_file_lock
 
 PRODUCT_ACCESS_CONTRACT_VERSION = "v1.0"
@@ -596,10 +596,10 @@ class ProductAccessManager:
             return ""
 
     def load_license(self) -> LicenseEntitlement | None:
-        if not self.license_path.exists():
-            return None
         try:
-            payload = json.loads(self.license_path.read_text("utf-8"))
+            payload = json.loads(atomic_read_text(self.license_path, encoding="utf-8"))
+        except FileNotFoundError:
+            return None
         except Exception as exc:
             raise ValueError(f"Файл лицензии повреждён: {exc}") from exc
         if not isinstance(payload, dict):
