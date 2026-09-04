@@ -110,7 +110,7 @@ class PlanLimits:
 
 
 PLAN_LIMITS: dict[str, PlanLimits] = {
-    "trial": PlanLimits("trial", "Trial", 0, 0, 1, 1, 1, 5, 30, 3, "trial", offline_activation=False, overage_percent=0, grace_days=0, support_level="knowledge_base"),
+    "trial": PlanLimits("trial", "Trial", 0, 0, 1, 1, 1, 5, 30, 30, "trial", offline_activation=False, overage_percent=0, grace_days=0, support_level="knowledge_base"),
     "doctor_start": PlanLimits("doctor_start", "Doctor Start", 1490, 14900, 1, 1, 1, 30, 600, 10),
     "doctor_pro": PlanLimits("doctor_pro", "Doctor Pro", 3900, 29900, 2, 1, 3, 150, 3000, 50, batch_generation=True, batch_print=True, support_level="priority"),
     "department": PlanLimits("department", "Department", 14900, 149000, 5, 10, 10, 500, 20000, 100, batch_generation=True, batch_print=True, shared_department_profile=True, role_management=True, grace_days=14, support_level="department"),
@@ -456,19 +456,38 @@ class ProductAccessManager:
             return None, True
 
     @staticmethod
+    def _state_semantic_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+        result = dict(payload)
+        result.pop("_state_mac", None)
+        return result
+
+    @staticmethod
     def _merge_state_copies(copies: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         items = [dict(item) for item in copies if isinstance(item, Mapping)]
         if not items:
             return {}
-        result = dict(items[0])
-        starts = [parse_dt(str(item.get("trial_started_at") or "")) for item in items]
+
+        # A successful first-public-release reset creates an integrity-protected
+        # epoch marker.  A stale legacy Registry/file copy from before that reset
+        # must never drag the canonical trial start/usage backwards after one of
+        # the redundant writes failed.  Once at least one valid current-epoch
+        # copy exists, merge only within that epoch.  The MAC makes it impossible
+        # to fabricate this marker by editing JSON/Registry manually.
+        current_epoch_items = [
+            item for item in items
+            if str(item.get("trial_epoch") or "") == PRODUCTION_TRIAL_EPOCH
+        ]
+        merge_items = current_epoch_items or items
+        result = dict(max(merge_items, key=lambda item: int(item.get("usage_sequence", 0) or 0)))
+
+        starts = [parse_dt(str(item.get("trial_started_at") or "")) for item in merge_items]
         starts = [item for item in starts if item is not None]
         if starts:
             result["trial_started_at"] = iso(min(starts))
-        result["trial_created_total"] = max(int(item.get("trial_created_total", 0) or 0) for item in items)
-        result["usage_sequence"] = max(int(item.get("usage_sequence", 0) or 0) for item in items)
+        result["trial_created_total"] = max(int(item.get("trial_created_total", 0) or 0) for item in merge_items)
+        result["usage_sequence"] = max(int(item.get("usage_sequence", 0) or 0) for item in merge_items)
         merged_usage: dict[str, int] = {}
-        for item in items:
+        for item in merge_items:
             usage = item.get("usage_by_month") if isinstance(item.get("usage_by_month"), dict) else {}
             for key, value in usage.items():
                 merged_usage[str(key)] = max(merged_usage.get(str(key), 0), int(value or 0))
@@ -487,7 +506,19 @@ class ProductAccessManager:
         valid = [item for item in (primary, guard, registry) if item is not None]
         if valid:
             merged = self._merge_state_copies(valid)
-            if primary_corrupt or guard_corrupt or registry_corrupt or primary is None or guard is None:
+            canonical = self._state_semantic_payload(merged)
+            divergent = any(self._state_semantic_payload(item) != canonical for item in valid)
+            if (
+                primary_corrupt
+                or guard_corrupt
+                or registry_corrupt
+                or primary is None
+                or guard is None
+                or divergent
+            ):
+                # Heal every redundant owner from the canonical merged state.  In
+                # particular this repairs a stale Windows Registry guard left by
+                # a partially-successful public-trial reset.
                 self._save_state_payload(merged)
             return merged
         if primary_corrupt or guard_corrupt or registry_corrupt:
@@ -663,6 +694,8 @@ class ProductAccessManager:
         ends_at = started_at + timedelta(days=14)
         active = self._now() <= ends_at and trial_total < limits.document_limit_month
         reason = "trial_active" if active else "trial_document_limit" if trial_total >= limits.document_limit_month else "trial_expired"
+        remaining_seconds = max(0.0, (ends_at - self._now()).total_seconds())
+        days_left = int((remaining_seconds + 86399) // 86400) if active else 0
         return LicenseState(
             plan="trial",
             title=limits.title,
@@ -670,6 +703,7 @@ class ProductAccessManager:
             reason=reason,
             trial_started_at=iso(started_at),
             trial_ends_at=iso(ends_at),
+            days_left=days_left,
             documents_used_month=used,
             documents_limit_month=limits.document_limit_month,
             documents_used_total_trial=trial_total,

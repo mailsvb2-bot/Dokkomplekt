@@ -179,3 +179,56 @@ def test_installer_aborts_before_delete_when_runtime_shutdown_fails() -> None:
     assert "Result := False;" in script
     assert "SuppressibleMsgBox" in script
     assert "ArchitecturesAllowed=x64compatible" in script
+
+
+def test_current_public_trial_epoch_ignores_and_heals_stale_legacy_guard(tmp_path: Path) -> None:
+    """A stale pre-public redundant copy must not re-expire a reset public trial."""
+    current_now = datetime(2026, 9, 4, 11, 0, tzinfo=timezone.utc)
+    manager = ProductAccessManager(tmp_path, now=current_now)
+    manager._save_state_payload({
+        "trial_started_at": "2026-09-04T11:00:00+00:00",
+        "usage_by_month": {},
+        "trial_created_total": 0,
+        "trial_epoch": "v1.4.91-public",
+        "trial_public_reset_at": "2026-09-04T11:00:00+00:00",
+    })
+
+    # Simulate the exact Windows failure mode: files were updated, but one old
+    # redundant owner (Registry in production; guard file here) survived the
+    # public-reset write and still carries the months-old pre-release trial.
+    legacy = {
+        "state_version": 2,
+        "trial_started_at": "2026-06-20T00:00:00+00:00",
+        "usage_by_month": {"2026-06": 30},
+        "trial_created_total": 30,
+    }
+    legacy["_state_mac"] = hmac.new(
+        _legacy_v2_key(), stable_json(legacy).encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    manager.state_guard_path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    state = ProductAccessManager(tmp_path, now=current_now).current_state()
+
+    assert state.active is True
+    assert state.reason == "trial_active"
+    assert state.documents_used_total_trial == 0
+    assert state.trial_started_at == "2026-09-04T11:00:00+00:00"
+    healed_guard = json.loads((tmp_path / "product_access_guard.json").read_text("utf-8"))
+    assert healed_guard["trial_epoch"] == "v1.4.91-public"
+    assert healed_guard["trial_started_at"] == "2026-09-04T11:00:00+00:00"
+    assert healed_guard["trial_created_total"] == 0
+
+
+def test_trial_allows_normal_multi_document_patient_set_up_to_total_allowance(tmp_path: Path) -> None:
+    manager = ProductAccessManager(tmp_path, now=datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc))
+    decision = manager.check_document_creation(8)
+    assert decision.allowed is True
+    assert decision.code == "ok_trial"
+    assert decision.state.documents_limit_month == 30
+
+
+def test_fresh_trial_reports_real_days_left(tmp_path: Path) -> None:
+    manager = ProductAccessManager(tmp_path, now=datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc))
+    state = manager.current_state()
+    assert state.active is True
+    assert state.days_left == 14

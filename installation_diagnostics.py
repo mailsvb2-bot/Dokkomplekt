@@ -190,9 +190,11 @@ def assert_installation_diagnostics_lock() -> None:
 
 
 def run_user_journey_check() -> dict[str, object]:
+    """Exercise the packaged patient path through trial access and atomic DOCX publication."""
     import tempfile
     import time
     from dataclasses import replace
+    from datetime import datetime, timezone
     result: dict[str, object] = {"check": "user_journey", "ok": False, "checks": {}, "error": None}
     checks: dict[str, bool] = result["checks"]  # type: ignore[assignment]
     try:
@@ -201,6 +203,9 @@ def run_user_journey_check() -> dict[str, object]:
         from diary_schedule import DiaryScheduleSpec
         from medical_docx_reader import extract_docx_text
         from medical_service import MedicalDocumentService
+        from output_transaction import OutputTransaction
+        from product_access import apply_watermark_to_files
+        from product_access.native import NativeProductAccessManager
         from universal_case_adapter import patient_data_to_case
         from universal_diary_generation import render_diary_documents_from_pack
         from universal_generation import render_documents_from_pack
@@ -243,16 +248,46 @@ def run_user_journey_check() -> dict[str, object]:
             diary_spec = replace(diary_spec, category="diaries", role_id="daily_diary", diary_schedule=DiaryScheduleSpec("daily", (1, 2, 3, 4), (), 1.0, "packaged_user_journey").to_dict())
             pack.add_document(diary_spec)
             checks["doctor_owned_buttons_ready"] = {doc.id for doc in pack.documents} == {"doctor_primary", "doctor_discharge", "doctor_diary"}
-            regular = render_documents_from_pack(pack=pack, case=case, document_ids=["doctor_primary", "doctor_discharge"], output_dir=patient_dir, base_dir=profile_dir, strict=True)
-            diaries = render_diary_documents_from_pack(pack=pack, case=case, document_ids=["doctor_diary"], output_dir=patient_dir, base_dir=profile_dir, status_files=[], patient_name=case.get("patient.fio"), admission_value=case.get("admission.date"), discharge_value=case.get("discharge.date"), diary_day_offsets=(1, 2, 3, 4), remove_holiday_rows=False, force_final_diary=False)
+            transaction = OutputTransaction(final_dir=patient_dir)
+            stage_dir = transaction.begin()
+            regular = render_documents_from_pack(pack=pack, case=case, document_ids=["doctor_primary", "doctor_discharge"], output_dir=stage_dir, base_dir=profile_dir, strict=True)
+            diaries = render_diary_documents_from_pack(pack=pack, case=case, document_ids=["doctor_diary"], output_dir=stage_dir, base_dir=profile_dir, status_files=[], patient_name=case.get("patient.fio"), admission_value=case.get("admission.date"), discharge_value=case.get("discharge.date"), diary_day_offsets=(1, 2, 3, 4), remove_holiday_rows=False, force_final_diary=False)
             checks["regular_documents_created"] = regular.ok and len(regular.created_files) == 2
             checks["diaries_created"] = not diaries.skipped and len(diaries.created_files) == 1
-            regular_texts = [extract_docx_text(path) for path in regular.created_files]
-            diary_text = extract_docx_text(diaries.created_files[0]) if diaries.created_files else ""
+
+            staged_files = [Path(path) for path in [*regular.created_files, *diaries.created_files]]
+            access = NativeProductAccessManager(
+                storage_dir=root / "product_access",
+                now=datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc),
+            )
+            access_decision = access.check_document_creation(len(staged_files))
+            checks["trial_access_allows_real_creation"] = access_decision.allowed and access_decision.state.plan == "trial"
+            watermark = access.current_watermark_text()
+            watermark_result = apply_watermark_to_files(staged_files, watermark)
+            checks["trial_watermark_applied"] = bool(watermark) and not watermark_result.errors and watermark_result.changed_count == len(staged_files)
+
+            reservation = access.reserve_created_documents(len(staged_files))
+            mapping = transaction.commit(expected_files=staged_files)
+            access.finalize_created_documents(reservation)
+            committed_regular = [mapping[Path(path)] for path in regular.created_files]
+            committed_diaries = [mapping[Path(path)] for path in diaries.created_files]
+            committed_files = [*committed_regular, *committed_diaries]
+            checks["trial_usage_committed"] = access.current_state().documents_used_total_trial == len(committed_files)
+            checks["transaction_published_outputs"] = len(committed_files) == 3 and all(path.exists() for path in committed_files)
+
+            footer_text = "\n".join(
+                paragraph.text
+                for path in committed_files
+                for section in Document(str(path)).sections
+                for paragraph in section.footer.paragraphs
+            )
+            checks["trial_watermark_survives_commit"] = watermark in footer_text
+            regular_texts = [extract_docx_text(path) for path in committed_regular]
+            diary_text = extract_docx_text(committed_diaries[0]) if committed_diaries else ""
             checks["regular_content_correct"] = all("К-777" in text and "K35.8" in text for text in regular_texts) and any("терапия из пользовательского popup" in text for text in regular_texts) and any("05.09.2026" in text for text in regular_texts)
             checks["diary_calendar_correct"] = "02.09.26" in diary_text and "05.09.26" in diary_text and "01.09.26" not in diary_text and "06.09.26" not in diary_text
             checks["diary_signatures_present"] = "Лечащий врач" in diary_text and "Зав. отделением" in diary_text
-            checks["outputs_stay_in_patient_folder"] = all(Path(path).parent == patient_dir for path in [*regular.created_files, *diaries.created_files])
+            checks["outputs_stay_in_patient_folder"] = all(path.parent == patient_dir for path in committed_files)
             checks["intake_does_not_retrigger"] = scan_primary_candidates(intake, set()) == ()
         result["ok"] = bool(checks) and all(checks.values())
     except Exception as exc:
