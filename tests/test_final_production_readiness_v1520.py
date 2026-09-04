@@ -525,30 +525,35 @@ native.NativeProductAccessManager().install_license_text(json.dumps(payload))
     base = dict(os.environ)
     base["DOKKOMPLEKT_LICENSE_DIR"] = str(storage)
     base["PYTHONPATH"] = str(Path.cwd())
-    processes = []
-    for index in range(8):
-        env = dict(base)
-        env["WRITER"] = str(index)
-        processes.append(
-            subprocess.Popen(
-                [sys.executable, "-c", code],
-                cwd=Path.cwd(),
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-        )
     failures = []
-    for process in processes:
-        stdout, stderr = process.communicate(timeout=30)
-        if process.returncode:
-            failures.append((process.returncode, stdout, stderr))
+    all_writers: set[str] = set()
+    for round_index in range(4):
+        processes = []
+        for index in range(8):
+            writer = f"{round_index}-{index}"
+            all_writers.add(writer)
+            env = dict(base)
+            env["WRITER"] = writer
+            processes.append(
+                subprocess.Popen(
+                    [sys.executable, "-c", code],
+                    cwd=Path.cwd(),
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            )
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=30)
+            if process.returncode:
+                failures.append((process.returncode, stdout, stderr))
     assert not failures
     payload = json.loads((storage / "license.json").read_text())
     assert payload["schema"] == "dokkomplekt.license.v1"
-    assert payload["license"]["writer"] in {str(index) for index in range(8)}
+    assert payload["license"]["writer"] in all_writers
     assert not list(storage.glob("*.tmp"))
+    assert not list(storage.glob("*.write.lock"))
 
 
 def test_concurrent_docm_conversion_has_no_shared_temp_race(tmp_path: Path) -> None:

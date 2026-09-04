@@ -10,7 +10,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Mapping
 
-from medical_paths import atomic_write_text
+from medical_paths import atomic_read_text, atomic_write_text
 from product_access import AccessDecision, LicenseEntitlement, ProductAccessManager
 
 try:
@@ -108,9 +108,10 @@ def _entitlement_payload(text: str) -> dict[str, Any]:
 
 class NativeProductAccessManager(ProductAccessManager):
     def load_license(self) -> LicenseEntitlement | None:
-        if not self.license_path.exists():
+        try:
+            text = atomic_read_text(self.license_path, encoding="utf-8")
+        except FileNotFoundError:
             return None
-        text = self.license_path.read_text("utf-8")
         payload: Any = json.loads(text or "{}")
         if isinstance(payload, dict) and is_rust_license_document(payload):
             return LicenseEntitlement.from_mapping(_entitlement_payload(text))
@@ -164,7 +165,7 @@ class NativeProductAccessManager(ProductAccessManager):
         if not path.exists():
             return None
         try:
-            payload = json.loads(path.read_text("utf-8"))
+            payload = json.loads(atomic_read_text(path, encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
         if not isinstance(payload, dict):
