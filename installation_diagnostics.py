@@ -190,6 +190,7 @@ def assert_installation_diagnostics_lock() -> None:
 
 
 def run_user_journey_check() -> dict[str, object]:
+    """Exercise the packaged patient path through trial access and atomic DOCX publication."""
     import tempfile
     import time
     from dataclasses import replace
