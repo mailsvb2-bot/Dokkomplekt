@@ -1,6 +1,13 @@
 # MedicalDiaryAutofill / Dokkomplekt
 
-Version: `v1.4.92_trial_uninstall_hotfix`
+Version: `v1.4.93_generation_trial_hotfix`
+
+## v1.4.93 — document creation / trial runtime hotfix
+
+- Repairs redundant trial-state reconciliation so a stale pre-release Windows Registry guard cannot re-expire a valid public trial.
+- Trial keeps the 30-document total allowance but no longer blocks normal multi-document patient sets at three files per run.
+- Packaged user-journey now proves trial watermarking, usage reservation and transactional publication of real DOCX outputs.
+- Windows CI adds a full patient-creation pass with product-access enforcement enabled.
 
 ## v1.4.92 — production trial / uninstall hotfix
 

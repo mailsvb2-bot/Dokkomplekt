@@ -2,7 +2,7 @@ MedicalDiaryAutofill baseline
 =============================
 
 Baseline version: v1.4.85_baseline_foundation_SOURCE
-Current regression-contour release: v1.4.92_trial_uninstall_hotfix
+Current regression-contour release: v1.4.93_generation_trial_hotfix
 Baseline date: 2026-06-26
 Regression contour date: 2026-06-26
 Baseline lineage source: v1.4.84_button_management_popup_folder_regression_closure_SOURCE

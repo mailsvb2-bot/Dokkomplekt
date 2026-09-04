@@ -169,6 +169,18 @@ jobs:
               throw "Smoke gate failed: $smoke (exit $LASTEXITCODE)"
             }
           }
+      - name: Run full patient creation with production trial enforcement
+        shell: pwsh
+        env:
+          DOKKOMPLEKT_TEST_DISABLE_PRODUCT_ACCESS: '0'
+          DOKKOMPLEKT_LICENSE_DIR: ${{ runner.temp }}\dokkomplekt-real-trial
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -Recurse -Force $env:DOKKOMPLEKT_LICENSE_DIR -ErrorAction SilentlyContinue
+          python smoke_full_patient_replay.py
+          if ($LASTEXITCODE -ne 0) {
+            throw "Production-trial full patient replay failed: exit $LASTEXITCODE"
+          }
       - name: Run release gate
         shell: pwsh
         run: |

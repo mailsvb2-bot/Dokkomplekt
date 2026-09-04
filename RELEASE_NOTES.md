@@ -1,3 +1,12 @@
+# Release notes — v1.4.93_generation_trial_hotfix
+
+## Fixed
+
+- Document creation can no longer be blocked by a stale pre-public trial copy after the v1.4.91 public reset. Current-epoch state wins and heals divergent redundant copies.
+- Trial users can create a normal multi-document patient set; the 30-document total trial limit remains unchanged.
+- The packaged user-journey check now includes the real trial watermark, usage reservation and output transaction before declaring the EXE healthy.
+- Windows CI explicitly runs the full patient flow with product access enabled.
+
 # Release notes — v1.4.92_trial_uninstall_hotfix
 
 - Исправлен ложный «Пробный период завершён» у первого публичного production-релиза: состояние внутренних/pre-release сборок не съедает 14-дневный Trial. Сброс выполняется строго один раз и защищён integrity state/guard.
