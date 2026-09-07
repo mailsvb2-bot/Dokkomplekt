@@ -407,8 +407,12 @@ def prepare_patient_work_folder(
                     if not same_path:
                         try:
                             source.unlink()
-                        except FileNotFoundError:
-                            pass
+                        except FileNotFoundError as missing_exc:
+                            record_soft_exception(
+                                "desktop_intake.dedup_source_already_missing",
+                                missing_exc,
+                                detail=str(source),
+                            )
                         except OSError as unlink_exc:
                             raise RuntimeError(
                                 "Первичный документ уже есть в папке пациента, но исходный файл не удалось удалить. "
