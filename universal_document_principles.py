@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Sequence
 
+from diagnostic_logging import record_soft_exception
 from document_intelligence.analyzer import DocumentIntelligenceCore
-from universal_fields import PatientCase
+from universal_fields import PatientCase, normalize_field_id_for_context
 
-UNIVERSAL_DOCUMENT_PRINCIPLES_LOCK_VERSION = "v1.0"
+UNIVERSAL_DOCUMENT_PRINCIPLES_LOCK_VERSION = "v1.1"
 
 
 def infer_document_principles(path: str | Path, **_kwargs):
@@ -22,6 +23,14 @@ def infer_document_principles_for_document(document: object, *, base_dir: str | 
 
 
 def missing_fields_from_principles(case: PatientCase, document: object, *, base_dir: str | Path | None = None):
+    """Return missing fields without inventing a second required-field policy.
+
+    Document intelligence may discover many fillable visible blanks, but the
+    persisted DocumentTemplateSpec is the single owner of which fields are
+    actually mandatory. This keeps the completion popup, strict renderer and
+    doctor-owned profile on the same contract.
+    """
+
     blueprint = infer_document_principles_for_document(document, base_dir=base_dir)
     result = []
     role_id = str(getattr(document, "role_id", "") or "")
@@ -29,6 +38,24 @@ def missing_fields_from_principles(case: PatientCase, document: object, *, base_
     button_label = str(getattr(document, "button_label", "") or "")
     from dataclasses import replace
     from document_intelligence.form_fill import visible_field_id
+
+    required_field_ids: set[str] = set()
+    for raw_id in tuple(getattr(document, "required_fields", ()) or ()):
+        try:
+            required_field_ids.add(
+                normalize_field_id_for_context(
+                    str(raw_id),
+                    role_id=role_id,
+                    category=category,
+                    document_label=button_label,
+                )
+            )
+        except ValueError as exc:
+            record_soft_exception(
+                "universal_document_principles.invalid_profile_required_field",
+                exc,
+                detail=str(raw_id),
+            )
 
     for field in blueprint.fields:
         field_id = str(getattr(field, "field_id", "") or "").strip()
@@ -39,7 +66,22 @@ def missing_fields_from_principles(case: PatientCase, document: object, *, base_
                 category=category,
                 button_label=button_label,
             )
-        if getattr(field, "required", True) and field_id and not case.get(field_id).strip():
+        else:
+            try:
+                field_id = normalize_field_id_for_context(
+                    field_id,
+                    role_id=role_id,
+                    category=category,
+                    document_label=button_label,
+                )
+            except ValueError as exc:
+                record_soft_exception(
+                    "universal_document_principles.invalid_inferred_field",
+                    exc,
+                    detail=field_id,
+                )
+                continue
+        if field_id in required_field_ids and not case.get(field_id).strip():
             result.append(replace(field, field_id=field_id))
     return tuple(dict((field.field_id, field) for field in result).values())
 
@@ -58,5 +100,5 @@ def completion_inputs_from_inferred_fields(fields: Sequence[object], *, existing
 
 
 def assert_universal_document_principles_lock() -> None:
-    if UNIVERSAL_DOCUMENT_PRINCIPLES_LOCK_VERSION != "v1.0":
+    if UNIVERSAL_DOCUMENT_PRINCIPLES_LOCK_VERSION != "v1.1":
         raise AssertionError("Universal document principles lock changed unexpectedly")

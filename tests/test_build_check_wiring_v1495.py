@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_VERSION = "1.4.93"
-CURRENT_VERSION_LABEL = "v1.4.93_generation_trial_hotfix"
-CURRENT_VERSION_TUPLE = "(1, 4, 93, 0)"
+CURRENT_VERSION = "1.4.94"
+CURRENT_VERSION_LABEL = "v1.4.94_real_template_creation_fix"
+CURRENT_VERSION_TUPLE = "(1, 4, 94, 0)"
 HOTFIX_PHRASE = "discharge custom case propagation"
 
 

@@ -1,6 +1,13 @@
 # MedicalDiaryAutofill / Dokkomplekt
 
-Version: `v1.4.93_generation_trial_hotfix`
+Version: `v1.4.94_real_template_creation_fix`
+
+## v1.4.94 — real Word-template creation fix
+
+- Ordinary visible Word fields are no longer all treated as unconditional blockers. Conditional fields such as sick-leave number, workplace and position remain fillable but do not cancel the whole patient set when legitimately empty.
+- Explicit `{{...}}` placeholders remain strict required fields, and role-owned core fields remain protected.
+- Existing auto-inferred doctor profiles are migrated in place with a backup; buttons/templates do not need to be recreated.
+- The full patient replay now includes conditional visible discharge fields so this regression is covered by the Windows production gate.
 
 ## v1.4.93 — document creation / trial runtime hotfix
 
