@@ -5,6 +5,7 @@ from pathlib import Path
 
 from docx import Document
 
+from universal_document_principles import missing_fields_from_principles
 from universal_fields import PatientCase
 from universal_profiles import DocumentPack
 from universal_template_engine import (
@@ -71,6 +72,27 @@ def test_conditional_visible_fields_do_not_block_strict_real_template_render(tmp
         strict=True,
     )
     assert output.exists()
+
+
+def test_document_principles_respect_profile_required_policy(tmp_path: Path) -> None:
+    template = _realistic_discharge_template(tmp_path / "discharge.docx")
+    spec = infer_document_spec_from_template(
+        template,
+        button_label="Выписной эпикриз",
+        role_id="discharge_epicrisis",
+    )
+
+    # A complete core case must not reopen a completion popup merely because the
+    # template contains conditional visible blanks such as sick leave/work data.
+    assert missing_fields_from_principles(_core_case(), spec, base_dir=tmp_path) == ()
+
+    incomplete = PatientCase()
+    incomplete.set("patient.fio", "Тестовый Пациент")
+    incomplete.set("case.number", "123")
+    incomplete.set("diagnosis.main", "F20.0")
+    incomplete.set("discharge.date", "07.09.2026")
+    missing = missing_fields_from_principles(incomplete, spec, base_dir=tmp_path)
+    assert {field.field_id for field in missing} == {"treatment.plan"}
 
 
 def test_existing_auto_inferred_profile_is_migrated_without_recreating_buttons(tmp_path: Path) -> None:
