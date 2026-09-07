@@ -27,7 +27,7 @@ class MedicalTextParser(
     FIELD_ALIASES: Dict[str, Sequence[str]] = {
         "case_number": ("История болезни №", "История болезни N", "ИБ №", "Nr historii choroby", "Numer historii choroby", "Historia choroby nr", "Nr dokumentacji", "Numer dokumentacji", "Nr karty"),
         "fio": ("Ф.И.О.", "Ф.И.О", "ФИО", "ФИО пациента", "Ф.И.О. пациента", "Ф.И.О пациента", "Фамилия Имя Отчество", "Пациент", "Пациентка", "Больной", "Больная", "Pacjent", "Pacjentka", "Imię i nazwisko", "Imie i nazwisko", "Nazwisko i imię", "Nazwisko i imie"),
-        # ``Возраст``/``Wiek`` are intentionally not birth aliases.  Treating an
+        # ``Возраст``/``Wiek`` are intentionally not birth aliases. Treating an
         # age such as "46 лет" as a birth date poisoned both patient.birth_date
         # and patient.age in universal templates.
         "birth": ("Год рождения", "Дата рождения", "г.р.", "Data urodzenia", "Urodzony", "Urodzona"),
