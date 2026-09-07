@@ -10,7 +10,10 @@ def test_v1502_intake_diary_and_discharge_contracts():
     from desktop_intake_mixin import DesktopIntakeMixin
     from diary_batch import _calendar_text_diary_dates, _split_regular_and_final_text_diary_dates
 
-    assert desktop_intake.DESKTOP_INTAKE_SETUP_PROMPT_VERSION == "v4-intake-patient-folder-confirm"
+    # v5 intentionally re-asks old setups because closed-app readiness is now a
+    # persisted, user-visible contract rather than being inferred from enabled=True.
+    assert desktop_intake.DESKTOP_INTAKE_SETUP_PROMPT_VERSION == "v5-intake-critical-path"
+    assert desktop_intake.DESKTOP_INTAKE_PERSISTS_BACKGROUND_AGENT_READINESS is True
     assert desktop_intake.DESKTOP_INTAKE_REASKS_AFTER_FOLDER_NAMING_REGRESSION is True
     assert desktop_intake_agent.AGENT_VERSION == "v1.9"
     assert desktop_intake_agent.DESKTOP_INTAKE_AGENT_REASKS_OLD_DISABLED_SETTINGS is True
