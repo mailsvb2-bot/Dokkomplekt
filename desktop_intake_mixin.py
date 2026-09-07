@@ -417,6 +417,7 @@ class DesktopIntakeMixin:
         return effective_primary
 
     def _open_desktop_intake_popup(self, primary_path: str | Path) -> bool:
+        """Run the modal intake transaction from detected primary document to committed outputs."""
         if getattr(self, "_desktop_intake_popup_open", False):
             return False
         self._desktop_intake_popup_open = True
