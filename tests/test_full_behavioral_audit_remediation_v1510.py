@@ -200,6 +200,46 @@ def test_patient_reset_clears_external_sources_and_undo_history():
     assert h._field_undo_stack["patient_name"] == []
 
 
+@pytest.mark.parametrize(
+    ("choice", "expected_dialog"),
+    [(None, None), (True, "file"), (False, "folder")],
+)
+def test_diary_dates_picker_has_explicit_file_folder_cancel_semantics(monkeypatch, choice, expected_dialog):
+    import files_mixin as module
+    from files_mixin import FilesMixin
+
+    app = object.__new__(FilesMixin)
+    app.root = None
+    app.output_dir_var = Var("")
+    app.diary_files = ["KEEP_EXISTING.docx"]
+    app.diary_template_dir = "KEEP_FOLDER"
+    app._dialog_initial_dir = lambda *_args: "C:/dates"
+    app._get_saved_directory = lambda *_args: ""
+    app._set_manual_diary_template_file = lambda _selected: True
+    app._set_numbered_diary_template_dir = lambda _folder, **_kwargs: True
+    app._set_output_dir_auto = lambda _path: None
+
+    calls: list[str] = []
+    monkeypatch.setattr(module.messagebox, "askyesnocancel", lambda *_args, **_kwargs: choice)
+    monkeypatch.setattr(
+        module.filedialog,
+        "askopenfilename",
+        lambda **_kwargs: calls.append("file") or "C:/dates/01.docx",
+    )
+    monkeypatch.setattr(
+        module.filedialog,
+        "askdirectory",
+        lambda **_kwargs: calls.append("folder") or "C:/dates",
+    )
+
+    FilesMixin.choose_diary_files(app)
+
+    assert calls == ([] if expected_dialog is None else [expected_dialog])
+    if choice is None:
+        assert app.diary_files == ["KEEP_EXISTING.docx"]
+        assert app.diary_template_dir == "KEEP_FOLDER"
+
+
 def test_dead_agent_pid_makes_lock_stale_immediately(monkeypatch, tmp_path: Path):
     import desktop_intake_agent as agent
     lock=tmp_path/"agent.lock"; lock.write_text("pid=424242\nversion=x\n",encoding="utf-8"); os.utime(lock,(time.time(),time.time()))
