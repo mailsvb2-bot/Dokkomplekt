@@ -145,6 +145,10 @@ def test_manual_diary_date_template_selection_is_not_auto_replaced(tmp: Path) ->
     _empty_docx(selected)
     _empty_docx(other)
     fake = _FakeFiles(tmp)
+    # This smoke verifies the explicit "one file" branch. Do not invoke a real
+    # Tk messagebox on headless CI; the separate UX regression covers all three
+    # file/folder/cancel choices.
+    fake._choose_diary_date_source_mode = lambda: "file"
     old_file = files_mixin_module.filedialog.askopenfilename
     old_dir = files_mixin_module.filedialog.askdirectory
     files_mixin_module.filedialog.askopenfilename = lambda **_kwargs: str(selected)
