@@ -19,6 +19,8 @@ CUSTOM_DIARY_CAN_USE_TEMPLATE_TEXTS_AS_STATUS_SOURCE = True
 # The removed legacy GLOBAL table backend stays disabled. Doctor-owned block-03
 # diaries now use an isolated template-preserving renderer. The semantic calendar
 # remains the same contract as the text route's fill_diary_batch(..., diary_files=[]).
+# The standard Dates+Texts path remains text_output=True; custom doctor-owned
+# templates consume the same semantic schedule while preserving their Word layout.
 CUSTOM_DIARY_TABLE_FILLING_IS_DISABLED = True
 CUSTOM_DIARY_USES_DOCTOR_TEMPLATE_RENDERER = True
 CUSTOM_DIARY_GENERATION_IS_ALL_OR_NOTHING = True
