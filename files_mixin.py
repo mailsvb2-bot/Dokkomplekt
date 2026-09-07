@@ -564,24 +564,42 @@ class FilesMixin:
         self._log(f"\n✅ Врач вручную выбрал файл дат дневников: {path.name}.\n")
         return True
 
+    def _choose_diary_date_source_mode(self) -> str | None:
+        """Ask explicitly whether «Даты» means one file, a 01–31 folder, or cancel."""
+        choice = messagebox.askyesnocancel(
+            "Даты дневников — что выбрать?",
+            "Выберите источник дат дневников:\n\n"
+            "Да — один конкретный Word-файл DOCX/DOCM.\n"
+            "Нет — папку с шаблонами 01.docx … 31.docx.\n"
+            "Отмена — ничего не менять.",
+            parent=getattr(self, "root", None),
+        )
+        if choice is None:
+            return None
+        return "file" if choice else "folder"
+
     def choose_diary_files(self) -> None:
-        # Кнопка «Даты» теперь честно поддерживает два сценария:
-        # 1) врач выбирает конкретный DOCX — это ручной выбор, не автоподбор;
-        # 2) врач отменяет выбор файла и выбирает папку — тогда программа
-        #    продолжает автоподбор 01–31 по дате поступления.
+        # «Отмена» должна означать именно отмену. Выбор файла и выбор папки —
+        # два равноправных явных сценария, а не скрытый переход через Cancel.
+        mode = self._choose_diary_date_source_mode()
+        if mode is None:
+            return
         initial_dir = self._dialog_initial_dir(
             DIR_NUMBERED_DIARY_TEMPLATES,
             self._get_saved_directory(DIR_DIARY_TEMPLATES),
         )
-        selected = filedialog.askopenfilename(
-            title="Выберите конкретный DOCX с датами дневников или отмените для выбора папки",
-            initialdir=initial_dir,
-            filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("Все файлы", "*.*")],
-        )
-        if selected:
+        if mode == "file":
+            selected = filedialog.askopenfilename(
+                title="Выберите конкретный DOCX/DOCM с датами дневников",
+                initialdir=initial_dir,
+                filetypes=[("Word DOCX/DOCM", "*.docx *.docm"), ("Все файлы", "*.*")],
+            )
+            if not selected:
+                return
             if self._set_manual_diary_template_file(selected) and not self.output_dir_var.get().strip():
                 self._set_output_dir_auto(Path(selected).parent)
             return
+
         folder_value = filedialog.askdirectory(
             title="Выберите папку «шаблоны дневников» для автоподбора 01–31",
             initialdir=initial_dir,
