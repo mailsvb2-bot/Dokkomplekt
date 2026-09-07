@@ -31,16 +31,32 @@ def _labs_results_for_case(data: PatientData) -> str:
     return data.labs_text or ""
 
 
-def _age_at_admission(birth_value: str, admission_value: str) -> str:
-    """Return completed years only when both semantic dates are trustworthy.
+def _explicit_age(value: str) -> str:
+    """Return a doctor/source supplied age, but never a date/year of birth."""
 
-    ``PatientData.birth`` historically also received values from an ``Возраст``
-    label. Treating an arbitrary birth/age string as ``patient.age`` produced
-    dangerous output such as ``Возраст: 12.03.1981``. Age is therefore derived
-    only from two parseable dates and is otherwise left empty for preflight.
+    text = " ".join(str(value or "").strip().split())
+    match = re.fullmatch(
+        r"(?i)(\d{1,3})(?:\s*(?:лет|года?|год|years?|yrs?|y\.o\.|lat))?",
+        text,
+    )
+    if not match:
+        return ""
+    years = int(match.group(1))
+    return text if 0 <= years <= 130 else ""
+
+
+def _age_at_admission(birth_or_age_value: str, admission_value: str) -> str:
+    """Return an explicit age or derive completed years from two semantic dates.
+
+    ``PatientData.birth`` is legacy storage and may contain either a birth value
+    or an age extracted from a visible ``Возраст`` field. A birth date must never
+    be copied verbatim into ``patient.age``.
     """
 
-    birth = parse_date(str(birth_value or "").strip())
+    explicit = _explicit_age(birth_or_age_value)
+    if explicit:
+        return explicit
+    birth = parse_date(str(birth_or_age_value or "").strip())
     admission = parse_date(str(admission_value or "").strip())
     if not birth or not admission:
         return ""
@@ -55,23 +71,78 @@ def _age_at_admission(birth_value: str, admission_value: str) -> str:
     return str(years) if 0 <= years <= 130 else ""
 
 
+def _birth_date_for_case(value: str) -> str:
+    """Do not expose an explicit age as ``patient.birth_date``."""
+
+    text = str(value or "").strip()
+    return "" if _explicit_age(text) else text
+
+
+def _is_negated_semantic_claim(value: str) -> bool:
+    normalized = " ".join(str(value or "").casefold().replace("ё", "е").split())
+    return any(
+        marker in normalized
+        for marker in (
+            "не является",
+            "не относится",
+            "не считать",
+            "не является результатом",
+            "не является рекомендац",
+        )
+    )
+
+
+def _discharge_summary(data: PatientData) -> str:
+    """Use discharge-owned text, never unrelated somatic/profile status."""
+
+    epi = str(data.epi_text or "").strip()
+    if epi and not _is_negated_semantic_claim(epi):
+        return epi
+    additional = str(data.additional_info_text or "").strip()
+    normalized = additional.casefold().replace("ё", "е")
+    discharge_markers = (
+        "выпис",
+        "с улучш",
+        "без улучш",
+        "стабильн",
+        "состояни",
+        "wypis",
+        "popraw",
+        "stan przy wypisie",
+    )
+    if additional and not _is_negated_semantic_claim(additional) and any(marker in normalized for marker in discharge_markers):
+        return additional
+    return ""
+
+
+def _recommendations(data: PatientData) -> str:
+    text = str(data.additional_info_text or "").strip()
+    normalized = text.casefold().replace("ё", "е")
+    if not text or _is_negated_semantic_claim(text):
+        return ""
+    if any(marker in normalized for marker in ("рекоменд", "zalec")):
+        return text
+    return ""
+
+
 def patient_data_to_case(data: PatientData, *, source_document: str = "") -> PatientCase:
     """Convert legacy PatientData, including popup requisites, into PatientCase.
 
-    The adapter is deliberately conservative: it never manufactures semantically
-    different discharge/recommendation/expert fields from merely non-empty nearby
-    sections. Profile scanning or doctor-confirmed completion owns those fields.
+    Semantically distinct fields are populated only from their owning source:
+    treatment sections stay treatment plans; discharge/result fields come from
+    epicrisis/discharge text; recommendations require recommendation semantics.
     """
 
     case = PatientCase()
     objective_status = _first_text(data.somatic_status, data.profile_status)
+    discharge_summary = _discharge_summary(data)
     vk_mse_work_position = _first_text(
         data.vk_mse_work_position,
         ", ".join(part for part in (data.vk_mse_work_org, data.vk_mse_position) if part),
     )
     pairs = {
         "patient.fio": data.output_fio or data.fio,
-        "patient.birth_date": data.birth,
+        "patient.birth_date": _birth_date_for_case(data.birth),
         "patient.age": _age_at_admission(data.birth, data.admission_date),
         "patient.address": data.registered,
         "patient.work": data.work_org,
@@ -94,8 +165,11 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
         "diagnosis.main": data.diagnosis,
         "diagnosis.icd10": _icd10_code_from_diagnosis(data.diagnosis),
         "treatment.plan": data.treatment_plan,
+        "condition.discharge": discharge_summary,
+        "treatment.result": discharge_summary,
         "epicrisis.text": data.epi_text,
         "additional.info": data.additional_info_text,
+        "recommendations": _recommendations(data),
         "labs.results": _labs_results_for_case(data),
         "labs.source": data.labs_source,
         "labs.date_policy": data.labs_date_policy,
@@ -128,15 +202,15 @@ def _safe_overlay_values(values: Mapping[str, str]) -> dict[str, str]:
     safe = {str(key): str(value or "").strip() for key, value in values.items() if str(value or "").strip()}
 
     # The current UI has one generic "additional information" field. It must not
-    # masquerade as a dedicated Recommendations section simply because both keys
-    # were historically populated from the same widget.
+    # masquerade as Recommendations unless the value itself has recommendation
+    # semantics. Source-parsed PatientData uses _recommendations() above.
     if safe.get("recommendations") and safe.get("recommendations") == safe.get("additional.info"):
-        safe.pop("recommendations", None)
+        candidate = safe["recommendations"]
+        if not _recommendations(PatientData(additional_info_text=candidate)):
+            safe.pop("recommendations", None)
 
     work = safe.get("patient.work", "").casefold().replace("ё", "е")
     if work in {"не работает", "неработает", "нет", "безработный", "безработная"}:
-        # A stale position/workplace parsed from the primary must never survive a
-        # doctor-confirmed "не работает" choice.
         safe.pop("patient.position", None)
         safe.pop("expert.work_org", None)
         safe.pop("expert.position", None)
