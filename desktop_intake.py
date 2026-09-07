@@ -388,6 +388,7 @@ def prepare_patient_work_folder(
     *,
     keep_source: bool = False,
 ) -> tuple[Path, Path]:
+    """Create/reuse the patient folder and atomically place the primary Word file there."""
     source = Path(primary_path).expanduser()
     if not source.exists() or not source.is_file():
         raise FileNotFoundError(f"Не найден первичный документ для папки пациента: {source}")
