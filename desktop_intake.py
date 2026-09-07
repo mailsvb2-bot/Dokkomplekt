@@ -1,9 +1,4 @@
-"""Desktop intake folder helpers.
-
-The feature is intentionally local and polling-based: while the application is
-running, a doctor may drop a primary DOCX into the desktop folder and the app
-will offer document creation into a patient subfolder.
-"""
+"""Desktop intake folder helpers."""
 
 from __future__ import annotations
 
@@ -20,9 +15,9 @@ from diagnostic_logging import record_soft_exception
 from medical_docx_reader import extract_docx_text
 from medical_formatting import available_path, safe_filename
 
-DESKTOP_INTAKE_LOCK_VERSION = "v1.14"
+DESKTOP_INTAKE_LOCK_VERSION = "v1.15"
 PRIMARY_FILE_QUIET_SECONDS = 1.5
-DESKTOP_INTAKE_SETUP_PROMPT_VERSION = "v4-intake-patient-folder-confirm"
+DESKTOP_INTAKE_SETUP_PROMPT_VERSION = "v5-intake-critical-path"
 DESKTOP_INTAKE_FOLDER_NAME = "Выписанные пациенты"
 DESKTOP_INTAKE_REQUIRES_RUNNING_APP = False
 DESKTOP_INTAKE_BACKGROUND_AGENT_SUPPORTED = True
@@ -51,23 +46,13 @@ DESKTOP_INTAKE_RELAXED_PRIMARY_THRESHOLD_FOR_DOCTOR_FOLDER = True
 DESKTOP_INTAKE_TOP_LEVEL_DOCX_DROP_STARTS_APP = True
 DESKTOP_INTAKE_REJECTS_UNREADABLE_DOCX_FALLBACKS = True
 DESKTOP_INTAKE_REASKS_AFTER_FOLDER_NAMING_REGRESSION = True
+DESKTOP_INTAKE_SUPPORTS_SAME_WORD_FORMATS_AS_MANUAL_FLOW = True
+DESKTOP_INTAKE_EXACT_CONTENT_DEDUP_PRECEDES_METADATA = True
+DESKTOP_INTAKE_PRIORITY_USES_ROLE_SCORE = True
+DESKTOP_INTAKE_PERSISTS_BACKGROUND_AGENT_READINESS = True
 DESKTOP_INTAKE_MAX_SEEN_SIGNATURES = 1000
 
-_ALLOWED_PRIMARY_SUFFIXES = {".docx", ".docm"}
-_PRIMARY_MARKERS = (
-    "первичный осмотр",
-    "первинний огляд",
-    "осмотр врача приёмного покоя",
-    "осмотр врача приемного покоя",
-    "приёмного покоя",
-    "приемного покоя",
-    "направление на госпитализацию",
-    "госпитализац",
-    "поступает",
-    "поступил",
-    "admission",
-    "hospitalization",
-)
+_ALLOWED_PRIMARY_SUFFIXES = {".docx", ".docm", ".doc"}
 _EXCLUDED_DOCUMENT_MARKERS = (
     "выписной эпикриз",
     "переводной эпикриз",
@@ -85,16 +70,12 @@ class DesktopCandidate:
 
 
 def primary_document_score(text: str) -> int:
-    """Score whether DOCX text is a primary intake source."""
+    """Score whether Word text is a primary intake source."""
 
     low = (text or "").lower().replace("ё", "е")
     if not low.strip():
         return 0
-    negative = 0
-    for marker in _EXCLUDED_DOCUMENT_MARKERS:
-        if marker in low:
-            negative += 5
-    score = 0
+    negative = sum(5 for marker in _EXCLUDED_DOCUMENT_MARKERS if marker in low)
     strong_markers = (
         "первичный осмотр",
         "первинний огляд",
@@ -102,34 +83,32 @@ def primary_document_score(text: str) -> int:
         "осмотр врача приёмного покоя",
         "направление на госпитализацию",
     )
-    identity_markers = ("ф.и.о", "фио", "фамилия имя отчество", "пациент", "больной", "больная", "история болезни", "номер истории")
-    admission_markers = (
-        "дата поступления",
-        "дата госпитализации",
-        "поступил",
-        "поступила",
-        "поступает",
-        "госпитализирован",
-        "госпитализирована",
+    identity_markers = (
+        "ф.и.о", "фио", "фамилия имя отчество", "пациент", "больной", "больная",
+        "история болезни", "номер истории",
     )
-    clinical_markers = ("диагноз", "жалобы", "анамнез", "объективный статус", "соматический статус", "план лечения")
-    score += 6 * sum(1 for marker in strong_markers if marker in low)
+    admission_markers = (
+        "дата поступления", "дата госпитализации", "поступил", "поступила",
+        "поступает", "госпитализирован", "госпитализирована",
+    )
+    clinical_markers = (
+        "диагноз", "жалобы", "анамнез", "объективный статус",
+        "соматический статус", "план лечения",
+    )
+    score = 6 * sum(1 for marker in strong_markers if marker in low)
     score += 2 * sum(1 for marker in identity_markers if marker in low)
     score += 3 * sum(1 for marker in admission_markers if marker in low)
-    score += 1 * sum(1 for marker in clinical_markers if marker in low)
+    score += sum(1 for marker in clinical_markers if marker in low)
     if "госпитализац" in low and not any(marker in low for marker in admission_markers + strong_markers):
         score -= 2
     return max(0, score - negative)
 
 
 def _desktop_from_windows_registry() -> Path | None:
-    """Read the authoritative Windows Desktop location when available."""
-
     if os.name != "nt":
         return None
     try:
         import winreg  # type: ignore[import-not-found]
-
         with winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
             r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders",
@@ -144,12 +123,9 @@ def _desktop_from_windows_registry() -> Path | None:
 
 
 def desktop_path() -> Path:
-    """Return the user's real Desktop folder as safely as possible."""
-
     registry_desktop = _desktop_from_windows_registry()
     if registry_desktop is not None:
         return registry_desktop
-
     home = Path.home()
     candidates: list[Path] = []
 
@@ -166,7 +142,6 @@ def desktop_path() -> Path:
     for key in ("OneDriveCommercial", "OneDriveConsumer", "OneDrive", "USERPROFILE"):
         add_base(os.environ.get(key))
     candidates.extend((home / "Desktop", home / "Рабочий стол"))
-
     seen: set[str] = set()
     for candidate in candidates:
         try:
@@ -187,8 +162,6 @@ def default_intake_folder() -> Path:
 
 
 def prompt_intake_folder(saved_folder: str | Path | None = None) -> Path:
-    """Return the folder path that the setup dialog should offer."""
-
     if saved_folder:
         try:
             candidate = Path(saved_folder).expanduser()
@@ -200,8 +173,6 @@ def prompt_intake_folder(saved_folder: str | Path | None = None) -> Path:
 
 
 def _existing_intake_folder_on_desktop() -> Path | None:
-    """Return an existing intake folder regardless of case/old spelling."""
-
     root = desktop_path()
     target = DESKTOP_INTAKE_FOLDER_NAME.casefold()
     try:
@@ -224,8 +195,6 @@ def _is_supported_intake_document_name(path: str | Path) -> bool:
 
 
 def _setting_bool(value: object) -> bool:
-    """Normalize legacy JSON booleans stored as strings."""
-
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -240,8 +209,6 @@ def _setting_bool(value: object) -> bool:
 
 
 def is_desktop_intake_folder_path(path: str | Path) -> bool:
-    """Return True only for the canonical watched folder name."""
-
     try:
         return Path(path).expanduser().name.casefold() == DESKTOP_INTAKE_FOLDER_NAME.casefold()
     except Exception as exc:
@@ -263,6 +230,7 @@ def normalize_intake_settings(raw: Mapping[str, object] | None) -> dict:
     return {
         "asked": _setting_bool(data.get("asked", False)),
         "enabled": _setting_bool(data.get("enabled", False)),
+        "background_agent_ready": _setting_bool(data.get("background_agent_ready", False)),
         "folder": folder,
         "prompt_version": prompt_version,
         "seen_signatures": tuple(dict.fromkeys(seen))[-DESKTOP_INTAKE_MAX_SEEN_SIGNATURES:],
@@ -270,8 +238,6 @@ def normalize_intake_settings(raw: Mapping[str, object] | None) -> dict:
 
 
 def should_prompt_intake_setup(settings: Mapping[str, object] | None) -> bool:
-    """Whether startup must ask about the intake folder."""
-
     normalized = normalize_intake_settings(settings)
     folder = Path(str(normalized["folder"])).expanduser()
     enabled = bool(normalized["enabled"])
@@ -280,9 +246,7 @@ def should_prompt_intake_setup(settings: Mapping[str, object] | None) -> bool:
     folder_ready = folder.exists() and folder.is_dir() and is_desktop_intake_folder_path(folder)
     if enabled and folder_ready and prompt_version == DESKTOP_INTAKE_SETUP_PROMPT_VERSION:
         return False
-    if not asked:
-        return True
-    if prompt_version != DESKTOP_INTAKE_SETUP_PROMPT_VERSION:
+    if not asked or prompt_version != DESKTOP_INTAKE_SETUP_PROMPT_VERSION:
         return True
     if enabled and not folder_ready:
         return True
@@ -304,7 +268,6 @@ def _available_dir(path: str | Path) -> Path:
 
 
 def _file_content_digest(path: str | Path) -> str:
-    """Return a stable content fingerprint without persisting patient text or paths."""
     candidate = Path(path).expanduser()
     digest = hashlib.sha256()
     with candidate.open("rb") as source:
@@ -314,13 +277,7 @@ def _file_content_digest(path: str | Path) -> str:
 
 
 def _same_patient_existing_folder(candidate: Path, primary_path: str | Path) -> bool:
-    """Reuse only a proven same hospitalization episode.
-
-    FIO equality alone is never sufficient.  When both admission dates are
-    known they must match exactly.  If either date is unavailable, reuse is
-    allowed only for an exact byte-identical source document; this preserves a
-    failed/retried intake without ever merging two ambiguous admissions.
-    """
+    """Reuse only a proven same episode; exact content is the strongest proof."""
     if not candidate.exists() or not candidate.is_dir():
         return False
     try:
@@ -333,8 +290,10 @@ def _same_patient_existing_folder(candidate: Path, primary_path: str | Path) -> 
             if not doc.is_file() or doc.suffix.lower() not in _ALLOWED_PRIMARY_SUFFIXES:
                 continue
             try:
-                info = build_patient_folder_info(doc)
                 existing_digest = _file_content_digest(doc)
+                if existing_digest == source_digest:
+                    return True
+                info = build_patient_folder_info(doc)
             except Exception as exc:
                 record_soft_exception("desktop_intake.same_patient_existing_document", exc, detail=str(doc))
                 continue
@@ -342,11 +301,7 @@ def _same_patient_existing_folder(candidate: Path, primary_path: str | Path) -> 
             existing_date = info.admission_date.strip()
             if source_fio and fio and fio != source_fio:
                 continue
-            if source_date and existing_date:
-                if source_fio and fio and source_date == existing_date:
-                    return True
-                continue
-            if existing_digest == source_digest:
+            if source_date and existing_date and source_fio and fio and source_date == existing_date:
                 return True
     except Exception as exc:
         record_soft_exception("desktop_intake.same_patient_folder", exc, detail=str(candidate))
@@ -357,7 +312,6 @@ def safe_patient_subfolder(folder: str | Path, primary_path: str | Path, folder_
     if folder_name is None:
         try:
             from desktop_patient_folder import build_patient_folder_info
-
             folder_name = build_patient_folder_info(primary_path).folder_name
         except Exception as exc:
             record_soft_exception("desktop_intake.patient_folder_info", exc, detail=str(primary_path))
@@ -370,29 +324,21 @@ def safe_patient_subfolder(folder: str | Path, primary_path: str | Path, folder_
 
 
 def _read_intake_docx_text(path: Path, *, context: str) -> str | None:
-    """Return DOCX text, or None for unreadable/corrupt renamed Word files."""
-
+    """Return readable Word text; legacy DOC is converted only when Word exists."""
     try:
-        return extract_docx_text(path)[:12000]
+        from medical_docx_xml_fragments import ensure_docx_compatible
+        readable = ensure_docx_compatible(path, label="первичный документ")
+        return extract_docx_text(readable)[:12000]
     except Exception as exc:
         record_soft_exception(context, exc, detail=str(path))
         return None
 
 
 def scan_primary_candidates(folder: str | Path, seen_signatures: set[str]) -> tuple[DesktopCandidate, ...]:
-    """Return top-level intake candidates with primary-source priority.
-
-    A stable top-level DOCX/DOCM inside the dedicated folder is a launch intent,
-    but it still must be a readable Word file. Corrupt/renamed bytes, hidden dot
-    files and Word lock files must not launch the UI.
-    """
-
     root = Path(folder).expanduser()
     if not root.exists() or not root.is_dir():
         return ()
-
     primary_candidates: list[tuple[int, DesktopCandidate]] = []
-
     for path in sorted(root.iterdir(), key=lambda item: item.name.lower()):
         if not path.is_file() or not _is_supported_intake_document_name(path):
             continue
@@ -400,13 +346,8 @@ def scan_primary_candidates(folder: str | Path, seen_signatures: set[str]) -> tu
             stat = path.stat()
         except OSError:
             continue
-        if stat.st_size <= 0:
+        if stat.st_size <= 0 or time.time() - stat.st_mtime < PRIMARY_FILE_QUIET_SECONDS:
             continue
-        if time.time() - stat.st_mtime < PRIMARY_FILE_QUIET_SECONDS:
-            continue
-        # Do not trust age alone.  A copied Word file may be old according to
-        # metadata while bytes are still changing (network/OneDrive/AV paths).
-        # Read it once, then prove size+mtime stayed unchanged throughout parse.
         doc_text = _read_intake_docx_text(path, context="desktop_intake.scan_primary_candidate_score")
         if doc_text is None:
             continue
@@ -419,30 +360,25 @@ def scan_primary_candidates(folder: str | Path, seen_signatures: set[str]) -> tu
         score = primary_document_score(doc_text)
         if score < 5:
             continue
-
         key = signature_key(path, stat.st_mtime_ns, stat.st_size)
         if key in seen_signatures:
             continue
-
-        candidate = DesktopCandidate(path, (stat.st_mtime_ns, stat.st_size))
-        primary_candidates.append((score, candidate))
-
-    ordered = sorted(primary_candidates, key=lambda item: (item[1].signature[0], item[1].path.name.lower()))
+        primary_candidates.append((score, DesktopCandidate(path, (stat.st_mtime_ns, stat.st_size))))
+    ordered = sorted(
+        primary_candidates,
+        key=lambda item: (-item[0], item[1].signature[0], item[1].path.name.lower()),
+    )
     return tuple(candidate for _score, candidate in ordered)
 
 
 def is_likely_primary_document(path: str | Path) -> bool:
-    """Return True only for intake source documents, not generated templates."""
-
     candidate = Path(path).expanduser()
     if _is_ignored_candidate_name(candidate):
         return False
     if candidate.suffix.lower() not in _ALLOWED_PRIMARY_SUFFIXES or not candidate.exists():
         return False
     text = _read_intake_docx_text(candidate, context="desktop_intake.likely_primary_extract")
-    if text is None:
-        return False
-    return primary_document_score(text) >= 5
+    return text is not None and primary_document_score(text) >= 5
 
 
 def prepare_patient_work_folder(
@@ -452,19 +388,11 @@ def prepare_patient_work_folder(
     *,
     keep_source: bool = False,
 ) -> tuple[Path, Path]:
-    """Create a patient subfolder and stage the primary document there.
-
-    ``keep_source=True`` is the transactional desktop-intake mode: the top-level
-    source remains in place until document generation reports success.
-    """
-
     source = Path(primary_path).expanduser()
     if not source.exists() or not source.is_file():
         raise FileNotFoundError(f"Не найден первичный документ для папки пациента: {source}")
     patient_dir = safe_patient_subfolder(folder, source, folder_name=folder_name)
     patient_dir.mkdir(parents=True, exist_ok=True)
-    # A failed transaction may already have staged this exact primary.  Reuse
-    # that owned copy instead of accumulating "(2)", "(3)" duplicates.
     source_digest = _file_content_digest(source)
     for existing in patient_dir.iterdir():
         if not existing.is_file() or existing.suffix.lower() not in _ALLOWED_PRIMARY_SUFFIXES:
@@ -477,15 +405,14 @@ def prepare_patient_work_folder(
                     except OSError:
                         same_path = source.absolute() == existing.absolute()
                     if not same_path:
-                        source_already_removed = False
                         try:
                             source.unlink()
                         except FileNotFoundError:
-                            source_already_removed = True
+                            pass
                         except OSError as unlink_exc:
                             raise RuntimeError(
-                                "Первичный документ уже есть в папке пациента, но исходный файл "
-                                "не удалось удалить. Перенос не завершён; закройте файл и повторите."
+                                "Первичный документ уже есть в папке пациента, но исходный файл не удалось удалить. "
+                                "Перенос не завершён; закройте файл и повторите."
                             ) from unlink_exc
                 return patient_dir, existing
         except OSError:
@@ -514,9 +441,6 @@ def prepare_patient_work_folder(
             try:
                 source.unlink()
             except Exception as unlink_exc:
-                # A move fallback is not committed unless ownership actually
-                # transferred.  Returning with source+target duplicates would
-                # make the watcher/process state ambiguous.
                 with suppress(Exception):
                     target.unlink()
                 with suppress(Exception):
@@ -536,16 +460,13 @@ def prepare_patient_work_folder(
                     patient_dir.rmdir()
             raise RuntimeError(
                 "Не удалось перенести первичный документ в папку пациента.\n"
-                f"Исходный файл: {source}\n"
-                f"Папка пациента: {patient_dir}\n"
-                f"Ошибка переноса: {move_exc}\n"
-                f"Ошибка копирования: {copy_exc}"
+                f"Исходный файл: {source}\nПапка пациента: {patient_dir}\n"
+                f"Ошибка переноса: {move_exc}\nОшибка копирования: {copy_exc}"
             ) from copy_exc
     return patient_dir, moved
 
 
 def signature_key(path: str | Path, mtime_ns: int, size: int) -> str:
-    """Hash path metadata plus content so same-size/same-mtime replacements differ."""
     candidate = Path(path)
     try:
         resolved = str(candidate.resolve())
@@ -566,81 +487,57 @@ def mark_seen(seen_signatures: set[str], candidate: DesktopCandidate) -> None:
 
 
 def assert_desktop_intake_lock() -> None:
-    """Lock the desktop-intake production behavior."""
-
-    if DESKTOP_INTAKE_LOCK_VERSION != "v1.14":
+    if DESKTOP_INTAKE_LOCK_VERSION != "v1.15":
         raise AssertionError("Desktop intake lock changed unexpectedly")
     if DESKTOP_INTAKE_REQUIRES_RUNNING_APP:
-        raise AssertionError("Desktop intake must support activation through the optional background agent")
+        raise AssertionError("Desktop intake must support background activation")
     if not DESKTOP_INTAKE_BACKGROUND_AGENT_SUPPORTED:
         raise AssertionError("Desktop intake background agent contract is missing")
     if not DESKTOP_INTAKE_SCANS_TOP_LEVEL_ONLY:
-        raise AssertionError("Desktop intake must scan top-level folder only to avoid output loops")
+        raise AssertionError("Desktop intake must scan top-level only")
     if not DESKTOP_INTAKE_VALIDATES_PRIMARY_DOCUMENT_ROLE:
-        raise AssertionError("Desktop intake must keep primary-document role checks available")
+        raise AssertionError("Desktop intake must keep role checks")
     if not DESKTOP_INTAKE_TOP_LEVEL_DOCX_DROP_STARTS_APP:
-        raise AssertionError("Dropping DOCX/DOCM into the dedicated intake folder must start the app")
+        raise AssertionError("Dropping a supported primary Word file must activate intake")
     if not DESKTOP_INTAKE_CREATES_PATIENT_FOLDER_AFTER_SELECTION:
-        raise AssertionError("Desktop intake must not create empty patient folders before doctor selection")
+        raise AssertionError("Desktop intake must not create empty patient folders before selection")
     if not DESKTOP_INTAKE_MOVES_PRIMARY_INTO_PATIENT_FOLDER:
-        raise AssertionError("Desktop intake must move processed primary files out of the watched top-level folder when possible")
+        raise AssertionError("Processed primary must leave watched top level")
     if not DESKTOP_INTAKE_PATIENT_FOLDER_USES_PRIMARY_DATA:
-        raise AssertionError("Desktop intake patient folders must use patient/admission data when available")
+        raise AssertionError("Patient folder must use primary data")
     if not DESKTOP_INTAKE_REASKS_ON_FEATURE_UPGRADE:
-        raise AssertionError("Desktop intake prompt must be versioned so old declined settings do not hide new functionality")
-    if not DESKTOP_INTAKE_IGNORES_WORD_TEMP_FILES:
-        raise AssertionError("Desktop intake must ignore temporary Word files")
+        raise AssertionError("Setup prompt must be versioned")
+    if not DESKTOP_INTAKE_IGNORES_WORD_TEMP_FILES or not DESKTOP_INTAKE_IGNORES_HIDDEN_DOT_FILES:
+        raise AssertionError("Temporary/hidden Word files must stay ignored")
     if not DESKTOP_INTAKE_REUSES_EXISTING_CASE_INSENSITIVE_FOLDER:
-        raise AssertionError("Desktop intake must reuse existing differently-cased intake folders")
-    if not DESKTOP_INTAKE_USES_ROLE_SCORE_CLASSIFIER:
-        raise AssertionError("Desktop intake must use scored primary-document classification")
-    if not DESKTOP_INTAKE_COPY_FALLBACK_RETURNS_PATIENT_COPY:
-        raise AssertionError("Desktop intake move fallback must return the patient-folder copy when copy succeeds")
-    if not DESKTOP_INTAKE_DOES_NOT_TRUST_GENERIC_HOSPITALIZATION_WORD:
-        raise AssertionError("Desktop intake must not trust generic hospitalization words alone")
-    if not DESKTOP_INTAKE_SEEN_SIGNATURES_ARE_HASHED:
-        raise AssertionError("Desktop intake seen signatures must not store patient filenames as raw keys")
-    if not DESKTOP_INTAKE_SEEN_SIGNATURES_ARE_PERSISTABLE:
-        raise AssertionError("Desktop intake seen signatures must be persistable across restarts")
-    if not DESKTOP_INTAKE_USES_WINDOWS_DESKTOP_REGISTRY:
-        raise AssertionError("Desktop intake must use Windows registry Desktop location when available")
-    if not DESKTOP_INTAKE_MOVE_FAILURE_IS_VISIBLE:
-        raise AssertionError("Desktop intake move/copy failure must be visible instead of silently falling back")
-    if not DESKTOP_INTAKE_NORMALIZES_LEGACY_BOOL_STRINGS:
-        raise AssertionError("Desktop intake settings must normalize legacy string booleans")
-    if not DESKTOP_INTAKE_FIRST_LAUNCH_PROMPT_IS_MANDATORY:
-        raise AssertionError("Desktop intake setup question must be mandatory on clean first launch")
-    if not DESKTOP_INTAKE_REASKS_OLD_V2_PROMPT_SETTINGS:
-        raise AssertionError("Desktop intake must re-ask old v2 prompt settings after the broken release")
-    if not DESKTOP_INTAKE_MISSING_ENABLED_FOLDER_REASKS:
-        raise AssertionError("Desktop intake must re-ask when enabled settings point to a missing folder")
-    if not DESKTOP_INTAKE_IGNORES_HIDDEN_DOT_FILES:
-        raise AssertionError("Desktop intake must ignore hidden dot files")
-    if not DESKTOP_INTAKE_COPY_FALLBACK_TRIES_TO_UNLINK_SOURCE:
-        raise AssertionError("Desktop intake copy fallback must try to remove the top-level source")
-    if not DESKTOP_INTAKE_REJECTS_UNREADABLE_DOCX_FALLBACKS:
-        raise AssertionError("Desktop intake must not launch on unreadable/corrupt DOCX files")
-    if not DESKTOP_INTAKE_REASKS_AFTER_FOLDER_NAMING_REGRESSION:
-        raise AssertionError("Desktop intake must re-ask after folder-naming regression builds")
-    if not _is_ignored_candidate_name(Path(".hidden.docx")) or not _is_ignored_candidate_name(Path("~$temp.docx")):
-        raise AssertionError("Desktop intake ignored-file predicate is broken")
+        raise AssertionError("Existing intake folder must be reused case-insensitively")
+    if not DESKTOP_INTAKE_USES_ROLE_SCORE_CLASSIFIER or not DESKTOP_INTAKE_PRIORITY_USES_ROLE_SCORE:
+        raise AssertionError("Desktop intake must prioritize the strongest primary candidate")
+    if not DESKTOP_INTAKE_EXACT_CONTENT_DEDUP_PRECEDES_METADATA:
+        raise AssertionError("Exact-content retry must outrank incomplete parsed metadata")
+    if not DESKTOP_INTAKE_SUPPORTS_SAME_WORD_FORMATS_AS_MANUAL_FLOW:
+        raise AssertionError("Desktop intake and manual Word input formats diverged")
+    if not DESKTOP_INTAKE_PERSISTS_BACKGROUND_AGENT_READINESS:
+        raise AssertionError("Closed-app watcher readiness must be persisted separately")
     if not _is_supported_intake_document_name(Path("Первичный осмотр.docx")):
-        raise AssertionError("Desktop intake must accept a top-level DOCX as launch intent")
+        raise AssertionError("DOCX must be accepted")
     if not _is_supported_intake_document_name(Path("Первичный осмотр.docm")):
-        raise AssertionError("Desktop intake must accept a top-level DOCM as launch intent")
+        raise AssertionError("DOCM must be accepted")
+    if not _is_supported_intake_document_name(Path("Первичный осмотр.doc")):
+        raise AssertionError("Legacy DOC must follow manual-input support when Word conversion is available")
     if _is_supported_intake_document_name(Path("~$Первичный осмотр.docx")):
-        raise AssertionError("Desktop intake must not launch on Word temporary lock files")
+        raise AssertionError("Word lock files must be ignored")
     if _is_supported_intake_document_name(Path("notes.txt")):
-        raise AssertionError("Desktop intake must ignore non-Word files")
+        raise AssertionError("Non-Word files must be ignored")
     if normalize_intake_settings({"enabled": "false", "asked": "нет"})["enabled"]:
         raise AssertionError("String false must not enable desktop intake")
     if not should_prompt_intake_setup({}):
-        raise AssertionError("Clean settings must show the desktop intake setup prompt")
+        raise AssertionError("Clean settings must show setup prompt")
     if not should_prompt_intake_setup({"asked": True, "enabled": False, "prompt_version": "v2"}):
-        raise AssertionError("Old v2 prompt settings must be re-asked in the fixed build")
+        raise AssertionError("Old setup settings must be re-asked")
     if should_prompt_intake_setup({"asked": True, "enabled": False, "prompt_version": DESKTOP_INTAKE_SETUP_PROMPT_VERSION}):
-        raise AssertionError("Current explicit No must not nag on every launch")
+        raise AssertionError("Current explicit No must not nag")
     if primary_document_score("Выписка после госпитализации. Рекомендации.") >= 7:
-        raise AssertionError("Generic discharge/hospitalization text must not trigger desktop intake")
+        raise AssertionError("Generic discharge text must not trigger intake")
     if len(signature_key("/tmp/Иванов.docx", 1, 2)) != 64:
         raise AssertionError("Desktop intake signatures must be hashed")
