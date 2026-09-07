@@ -241,7 +241,11 @@ def render_custom_diary_template(
     if not data_rows:
         raise ValueError("В шаблоне дневников нет строк для заполнения после заголовка таблицы.")
 
-    moments = list(planned_diary_datetimes(admission, schedule, limit=len(data_rows) + 1))
+    # Overflow can be proven only when the hospitalization has a finite end.
+    # Without a discharge date the schedule is intentionally open-ended, so the
+    # doctor's finite Word template is a capacity limit, not an error condition.
+    moment_limit = len(data_rows) + 1 if discharge is not None else len(data_rows)
+    moments = list(planned_diary_datetimes(admission, schedule, limit=moment_limit))
     if discharge is not None:
         moments = [moment for moment in moments if moment.date() <= discharge]
     entries = _status_entries(statuses, moments, patient_name=patient_name, repeat_statuses=repeat_statuses)
