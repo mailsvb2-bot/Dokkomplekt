@@ -153,9 +153,6 @@ def _dynamic_epicrisis_entries(
     )
     result: list[tuple[datetime, str, bool]] = []
     for item_date in dynamic_epicrisis_dates(base_date, discharge_date=discharge, limit=12):
-        # The template already owns its signature paragraphs. Keep the medical
-        # epicrisis text but do not duplicate hard-coded signature lines inside
-        # the diary cell.
         lines = [
             line for line in build_dynamic_epicrisis_text(data).splitlines()
             if line.strip() and not is_signature_paragraph_text(line)
@@ -171,6 +168,7 @@ def _with_final_entry(
     discharge,
     force_final_diary: bool,
     patient_name: str,
+    keep_discharge_observations: bool,
 ) -> list[tuple[datetime, str, bool]]:
     if not force_final_diary or discharge is None:
         return entries
@@ -180,6 +178,11 @@ def _with_final_entry(
     final_moment = datetime.combine(discharge, admission.time())
     if any(is_final and moment.date() == discharge for moment, _text, is_final in entries):
         return entries
+    # Daily diaries use the final discharge conclusion INSTEAD of a routine
+    # observation on the discharge date. Intraday/hourly diaries may have real
+    # observations earlier that day, so those are preserved before the final row.
+    if not keep_discharge_observations:
+        entries = [item for item in entries if item[0].date() < discharge]
     return [*entries, (final_moment, final_text, True)]
 
 
@@ -262,6 +265,7 @@ def render_custom_diary_template(
         discharge=discharge,
         force_final_diary=force_final_diary,
         patient_name=patient_name,
+        keep_discharge_observations=schedule.mode == "hourly",
     )
     entries.sort(key=lambda item: (item[0], 1 if item[2] else 0))
     if len(entries) > len(data_rows):
