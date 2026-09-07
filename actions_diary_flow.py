@@ -94,7 +94,7 @@ class ActionsDiaryFlowMixin:
             sick_leave_from=current_semantic_date(self, "expert_sick_leave_from"),
         )
         if diary_mode == "hourly":
-            from diary_hourly_finalization import ensure_hourly_final_diary
+            from document_intelligence.diary_hourly_finalization import ensure_hourly_final_diary
 
             ensure_hourly_final_diary(
                 result,
