@@ -14,7 +14,7 @@ from typing import Sequence
 
 from docx import Document
 
-from diary_dates import parse_full_datetime, parse_optional_discharge_date
+from diary_dates import parse_full_date, parse_full_datetime, parse_optional_discharge_date
 from diary_gender import adapt_text_to_patient_gender, detect_gender_from_patient_name
 from diary_schedule import DiaryScheduleSpec, planned_diary_datetimes
 from diary_text_parser import clean_status_text, is_signature_paragraph_text, remove_examinee_words
@@ -70,8 +70,7 @@ def _replace_content_paragraph_preserving_style(cell, text: str) -> None:
 
     content_paragraphs = [p for p in cell.paragraphs if not is_signature_paragraph_text(p.text)]
     if not content_paragraphs:
-        paragraph = cell.add_paragraph("")
-        content_paragraphs = [paragraph]
+        content_paragraphs = [cell.add_paragraph("")]
     first = content_paragraphs[0]
     if first.runs:
         first.runs[0].text = str(text or "")
@@ -124,6 +123,47 @@ def _status_entries(
     return result
 
 
+def _dynamic_epicrisis_entries(
+    *,
+    admission: datetime,
+    discharge,
+    patient_name: str,
+    birth_date: str,
+    complaints: str,
+    treatment: str,
+    profile_status: str,
+    treatment_correction: str,
+    sick_leave_from: str,
+) -> list[tuple[datetime, str, bool]]:
+    from diary_batch import DynamicEpicrisisInput, build_dynamic_epicrisis_text, dynamic_epicrisis_dates
+
+    try:
+        sick_from = parse_full_date(sick_leave_from) if str(sick_leave_from or "").strip() else None
+    except ValueError:
+        sick_from = None
+    base_date = max(admission.date(), sick_from) if sick_from is not None else admission.date()
+    data = DynamicEpicrisisInput(
+        patient_name,
+        birth_date,
+        f"{base_date:%d.%m.%Y}",
+        complaints,
+        treatment,
+        profile_status,
+        treatment_correction,
+    )
+    result: list[tuple[datetime, str, bool]] = []
+    for item_date in dynamic_epicrisis_dates(base_date, discharge_date=discharge, limit=12):
+        # The template already owns its signature paragraphs. Keep the medical
+        # epicrisis text but do not duplicate hard-coded signature lines inside
+        # the diary cell.
+        lines = [
+            line for line in build_dynamic_epicrisis_text(data).splitlines()
+            if line.strip() and not is_signature_paragraph_text(line)
+        ]
+        result.append((datetime.combine(item_date, admission.time()), "\n".join(lines), False))
+    return result
+
+
 def _with_final_entry(
     entries: list[tuple[datetime, str, bool]],
     *,
@@ -138,8 +178,6 @@ def _with_final_entry(
     final_text, _changed = adapt_text_to_patient_gender(NEUTRAL_FINAL_DIARY_TEXT, gender)
     final_text = remove_examinee_words(final_text)
     final_moment = datetime.combine(discharge, admission.time())
-    # A neutral discharge conclusion owns only its own final record; regular
-    # observations earlier on the discharge day remain valid in hourly mode.
     if any(is_final and moment.date() == discharge for moment, _text, is_final in entries):
         return entries
     return [*entries, (final_moment, final_text, True)]
@@ -163,6 +201,13 @@ def render_custom_diary_template(
     discharge_value: str,
     repeat_statuses: bool,
     force_final_diary: bool,
+    sick_leave_dynamic_epicrisis: bool = False,
+    treatment_correction: str = "",
+    birth_date: str = "",
+    complaints: str = "",
+    treatment: str = "",
+    profile_status: str = "",
+    sick_leave_from: str = "",
     output_language: str = "auto",
     spellcheck_enabled: bool = True,
 ) -> CustomDiaryTemplateRenderResult:
@@ -193,12 +238,24 @@ def render_custom_diary_template(
     if not data_rows:
         raise ValueError("В шаблоне дневников нет строк для заполнения после заголовка таблицы.")
 
-    # Request one record beyond capacity so overflow becomes a visible error,
-    # never silent truncation of the hospitalization episode.
     moments = list(planned_diary_datetimes(admission, schedule, limit=len(data_rows) + 1))
     if discharge is not None:
         moments = [moment for moment in moments if moment.date() <= discharge]
     entries = _status_entries(statuses, moments, patient_name=patient_name, repeat_statuses=repeat_statuses)
+    if sick_leave_dynamic_epicrisis:
+        entries.extend(
+            _dynamic_epicrisis_entries(
+                admission=admission,
+                discharge=discharge,
+                patient_name=patient_name,
+                birth_date=birth_date,
+                complaints=complaints,
+                treatment=treatment,
+                profile_status=profile_status,
+                treatment_correction=treatment_correction,
+                sick_leave_from=sick_leave_from,
+            )
+        )
     entries = _with_final_entry(
         entries,
         admission=admission,
@@ -213,8 +270,6 @@ def render_custom_diary_template(
             "Увеличьте число строк в вашем Word-шаблоне или измените ритм дневников."
         )
 
-    # Build the normal semantic context, then replace diary placeholders with the
-    # actual observation text rather than a list of dates.
     context = build_render_context(case, document, output_language=output_language, spellcheck_enabled=spellcheck_enabled)
     hourly = schedule.mode == "hourly"
     rendered_entries = [_format_entry(moment, text, hourly=hourly) for moment, text, _final in entries]
