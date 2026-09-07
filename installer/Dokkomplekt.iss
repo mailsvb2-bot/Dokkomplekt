@@ -26,8 +26,8 @@ SetupLogging=yes
 [Files]
 Source: "..\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
-[Dirs]
-Name: "{userdesktop}\Выписанные пациенты"
+; The intake folder is deliberately NOT created by Setup.  The first-launch UI
+; owns consent and creates «Выписанные пациенты» only after the doctor answers Yes.
 
 [Icons]
 Name: "{group}\Dokkomplekt"; Filename: "{app}\{#MyAppExeName}"
