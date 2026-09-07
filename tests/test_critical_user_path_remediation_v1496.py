@@ -5,14 +5,14 @@ from types import SimpleNamespace
 
 from docx import Document
 
-from custom_diary_template_renderer import render_custom_diary_template
+from document_intelligence.custom_diary_template_renderer import render_custom_diary_template
 from desktop_intake import (
     _is_supported_intake_document_name,
     _same_patient_existing_folder,
     normalize_intake_settings,
 )
 from desktop_intake_mixin import DesktopIntakeMixin
-from diary_hourly_finalization import ensure_hourly_final_diary
+from document_intelligence.diary_hourly_finalization import ensure_hourly_final_diary
 from diary_models import DiaryBatchResult
 from diary_schedule import DiaryScheduleSpec
 from medical_models import PatientData
@@ -93,13 +93,17 @@ def test_doctor_not_working_clears_stale_position_and_generic_recommendations() 
     assert merged.get("additional.info") == "Сведения"
 
 
-def test_parser_never_treats_age_or_generic_treatment_as_birth_or_plan() -> None:
+def test_parser_keeps_age_out_of_birth_aliases_but_accepts_treatment_sections() -> None:
     parser = MedicalTextParser()
     assert "Возраст" not in parser.FIELD_ALIASES["birth"]
     assert "Wiek" not in parser.FIELD_ALIASES["birth"]
-    assert "Лечение" not in parser.BLOCK_ALIASES["treatment_plan"]
-    assert "Leczenie" not in parser.BLOCK_ALIASES["treatment_plan"]
-    assert "Terapia" not in parser.BLOCK_ALIASES["treatment_plan"]
+    assert "Лечение" in parser.BLOCK_ALIASES["treatment_plan"]
+    assert "Leczenie" in parser.BLOCK_ALIASES["treatment_plan"]
+    assert "Terapia" in parser.BLOCK_ALIASES["treatment_plan"]
+    data = parser.parse_text("Лечение: режим, терапия\nДиагноз: J20 Острый бронхит")
+    assert "терап" in data.treatment_plan.casefold()
+    case = patient_data_to_case(data)
+    assert case.get("treatment.result") == ""
 
 
 def test_custom_diary_preserves_doctor_word_template_and_final_row(tmp_path: Path) -> None:
@@ -166,7 +170,7 @@ def test_hourly_user_flow_gets_final_discharge_diary(tmp_path: Path) -> None:
 
 
 def test_custom_diary_set_rolls_back_when_any_selected_template_fails(tmp_path: Path, monkeypatch) -> None:
-    import custom_diary_template_renderer
+    from document_intelligence import custom_diary_template_renderer
     import universal_diary_generation
 
     valid_template = tmp_path / "valid.docx"
