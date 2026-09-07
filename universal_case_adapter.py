@@ -35,8 +35,8 @@ def _age_at_admission(birth_value: str, admission_value: str) -> str:
     """Return completed years only when both semantic dates are trustworthy.
 
     ``PatientData.birth`` historically also received values from an ``Возраст``
-    label.  Treating an arbitrary birth/age string as ``patient.age`` produced
-    dangerous output such as ``Возраст: 12.03.1981``.  Age is therefore derived
+    label. Treating an arbitrary birth/age string as ``patient.age`` produced
+    dangerous output such as ``Возраст: 12.03.1981``. Age is therefore derived
     only from two parseable dates and is otherwise left empty for preflight.
     """
 
@@ -60,7 +60,7 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
 
     The adapter is deliberately conservative: it never manufactures semantically
     different discharge/recommendation/expert fields from merely non-empty nearby
-    sections.  Profile scanning or doctor-confirmed completion owns those fields.
+    sections. Profile scanning or doctor-confirmed completion owns those fields.
     """
 
     case = PatientCase()
@@ -124,9 +124,33 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
     return case
 
 
+def _safe_overlay_values(values: Mapping[str, str]) -> dict[str, str]:
+    safe = {str(key): str(value or "").strip() for key, value in values.items() if str(value or "").strip()}
+
+    # The current UI has one generic "additional information" field. It must not
+    # masquerade as a dedicated Recommendations section simply because both keys
+    # were historically populated from the same widget.
+    if safe.get("recommendations") and safe.get("recommendations") == safe.get("additional.info"):
+        safe.pop("recommendations", None)
+
+    work = safe.get("patient.work", "").casefold().replace("ё", "е")
+    if work in {"не работает", "неработает", "нет", "безработный", "безработная"}:
+        # A stale position/workplace parsed from the primary must never survive a
+        # doctor-confirmed "не работает" choice.
+        safe.pop("patient.position", None)
+        safe.pop("expert.work_org", None)
+        safe.pop("expert.position", None)
+    return safe
+
+
 def merge_case_values(case: PatientCase, values: Mapping[str, str], *, source_document: str = "manual_completion") -> PatientCase:
+    safe_values = _safe_overlay_values(values)
     merged = PatientCase(values=dict(case.values))
-    merged.update_from_pairs(values, confidence=1.0, source_document=source_document)
+    work = safe_values.get("patient.work", "").casefold().replace("ё", "е")
+    if work in {"не работает", "неработает", "нет", "безработный", "безработная"}:
+        for field_id in ("patient.position", "expert.work_org", "expert.position"):
+            merged.values.pop(field_id, None)
+    merged.update_from_pairs(safe_values, confidence=1.0, source_document=source_document)
     return merged
 
 
