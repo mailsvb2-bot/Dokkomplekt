@@ -6,6 +6,7 @@ import re
 from typing import Mapping
 
 from icd10_f_search import normalize_required_diagnosis_with_icd10
+from medical_formatting import parse_date
 from medical_models import PatientData
 from universal_fields import PatientCase
 
@@ -30,12 +31,40 @@ def _labs_results_for_case(data: PatientData) -> str:
     return data.labs_text or ""
 
 
+def _age_at_admission(birth_value: str, admission_value: str) -> str:
+    """Return completed years only when both semantic dates are trustworthy.
+
+    ``PatientData.birth`` historically also received values from an ``Возраст``
+    label.  Treating an arbitrary birth/age string as ``patient.age`` produced
+    dangerous output such as ``Возраст: 12.03.1981``.  Age is therefore derived
+    only from two parseable dates and is otherwise left empty for preflight.
+    """
+
+    birth = parse_date(str(birth_value or "").strip())
+    admission = parse_date(str(admission_value or "").strip())
+    if not birth or not admission:
+        return ""
+    try:
+        birth_date = birth.date() if hasattr(birth, "date") else birth
+        admission_date = admission.date() if hasattr(admission, "date") else admission
+        years = admission_date.year - birth_date.year - (
+            (admission_date.month, admission_date.day) < (birth_date.month, birth_date.day)
+        )
+    except Exception:
+        return ""
+    return str(years) if 0 <= years <= 130 else ""
+
+
 def patient_data_to_case(data: PatientData, *, source_document: str = "") -> PatientCase:
-    """Convert legacy PatientData, including popup requisites, into PatientCase."""
+    """Convert legacy PatientData, including popup requisites, into PatientCase.
+
+    The adapter is deliberately conservative: it never manufactures semantically
+    different discharge/recommendation/expert fields from merely non-empty nearby
+    sections.  Profile scanning or doctor-confirmed completion owns those fields.
+    """
+
     case = PatientCase()
     objective_status = _first_text(data.somatic_status, data.profile_status)
-    discharge_condition = _first_text(data.epi_text, data.additional_info_text, data.somatic_status, data.profile_status)
-    treatment_result = _first_text(data.epi_text, data.additional_info_text, data.somatic_status, data.profile_status)
     vk_mse_work_position = _first_text(
         data.vk_mse_work_position,
         ", ".join(part for part in (data.vk_mse_work_org, data.vk_mse_position) if part),
@@ -43,7 +72,7 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
     pairs = {
         "patient.fio": data.output_fio or data.fio,
         "patient.birth_date": data.birth,
-        "patient.age": data.birth,
+        "patient.age": _age_at_admission(data.birth, data.admission_date),
         "patient.address": data.registered,
         "patient.work": data.work_org,
         "patient.position": data.position,
@@ -53,7 +82,6 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
         "complaints": data.complaints,
         "anamnesis.life": data.life_anamnesis,
         "anamnesis.disease": data.disease_anamnesis,
-        "anamnesis.expert": data.expert_work_status or data.sick_leave,
         "expert.work_status": data.expert_work_status,
         "expert.work_org": data.expert_work_org,
         "expert.position": data.expert_position,
@@ -66,11 +94,8 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
         "diagnosis.main": data.diagnosis,
         "diagnosis.icd10": _icd10_code_from_diagnosis(data.diagnosis),
         "treatment.plan": data.treatment_plan,
-        "condition.discharge": discharge_condition,
-        "treatment.result": treatment_result,
         "epicrisis.text": data.epi_text,
         "additional.info": data.additional_info_text,
-        "recommendations": data.additional_info_text,
         "labs.results": _labs_results_for_case(data),
         "labs.source": data.labs_source,
         "labs.date_policy": data.labs_date_policy,
