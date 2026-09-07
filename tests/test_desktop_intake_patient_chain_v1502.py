@@ -26,4 +26,5 @@ def test_v1502_intake_diary_and_discharge_contracts():
 
 def test_v1502_discharge_button_route_exists():
     from actions_creation_execution import ActionsCreationExecutionMixin
+
     assert hasattr(ActionsCreationExecutionMixin, "_route_legacy_medical_selection_to_profile_docs")
