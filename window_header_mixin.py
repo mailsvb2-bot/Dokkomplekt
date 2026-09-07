@@ -243,8 +243,18 @@ class WindowHeaderMixin:
             record_soft_exception("window_header_mixin.refresh_custom_profile_tiles", exc)
 
     def _load_or_create_universal_pack(self):
-        from universal_profiles import ensure_default_pack
-        return ensure_default_pack(self._universal_profile_path())
+        from universal_profiles import ensure_default_pack, save_document_pack
+
+        profile_path = self._universal_profile_path()
+        pack = ensure_default_pack(profile_path)
+        try:
+            from universal_template_engine import migrate_auto_inferred_required_fields
+
+            if migrate_auto_inferred_required_fields(pack, base_dir=profile_path.parent):
+                save_document_pack(pack, profile_path, backup_reason="migrate_conditional_required_fields_v2")
+        except Exception as exc:
+            record_soft_exception("window_header.required_field_policy_migration", exc, detail=str(profile_path))
+        return pack
 
     def _header_icon_button(self, parent, text: str, command) -> tk.Button:
         return tk.Button(

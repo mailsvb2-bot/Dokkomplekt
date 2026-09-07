@@ -126,7 +126,19 @@ def _build_profile(root: Path):
     pack = default_document_pack()
     primary_template = _journey_doc(root / "Первичный шаблон.docx", ["Пациент {{patient.fio}}", "История болезни № {{case.number}}", "Диагноз {{diagnosis.main}}", "План лечения {{treatment.plan}}"])
     attach_template_to_pack(pack, primary_template, profile_path.parent, button_label="Первичный осмотр", document_id="doctor_primary", category="medical", role_id="primary_exam")
-    discharge_template = _journey_doc(root / "Выписной шаблон.docx", ["Выписной эпикриз {{patient.fio}}", "История болезни № {{case.number}}", "Диагноз {{diagnosis.main}}", "Лечение {{treatment.plan}}", "Дата выписки {{discharge.date}}"])
+    discharge_template = _journey_doc(
+        root / "Выписной шаблон.docx",
+        [
+            "Выписной эпикриз {{patient.fio}}",
+            "История болезни № {{case.number}}",
+            "Диагноз {{diagnosis.main}}",
+            "Лечение {{treatment.plan}}",
+            "Дата выписки {{discharge.date}}",
+            "Номер больничного: __________",
+            "Место работы: __________",
+            "Должность: __________",
+        ],
+    )
     attach_template_to_pack(pack, discharge_template, profile_path.parent, button_label="Выписной эпикриз", document_id="doctor_discharge", category="medical", role_id="discharge")
     diary_template = _journey_doc(root / "Дневники шаблон.docx", ["Состояние стабильное, жалоб активно не предъявляет.", "Контактен, ориентирован, назначения выполняет."])
     diary_spec, _ = attach_template_to_pack(pack, diary_template, profile_path.parent, button_label="Дневники наблюдения", document_id="doctor_diary", category="diaries", role_id="daily_diary")

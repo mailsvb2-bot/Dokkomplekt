@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import re
-from typing import Mapping
+from typing import Iterable, Mapping
 
 from diary_constants import DIARY_KIND
 from medical_constants import DOCUMENT_ORDER
@@ -321,6 +321,56 @@ _ROLE_REQUIREMENTS: dict[str, frozenset[str]] = {
     **{role: frozenset({"case", "diagnosis", "treatment"}) for role in _SICK_LEAVE_ROLES},
     "daily_diary": frozenset({"discharge"}),
 }
+
+
+_INFERRED_ALWAYS_REQUIRED_IF_PRESENT = frozenset({"patient.fio", "admission.date", "case.number"})
+_INFERRED_CORE_FIELDS_BY_REQUIREMENT: dict[str, frozenset[str]] = {
+    "case": frozenset({"case.number"}),
+    "diagnosis": frozenset({"diagnosis.main", "diagnosis.icd10"}),
+    "treatment": frozenset({"treatment.plan"}),
+    "discharge": frozenset({"discharge.date"}),
+}
+
+
+def inferred_required_fields_for_role(
+    role_id: str,
+    semantic_fields: Iterable[str],
+    *,
+    explicit_placeholder_fields: Iterable[str] = (),
+) -> tuple[str, ...]:
+    """Return only unconditional required fields for an auto-inferred template.
+
+    A visible Word blank means "fillable", not "always mandatory".  Fields such
+    as sick-leave number, workplace and position are conditional and must not
+    make an otherwise valid patient bundle fail closed.  Role-owned popup logic
+    still enforces the truly mandatory clinical fields before rendering.
+    """
+
+    normalized: list[str] = []
+    for item in tuple(semantic_fields or ()):
+        raw = str(item or "").strip()
+        if not raw:
+            continue
+        try:
+            field_id = normalize_field_id(raw)
+        except ValueError:
+            field_id = raw
+        if field_id not in normalized:
+            normalized.append(field_id)
+
+    role = _canonical_role_id(role_id)
+    required_ids = set(_INFERRED_ALWAYS_REQUIRED_IF_PRESENT)
+    for item in explicit_placeholder_fields:
+        raw = str(item or "").strip()
+        if not raw:
+            continue
+        try:
+            required_ids.add(normalize_field_id(raw))
+        except ValueError:
+            required_ids.add(raw)
+    for requirement in _ROLE_REQUIREMENTS.get(role, frozenset()):
+        required_ids.update(_INFERRED_CORE_FIELDS_BY_REQUIREMENT.get(requirement, frozenset()))
+    return tuple(field_id for field_id in normalized if field_id in required_ids)
 
 
 def semantic_role_for_document(document: object) -> str:

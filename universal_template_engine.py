@@ -264,6 +264,41 @@ def validate_template(
     )
 
 
+def infer_template_semantic_fields(
+    template_path: str | Path,
+    *,
+    registry: FieldRegistry | None = None,
+    role_id: str = "",
+    category: str = "medical",
+    button_label: str = "",
+) -> tuple[str, ...]:
+    """Return every semantic field that the template can fill, without assigning requiredness."""
+
+    path = _existing_docx(template_path, "шаблон документа")
+    registry = registry or default_field_registry()
+    placeholders = extract_template_placeholders(path, role_id=role_id, category=category, button_label=button_label)
+    from document_intelligence.form_fill import visible_fill_field_ids
+
+    visible_fields = visible_fill_field_ids(
+        path,
+        role_id=role_id,
+        category=category,
+        button_label=button_label,
+    )
+    return tuple(
+        dict.fromkeys(
+            [
+                *(
+                    item.field_id
+                    for item in placeholders
+                    if not item.field_id.startswith("document.") and (item.field_id in registry or item.field_id.startswith("custom."))
+                ),
+                *(field_id for field_id in visible_fields if field_id in registry or field_id.startswith("custom.")),
+            ]
+        )
+    )
+
+
 def infer_document_spec_from_template(
     template_path: str | Path,
     *,
@@ -321,14 +356,22 @@ def infer_document_spec_from_template(
             ]
         )
     )
+    from universal_main_documents import inferred_required_fields_for_role
+
+    required_fields = inferred_required_fields_for_role(
+        role_id,
+        semantic_fields,
+        explicit_placeholder_fields=(item.field_id for item in placeholders if not item.field_id.startswith("document.")),
+    )
+    optional_fields = tuple(field_id for field_id in semantic_fields if field_id not in set(required_fields))
     doc_id = _safe_document_id(document_id or path.stem or label)
     return DocumentTemplateSpec(
         id=doc_id,
         button_label=label,
         template=path.name,
         output_name="{{patient.fio}} " + label + ".docx",
-        required_fields=semantic_fields,
-        optional_fields=(),
+        required_fields=required_fields,
+        optional_fields=optional_fields,
         category=category or "medical",
         description=(
             "Создано автоматически по техническим меткам и видимым полям пользовательского DOCX-шаблона."
@@ -342,6 +385,70 @@ def infer_document_spec_from_template(
         source_language=source_language,
         button_label_source=label_source,
     )
+
+
+_AUTO_INFERRED_DESCRIPTIONS = frozenset({
+    "Создано автоматически по техническим меткам и видимым полям пользовательского DOCX-шаблона.",
+    "Создано автоматически по меткам в пользовательском DOCX-шаблоне.",
+    "Создано автоматически по обычным видимым полям пользовательского DOCX-шаблона.",
+})
+
+
+def migrate_auto_inferred_required_fields(pack: DocumentPack, *, base_dir: str | Path) -> bool:
+    """Repair old profiles that marked every discovered Word field as mandatory.
+
+    Migration is intentionally narrow: it changes only untouched auto-inferred
+    specs whose stored required_fields exactly equal the fields rediscovered from
+    the owned template and whose optional_fields are still empty.  A doctor- or
+    administrator-edited required-field policy is therefore preserved verbatim.
+    """
+
+    from universal_main_documents import inferred_required_fields_for_role
+
+    changed = False
+    migrated: list[DocumentTemplateSpec] = []
+    registry = pack.registry()
+    for document in pack.documents:
+        if document.description not in _AUTO_INFERRED_DESCRIPTIONS or document.optional_fields:
+            migrated.append(document)
+            continue
+        template_path = resolve_pack_template_path(document.template, base_dir)
+        if not template_path.exists():
+            migrated.append(document)
+            continue
+        try:
+            semantic_fields = infer_template_semantic_fields(
+                template_path,
+                registry=registry,
+                role_id=document.role_id,
+                category=document.category,
+                button_label=document.button_label,
+            )
+            placeholders = extract_template_placeholders(
+                template_path,
+                role_id=document.role_id,
+                category=document.category,
+                button_label=document.button_label,
+            )
+        except Exception as exc:
+            record_soft_exception("universal_template_engine.required_policy_migration", exc, detail=str(template_path))
+            migrated.append(document)
+            continue
+        if tuple(document.required_fields) != tuple(semantic_fields):
+            migrated.append(document)
+            continue
+        required_fields = inferred_required_fields_for_role(
+            document.role_id,
+            semantic_fields,
+            explicit_placeholder_fields=(item.field_id for item in placeholders if not item.field_id.startswith("document.")),
+        )
+        optional_fields = tuple(field_id for field_id in semantic_fields if field_id not in set(required_fields))
+        replacement = replace(document, required_fields=required_fields, optional_fields=optional_fields)
+        migrated.append(replacement)
+        changed = changed or replacement != document
+    if changed:
+        pack.documents = tuple(migrated)
+    return changed
 
 
 def build_document_pack_from_templates(
