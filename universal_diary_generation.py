@@ -17,7 +17,8 @@ UNIVERSAL_DIARY_GENERATION_LOCK_VERSION = "v1.4"
 CUSTOM_DIARY_GENERATION_USES_SEMANTIC_TEXT_CALENDAR = True
 CUSTOM_DIARY_CAN_USE_TEMPLATE_TEXTS_AS_STATUS_SOURCE = True
 # The removed legacy GLOBAL table backend stays disabled. Doctor-owned block-03
-# diaries now use their own isolated template-preserving renderer instead.
+# diaries now use an isolated template-preserving renderer. The semantic calendar
+# remains the same contract as the text route's fill_diary_batch(..., diary_files=[]).
 CUSTOM_DIARY_TABLE_FILLING_IS_DISABLED = True
 CUSTOM_DIARY_USES_DOCTOR_TEMPLATE_RENDERER = True
 CUSTOM_DIARY_GENERATION_IS_ALL_OR_NOTHING = True
@@ -73,7 +74,7 @@ def render_diary_documents_from_pack(
     and removes the whole generated custom-diary subset.
     """
 
-    _ = (reset_each_file, keep_signature, fill_months, remove_holiday_rows, write_report)
+    _ = (reset_each_file, keep_signature, fill_months, remove_holiday_rows, write_report, gender_source_name)
     selected = {str(item).strip() for item in document_ids if str(item).strip()}
     created: list[Path] = []
     skipped: list[str] = []
@@ -103,7 +104,7 @@ def render_diary_documents_from_pack(
             statuses = read_statuses_from_files(effective_status_files)
             if not statuses:
                 raise ValueError("в источнике не найдено подходящих текстов наблюдения")
-            from custom_diary_template_renderer import render_custom_diary_template
+            from document_intelligence.custom_diary_template_renderer import render_custom_diary_template
 
             rendered = render_custom_diary_template(
                 template_path=template,
