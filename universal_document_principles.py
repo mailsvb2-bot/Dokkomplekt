@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Sequence
 
+from diagnostic_logging import record_soft_exception
 from document_intelligence.analyzer import DocumentIntelligenceCore
 from universal_fields import PatientCase, normalize_field_id_for_context
 
@@ -26,7 +27,7 @@ def missing_fields_from_principles(case: PatientCase, document: object, *, base_
 
     Document intelligence may discover many fillable visible blanks, but the
     persisted DocumentTemplateSpec is the single owner of which fields are
-    actually mandatory.  This keeps the completion popup, strict renderer and
+    actually mandatory. This keeps the completion popup, strict renderer and
     doctor-owned profile on the same contract.
     """
 
@@ -49,8 +50,12 @@ def missing_fields_from_principles(case: PatientCase, document: object, *, base_
                     document_label=button_label,
                 )
             )
-        except ValueError:
-            continue
+        except ValueError as exc:
+            record_soft_exception(
+                "universal_document_principles.invalid_profile_required_field",
+                exc,
+                detail=str(raw_id),
+            )
 
     for field in blueprint.fields:
         field_id = str(getattr(field, "field_id", "") or "").strip()
@@ -69,8 +74,13 @@ def missing_fields_from_principles(case: PatientCase, document: object, *, base_
                     category=category,
                     document_label=button_label,
                 )
-            except ValueError:
-                pass
+            except ValueError as exc:
+                record_soft_exception(
+                    "universal_document_principles.invalid_inferred_field",
+                    exc,
+                    detail=field_id,
+                )
+                continue
         if field_id in required_field_ids and not case.get(field_id).strip():
             result.append(replace(field, field_id=field_id))
     return tuple(dict((field.field_id, field) for field in result).values())
