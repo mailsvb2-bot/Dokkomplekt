@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from actions_creation_live_guard import ActionsCreationLiveGuardMixin
 from actions_creation_preflight import ActionsCreationReviewMixin
 from actions_creation_foldering import ActionsCreationFolderingMixin
 from actions_creation_maintenance import ActionsCreationMaintenanceMixin
@@ -15,6 +16,7 @@ from actions_creation_execution import ActionsCreationExecutionMixin
 
 
 class ActionsCreationOrchestratorMixin(
+    ActionsCreationLiveGuardMixin,
     ActionsCreationReviewMixin,
     ActionsCreationFolderingMixin,
     ActionsCreationMaintenanceMixin,
