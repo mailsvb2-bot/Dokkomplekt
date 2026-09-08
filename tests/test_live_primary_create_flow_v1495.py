@@ -63,6 +63,27 @@ def test_referral_historical_episode_cannot_become_current_discharge() -> None:
         assert data.discharge_date == ""
 
 
+def test_referral_title_date_outranks_historical_hospitalization_without_label() -> None:
+    with TemporaryDirectory() as tmp:
+        path = Path(tmp) / "referral-title-only.docx"
+        _write_docx(
+            path,
+            [
+                "30.09.2025 Направление на госпитализацию",
+                "История болезни № 234",
+                "ФИО: Иванов Иван Иванович",
+                "Анамнез заболевания: в 2023 году госпитализирован 01.02.2023, выписан 07.02.2023.",
+                f"Диагноз: {SCREENSHOT_DIAGNOSIS}",
+            ],
+        )
+
+        assert extract_current_admission_date_from_primary_docx(path) == "30.09.2025"
+        assert extract_current_discharge_date_from_primary_docx(path) == ""
+        data = MedicalTextParser().parse_docx(path)
+        assert data.admission_date == "30.09.2025"
+        assert data.discharge_date == ""
+
+
 def test_primary_docx_prefills_current_patient_fields_end_to_end() -> None:
     with TemporaryDirectory() as tmp:
         path = Path(tmp) / "primary.docx"
