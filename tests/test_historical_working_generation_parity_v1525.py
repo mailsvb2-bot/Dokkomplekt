@@ -20,6 +20,7 @@ def _template(path: Path) -> Path:
     # Real doctor profiles may persist this explicit placeholder as optional.
     # Its absence must not cancel the entire document transaction.
     doc.add_paragraph("Номер больничного: {{expert.sick_leave_number}}")
+    doc.add_paragraph("Адрес: ______")
     doc.save(path)
     return path
 
@@ -92,6 +93,47 @@ def test_historical_compatibility_does_not_soften_required_fields(tmp_path: Path
     assert not (tmp_path / "out").exists()
     assert app._allow_missing_required_creation is False
 
+
+def test_explicit_continue_without_required_field_is_honored(tmp_path: Path) -> None:
+    pack = _pack(tmp_path)
+    case = PatientCase()
+    case.set("patient.fio", "Орлова Мария Ивановна")
+    app = _Subject()
+    app._allow_missing_required_creation = True
+    app._missing_required_override_fields = ("diagnosis.main",)
+
+    created = app._create_regular_custom_documents(pack, case, ["doctor_document"], tmp_path / "out")
+
+    assert len(created) == 1
+    assert created[0].exists()
+    text = "\n".join(paragraph.text for paragraph in Document(created[0]).paragraphs)
+    assert "Орлова Мария Ивановна" in text
+    assert "{{diagnosis.main}}" not in text
+    assert app._allow_missing_required_creation is True
+
+
+def test_optional_placeholder_compatibility_does_not_disable_visible_word_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pack = _pack(tmp_path)
+    case = PatientCase()
+    case.set("patient.fio", "Орлова Мария Ивановна")
+    case.set("diagnosis.main", "F32.1 Депрессивный эпизод")
+    app = _Subject()
+    app._allow_missing_required_creation = False
+
+    import document_intelligence.form_fill as form_fill
+
+    def fail_visible_fill(*_args, **_kwargs):
+        raise RuntimeError("visible Word fill failed")
+
+    monkeypatch.setattr(form_fill, "fill_docx_visible_fields", fail_visible_fill)
+
+    with pytest.raises(RuntimeError, match="visible Word fill failed"):
+        app._create_regular_custom_documents(pack, case, ["doctor_document"], tmp_path / "out")
+
+    assert not list((tmp_path / "out").glob("*.docx"))
+    assert app._allow_missing_required_creation is False
 
 def test_real_app_mro_uses_historical_compatibility_boundary() -> None:
     from app import CombinedMedicalDiaryApp
