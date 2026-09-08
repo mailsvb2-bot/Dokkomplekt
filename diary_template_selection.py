@@ -121,8 +121,8 @@ class DiaryTemplateSelectionMixin:
             return ""
         path = str(primary_path)
         try:
-            from medical_admission_resolver import extract_admission_date_from_primary_docx
-            title_date = extract_admission_date_from_primary_docx(path)
+            from medical_current_episode_dates import extract_current_admission_date_from_primary_docx
+            title_date = extract_current_admission_date_from_primary_docx(path)
         except Exception as exc:
             record_soft_exception("diary_template_selection.sync_admission_title", exc, detail=str(path))
             title_date = ""
