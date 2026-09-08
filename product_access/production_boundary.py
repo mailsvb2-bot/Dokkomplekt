@@ -59,7 +59,8 @@ class ProductionAccessBoundaryMixin:
 
     def _reserve_product_access_for_staged_files(self, created_files: Iterable[str | Path]):
         try:
-            return super()._reserve_product_access_for_staged_files(created_files)
+            owner = getattr(super(), "_reserve_product_access_for_staged_files")
+            return owner(created_files)
         except Exception as exc:
             surfaced = _publication_failure(exc, operation="проверка лицензии")
             if surfaced is exc:
@@ -68,7 +69,8 @@ class ProductionAccessBoundaryMixin:
 
     def _enforce_product_access_on_created_files(self, created_files: Iterable[str | Path]) -> list[Path]:
         try:
-            return super()._enforce_product_access_on_created_files(created_files)
+            owner = getattr(super(), "_enforce_product_access_on_created_files")
+            return owner(created_files)
         except Exception as exc:
             surfaced = _publication_failure(exc, operation="учёт созданных документов")
             if surfaced is exc:
