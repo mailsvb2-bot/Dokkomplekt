@@ -8,6 +8,7 @@ F00-F99.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from diagnostic_logging import record_soft_exception
 from medical_parser_sanitize import sanitize_diagnosis
@@ -147,6 +148,48 @@ def _alias_code_for_text(value: str) -> str:
 
 _CODE_RE = re.compile(r"(?<![A-Za-zА-Яа-я0-9])([A-ZА-ЯЁІЇЈ][0-9]{2}(?:[.,][0-9A-ZА-ЯЁІЇЈ]+)?)(?![A-Za-zА-Яа-я0-9])", re.IGNORECASE)
 
+_CODE_INVISIBLE_TRANSLATION = str.maketrans({
+    "\u200b": "",  # zero width space
+    "\u200c": "",  # zero width non-joiner
+    "\u200d": "",  # zero width joiner
+    "\u2060": "",  # word joiner
+    "\ufeff": "",  # BOM / zero width no-break space
+})
+_CODE_DOT_TRANSLATION = str.maketrans({
+    "。": ".", "｡": ".", "·": ".", "∙": ".", "•": ".", "‧": ".",
+})
+
+
+def _normalize_icd_code_input(value: str) -> str:
+    """Normalize Word/keyboard lookalikes only enough to detect an ICD code.
+
+    Clinical text copied from DOC/DOCX can contain full-width Latin/digits, a
+    one-dot leader instead of an ASCII full stop, zero-width characters or
+    spaces inside the code token (``F 20 . 00``).  Those characters are
+    visually indistinguishable in the popup, so rejecting them makes a valid
+    diagnosis look broken to the doctor.  Canonicalize the code token while
+    preserving the surrounding diagnosis wording.
+    """
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    text = text.translate(_CODE_INVISIBLE_TRANSLATION).translate(_CODE_DOT_TRANSLATION)
+    letter = r"[A-ZА-ЯЁІЇЈ]"
+    tail = r"[0-9A-ZА-ЯЁІЇЈ]+"
+    # Join only patterns that already look like an ICD token; ordinary prose is
+    # not whitespace-normalized or transliterated here.
+    text = re.sub(
+        rf"(?<![A-Za-zА-Яа-я0-9])({letter})\s+([0-9]{{2}})(?=\s*(?:[.,]|(?![A-Za-zА-Яа-я0-9])))",
+        r"\1\2",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        rf"(?<![A-Za-zА-Яа-я0-9])({letter}[0-9]{{2}})\s*[.,]\s*({tail})(?![A-Za-zА-Яа-я0-9])",
+        r"\1.\2",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text
+
 
 def _canonical_code(value: str) -> str:
     return _normalize_code_letters(str(value or "").strip().upper().replace(",", "."))
@@ -211,22 +254,23 @@ def normalize_diagnosis_with_icd10(value: str, *, language_id: str | None = "ru"
     diagnosis = sanitize_diagnosis(value)
     if not diagnosis:
         return ""
+    code_input = _normalize_icd_code_input(diagnosis)
     try:
-        code_match = _CODE_RE.search(diagnosis)
+        code_match = _CODE_RE.search(code_input)
         if code_match:
             code = _canonical_code(code_match.group(1))
             matches = search_icd10_f(code, limit=6, language_id=language_id)
             exact = next((item for item in matches if _canonical_code(item.code) == code), None)
             if exact is not None:
                 display = format_diagnosis(exact, language_id=language_id)
-                extra = _strip_existing_code(diagnosis, code)
+                extra = _strip_existing_code(code_input, code)
                 # If the doctor/source already wrote a diagnosis after the ICD
                 # code, keep that wording.  Replacing it with the local catalog
                 # title can duplicate or subtly change the clinical phrase.
                 if extra:
                     return f"{code} {extra}".strip()
                 return display
-            extra = _strip_existing_code(diagnosis, code)
+            extra = _strip_existing_code(code_input, code)
             return f"{code} {extra}".strip() if extra else code
 
         alias_code = _alias_code_for_text(diagnosis)
@@ -261,7 +305,7 @@ def diagnosis_has_icd10_code(value: str) -> bool:
     text = sanitize_diagnosis(value)
     if not text:
         return False
-    match = _CODE_RE.search(text)
+    match = _CODE_RE.search(_normalize_icd_code_input(text))
     if not match:
         return False
     code = _canonical_code(match.group(1))
