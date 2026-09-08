@@ -39,7 +39,9 @@ def _document_text(path: Path) -> str:
 
 
 def main() -> None:
-    sim = DoctorSim()
+    # False here deliberately chooses Word/DOCX in the real format popup.
+    # This is the user-facing format required by the production workflow.
+    sim = DoctorSim(answers={("askyesno", "Формат результата"): False})
     try:
         access_dir = sim.root_dir / "production-access"
         os.environ["DOKKOMPLEKT_TEST_DISABLE_PRODUCT_ACCESS"] = "0"
@@ -113,15 +115,30 @@ def main() -> None:
             sim.app.custom_output_vars[kind] = variable
         sim.app.output_vars[kind].set(True)
         sim.app._on_output_toggle(kind)
-        sim.app.create_selected_outputs(print_after=False)
+        selected_after_toggle = sim.app.selected_custom_docs()
+        if spec.id not in selected_after_toggle:
+            raise AssertionError(
+                "doctor-owned template selection was cancelled before create: "
+                f"selected={selected_after_toggle}; popups={sim.popups[-8:]}"
+            )
+        creation_result = sim.app.create_selected_outputs(print_after=False)
         sim.pump(0.5)
 
         all_outputs = {path.resolve() for path in sim.outputs() if path.suffix.lower() == ".docx"}
         new_outputs = sorted(all_outputs - first_outputs)
         if sim.errors:
             raise AssertionError("doctor-template create command showed errors: " + " | ".join(sim.errors))
+        if not creation_result:
+            raise AssertionError(
+                "doctor-owned top-level create command returned False: "
+                f"selected={sim.app.selected_custom_docs()}; popups={sim.popups[-10:]}"
+            )
         if not new_outputs:
-            raise AssertionError("doctor-owned template produced no published DOCX")
+            raise AssertionError(
+                "doctor-owned template produced no published DOCX: "
+                f"before={[str(p) for p in sorted(first_outputs)]}; "
+                f"after={[str(p) for p in sorted(all_outputs)]}; popups={sim.popups[-10:]}"
+            )
         doctor_output = next((path for path in new_outputs if "Историческая" in path.name), new_outputs[0])
         text = _document_text(doctor_output)
         if "Иванов Иван Иванович" not in text or "F32.1" not in text:
