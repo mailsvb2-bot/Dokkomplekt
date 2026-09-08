@@ -60,14 +60,11 @@ class ActionsNavigationMixin:
             popup_diag = self._popup_diagnosis_override.strip() or self.diagnosis_var.get().strip()
             if popup_diag and (self._popup_diagnosis_override.strip() or self._manual_diagnosis):
                 data.diagnosis = normalize_diagnosis_with_icd10(popup_diag, language_id=self._diagnosis_language() if hasattr(self, "_diagnosis_language") else "ru")
-            # Дата поступления берётся только из заголовка документа. Если
-            # общий парсер где-то нашёл дату рождения, заголовочная дата
-            # имеет приоритет.
-            from medical_admission_resolver import extract_admission_date_from_primary_docx
-            title_date = extract_admission_date_from_primary_docx(path)
-            # Заголовочная дата имеет приоритет, но если её нет, сохраняем
-            # строгий fallback из полного разбора первичного документа. Главное —
-            # не подменять дату поступления датой рождения из демографического блока.
+            # Current admission belongs to the selected episode. Historical
+            # hospitalizations in the anamnesis must not override the explicit
+            # admission label/title of the document being processed now.
+            from medical_current_episode_dates import extract_current_admission_date_from_primary_docx
+            title_date = extract_current_admission_date_from_primary_docx(path)
             if title_date:
                 data.admission_date = title_date
             self.data = data
@@ -79,10 +76,6 @@ class ActionsNavigationMixin:
             if data.admission_date and (not self._manual_admission_date or not current_semantic_date(self, "admission_date")):
                 self._set_ui_var(self.admission_date_var, data.admission_date)
             if data.discharge_date and (not getattr(self, "_manual_discharge_date", False) or not current_semantic_date(self, "discharge_date")):
-                # Discharge was parsed from the primary document but never pushed
-                # into the UI/semantic layer, so the diary/epicrisis flow kept
-                # asking for it and could not build documents. Push it like
-                # admission, unless the doctor already typed one manually.
                 self._set_ui_var(self.discharge_date_var, data.discharge_date)
             if data.case_number and not self.case_number_var.get().strip():
                 case_value = sanitize_case_number_candidate(data.case_number, patient_name=self.patient_name_var.get().strip() or data.fio)
@@ -93,8 +86,6 @@ class ActionsNavigationMixin:
                     data.case_number = ""
             if data.diagnosis and (not self._manual_diagnosis or not self.diagnosis_var.get().strip()):
                 self._set_ui_var(self.diagnosis_var, normalize_diagnosis_with_icd10(data.diagnosis, language_id=self._diagnosis_language() if hasattr(self, "_diagnosis_language") else "ru"))
-            # Если папки уже известны, автоматически подставляем только
-            # текст дневников по диагнозу. Даты строит календарь программы.
             self._auto_select_diary_text_by_diagnosis(ask_folder=False)
             self._set_preview(_format_preview_lazy(data))
             self._log(f"\n✅ Первичный документ прочитан ({data.input_document_kind or 'тип не определён'}). Данные подтянуты в общую карточку пациента.\n")
