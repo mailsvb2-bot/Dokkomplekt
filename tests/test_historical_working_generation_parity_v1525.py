@@ -100,7 +100,7 @@ def test_explicit_continue_without_required_field_is_honored(tmp_path: Path) -> 
     case.set("patient.fio", "Орлова Мария Ивановна")
     app = _Subject()
     app._allow_missing_required_creation = True
-    app._missing_required_override_fields = ("diagnosis.main",)
+    app._missing_required_override_fields = ("diagnosis",)
 
     created = app._create_regular_custom_documents(pack, case, ["doctor_document"], tmp_path / "out")
 

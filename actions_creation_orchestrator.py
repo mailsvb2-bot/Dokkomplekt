@@ -37,7 +37,7 @@ class ActionsCreationLiveGuardMixin:
 
         ``strict=False`` used to solve two unrelated problems at once: it allowed
         empty doctor-declared optional placeholders, but it also disabled strict
-        visible-Word-field validation. Keep the renderer strict instead. For
+        visible-Word-field validation.  Keep the renderer strict instead.  For
         this one render only, copy selected templates and remove exactly the
         placeholders the doctor is allowed to leave empty.
         """
@@ -58,11 +58,11 @@ class ActionsCreationLiveGuardMixin:
 
         selected = {str(item).strip() for item in regular_ids if str(item).strip()}
         allow_required_override = bool(getattr(self, "_allow_missing_required_creation", False))
-        override_fields = {
+        raw_override_fields = tuple(
             str(field_id).strip()
             for field_id in tuple(getattr(self, "_missing_required_override_fields", ()) or ())
             if str(field_id).strip()
-        }
+        )
         failures: list[str] = []
         profile_path = getattr(self, "_universal_profile_path", None)
         profile_base = profile_path().parent if callable(profile_path) else Path(out_dir).parent
@@ -76,6 +76,15 @@ class ActionsCreationLiveGuardMixin:
                     continue
 
                 missing_required = missing_required_fields(case, document)
+                context_kwargs = {
+                    "role_id": str(getattr(document, "role_id", "") or ""),
+                    "category": str(getattr(document, "category", "") or ""),
+                    "document_label": str(getattr(document, "button_label", "") or ""),
+                }
+                override_fields = {
+                    normalize_field_id_for_context(field_id, **context_kwargs)
+                    for field_id in raw_override_fields
+                }
                 permitted_required = {field_id for field_id in missing_required if field_id in override_fields}
                 unpermitted_required = tuple(
                     field_id for field_id in missing_required if field_id not in permitted_required
@@ -86,11 +95,6 @@ class ActionsCreationLiveGuardMixin:
                     rendered_documents.append(document)
                     continue
 
-                context_kwargs = {
-                    "role_id": str(getattr(document, "role_id", "") or ""),
-                    "category": str(getattr(document, "category", "") or ""),
-                    "document_label": str(getattr(document, "button_label", "") or ""),
-                }
                 optional = {
                     normalize_field_id_for_context(field_id, **context_kwargs)
                     for field_id in tuple(getattr(document, "optional_fields", ()) or ())
