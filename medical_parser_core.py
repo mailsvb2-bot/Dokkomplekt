@@ -14,11 +14,11 @@ from medical_docx_reader import (
     _is_birth_or_demographic_context,
     _is_primary_title_context,
 )
-from medical_admission_resolver import (
-    extract_admission_date_from_primary_docx,
-    extract_admission_date_from_primary_text,
-    extract_discharge_date_from_primary_docx,
-    extract_labeled_discharge_date_from_primary_text,
+from medical_admission_resolver import extract_admission_date_from_primary_text
+from medical_current_episode_dates import (
+    extract_current_admission_date_from_primary_docx,
+    extract_current_discharge_date_from_primary_docx,
+    extract_current_discharge_date_from_primary_text,
 )
 from medical_text_utils import sanitize_case_number_candidate
 from medical_models import PatientData
@@ -52,14 +52,14 @@ class MedicalParserCoreMixin:
     def parse_docx(self, path: str | Path) -> PatientData:
         text = extract_docx_text(path)
         data = self.parse_text(text)
-        admission_date = extract_admission_date_from_primary_docx(path)
+        admission_date = extract_current_admission_date_from_primary_docx(path)
         if admission_date:
             data.admission_date = admission_date
         # parse_text intentionally ignores historical narrative discharges for
-        # a primary/referral.  Re-assert the DOCX-level current-episode result
+        # a primary/referral. Re-assert the DOCX-level current-episode result
         # even when it is blank so a phrase such as «выписан 07.02.2023» in the
         # anamnesis cannot survive as this patient's discharge date.
-        data.discharge_date = extract_discharge_date_from_primary_docx(path)
+        data.discharge_date = extract_current_discharge_date_from_primary_docx(path)
         self._refresh_warnings(data)
         sanitize_patient_data_forbidden_phrases(data)
         return data
@@ -115,7 +115,7 @@ class MedicalParserCoreMixin:
             data.has_treatment_section = True
 
         data.admission_date = extract_admission_date_from_primary_text(text) or self._extract_admission_date(text)
-        data.discharge_date = extract_labeled_discharge_date_from_primary_text(text)
+        data.discharge_date = extract_current_discharge_date_from_primary_text(text)
         self._repair_compact_demographics(data, text)
         self._repair_work_details(data, text)
         if data.case_number:
