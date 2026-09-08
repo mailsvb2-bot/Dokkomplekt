@@ -76,6 +76,21 @@ def _check_runtime_bundle() -> int:
     return 0 if result["ok"] else 1
 
 
+def _check_production_license_key() -> int:
+    result = {"check": "production_license_key", "ok": False, "error": None}
+    try:
+        from product_access.production_boundary import packaged_license_public_key_status
+
+        ok, reason = packaged_license_public_key_status()
+        result["ok"] = ok
+        if not ok:
+            result["error"] = reason
+    except Exception as exc:
+        result["error"] = repr(exc)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
 def _check_user_journey() -> int:
     from installation_diagnostics import run_user_journey_check
     result = run_user_journey_check()
@@ -88,6 +103,8 @@ def main() -> None:
         raise SystemExit(_check_native_license_core())
     if "--check-runtime-bundle" in sys.argv:
         raise SystemExit(_check_runtime_bundle())
+    if "--check-production-license-key" in sys.argv:
+        raise SystemExit(_check_production_license_key())
     if "--check-user-journey" in sys.argv:
         raise SystemExit(_check_user_journey())
     if "--install-intake-agent" in sys.argv:
