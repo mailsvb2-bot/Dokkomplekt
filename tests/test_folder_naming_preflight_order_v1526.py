@@ -4,7 +4,7 @@ import pytest
 
 from actions_creation_foldering import ActionsCreationFolderingMixin
 from actions_creation_preflight import ActionsCreationReviewMixin
-from actions_folder_naming_preflight import ActionsFolderNamingPreflightMixin
+from actions_creation import ActionsFolderNamingPreflightMixin
 from medical_models import PatientData
 
 
@@ -70,4 +70,4 @@ def test_folder_naming_becomes_strict_after_preflight_confirmation(tmp_path: Pat
     app.data.output_fio = "Баннина Елена Геннадьевна"
     final_review = app._build_patient_case_review_for_selection([], True, [])
 
-    assert Path(final_review.output_dir).name == "Баннина Е.Г."
+    assert Path(final_review.output_dir).name == "Баннина Е.Г"
