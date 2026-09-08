@@ -27,7 +27,10 @@ class MedicalTextParser(
     FIELD_ALIASES: Dict[str, Sequence[str]] = {
         "case_number": ("История болезни №", "История болезни N", "ИБ №", "Nr historii choroby", "Numer historii choroby", "Historia choroby nr", "Nr dokumentacji", "Numer dokumentacji", "Nr karty"),
         "fio": ("Ф.И.О.", "Ф.И.О", "ФИО", "ФИО пациента", "Ф.И.О. пациента", "Ф.И.О пациента", "Фамилия Имя Отчество", "Пациент", "Пациентка", "Больной", "Больная", "Pacjent", "Pacjentka", "Imię i nazwisko", "Imie i nazwisko", "Nazwisko i imię", "Nazwisko i imie"),
-        "birth": ("Год рождения", "Дата рождения", "г.р.", "Возраст", "Data urodzenia", "Urodzony", "Urodzona", "Wiek"),
+        # ``Возраст``/``Wiek`` are intentionally not birth aliases. Treating an
+        # age such as "46 лет" as a birth date poisoned both patient.birth_date
+        # and patient.age in universal templates.
+        "birth": ("Год рождения", "Дата рождения", "г.р.", "Data urodzenia", "Urodzony", "Urodzona"),
         "registered": ("Зарегистрирован", "зарегистрирован по адресу", "Проживает", "Место жительства", "Адрес проживания", "Адрес места жительства", "Адрес регистрации", "Adres", "Adres zamieszkania", "Miejsce zamieszkania"),
         "psych_account": ("На учёте у психиатров", "На учете у психиатров"),
         "work_org": ("Работает в организации", "Работает", "Место работы", "Работа", "Miejsce pracy", "Pracuje", "Zakład pracy", "Zaklad pracy"),
@@ -47,6 +50,10 @@ class MedicalTextParser(
         "mental_status": ("Профильный статус при поступлении", "Профильный статус", "Психический статус при поступлении", "Психический статус", "Stan psychiczny", "Badanie psychiatryczne"),
         "somatic_status": ("Сомато-неврологический статус", "Соматический статус", "Объективный статус", "Объективно", "Status praesens", "Stan przedmiotowy", "Badanie przedmiotowe", "Stan somatyczny"),
         "examination_plan": ("План обследования", "Plan badań", "Plan badan"),
+        # A section explicitly titled "Лечение"/"Leczenie"/"Terapia" is the
+        # source document's treatment section and belongs to treatment.plan.
+        # The safety boundary is downstream: it must never be reused as a
+        # treatment RESULT or a discharge condition merely because it is nonempty.
         "treatment_plan": ("План лечения", "Назначенное лечение", "Лечение", "Plan leczenia", "Zalecone leczenie", "Zastosowane leczenie", "Leczenie", "Terapia"),
         "diagnosis": ("Клинический диагноз", "Предварительный диагноз", "Основной диагноз", "Заключительный диагноз", "Диагноз", "был выставлен диагноз", "установлен диагноз", "выставлен диагноз", "Rozpoznanie kliniczne", "Rozpoznanie główne", "Rozpoznanie glowne", "Rozpoznanie", "Diagnoza"),
         "epidemiology": ("Эпидемиологический анамнез", "Wywiad epidemiologiczny"),
@@ -170,7 +177,7 @@ class MedicalTextParser(
     )
 
     LIFE_ANAMNESIS_START_RE = re.compile(
-        r"(?i)(?<![А-Яа-яA-Za-z0-9])("
+        r"(?i)(?<![А-Яа-яA-Za-z0-9])(" 
         r"наследственность|рождение\s+в\s+городе|родил(?:ся|ась)?\s+в|"
         r"на\s+момент\s+рождения\s+семья|в\s+настоящее\s+время\s+семья|"
         r"братья\s*/\s*с[её]стры|братьев|с[её]ст[её]р|"
@@ -180,4 +187,3 @@ class MedicalTextParser(
         r"после\s+школы|специальность|окончание\s+уч[её]бы|"
         r"в\s+настоящее\s+время\s+работа|брак|дети|проживает\s*[-:])"
     )
-

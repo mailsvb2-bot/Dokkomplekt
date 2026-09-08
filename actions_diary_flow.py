@@ -21,7 +21,7 @@ class ActionsDiaryFlowMixin:
             raise ValueError("Выберите файл(ы) с текстами дневников. Тексты можно выбирать из DOCX/DOCM/DOC.")
 
         # Output is text, but an explicitly selected 01–31 Word template may
-        # still provide the date plan.  Do not silently discard the doctor's
+        # still provide the date plan. Do not silently discard the doctor's
         # Dates selection here.
         if not self.diary_files and getattr(self, "diary_template_dir", ""):
             self._auto_select_numbered_diary_template(ask_folder=False)
@@ -60,6 +60,8 @@ class ActionsDiaryFlowMixin:
         from diary_creation_wizard import current_diary_calendar_schedule
         diary_schedule = current_diary_calendar_schedule(self, fallback=self._selected_profile_diary_schedule())
         diary_mode = getattr(diary_schedule, "mode", "daily") if diary_schedule else "daily"
+        discharge_value = current_semantic_date(self, "discharge_date")
+        force_final_diary = bool(self.force_final_diary_var.get())
         sick_leave_yes = self._normalize_yes_no(getattr(self, "expert_sick_leave_needed_var", None).get() if getattr(self, "expert_sick_leave_needed_var", None) else "") == "да"
         treatment_correction = str(getattr(getattr(self, "diary_treatment_correction_var", None), "get", lambda: "")() or "").strip()
         result = fill_diary_batch(
@@ -69,12 +71,12 @@ class ActionsDiaryFlowMixin:
             patient_name=diary_patient_name,
             admission_value=diary_admission_value,
             gender_source_name=source_patient_fio or diary_patient_name,
-            discharge_value=current_semantic_date(self, "discharge_date"),
+            discharge_value=discharge_value,
             repeat_statuses=self.repeat_statuses_var.get(),
             reset_each_file=self.reset_each_file_var.get(),
             keep_signature=self.keep_signature_var.get(),
             fill_months=self.fill_months_var.get(),
-            force_final_diary=self.force_final_diary_var.get(),
+            force_final_diary=force_final_diary,
             remove_holiday_rows=self.remove_holiday_rows_var.get(),
             open_result_folder=False,
             write_report=self._diagnostic_reports_enabled(),
@@ -91,6 +93,15 @@ class ActionsDiaryFlowMixin:
             profile_status=str(getattr(parsed_for_name, "mental_status", "") or getattr(getattr(self, "data", None), "mental_status", "") or ""),
             sick_leave_from=current_semantic_date(self, "expert_sick_leave_from"),
         )
+        if diary_mode == "hourly":
+            from document_intelligence.diary_hourly_finalization import ensure_hourly_final_diary
+
+            ensure_hourly_final_diary(
+                result,
+                discharge_value=discharge_value,
+                patient_name=source_patient_fio or diary_patient_name,
+                force_final_diary=force_final_diary,
+            )
         self._log("\n✅ Дневники заполнены:\n")
         for path in result.created_files:
             self._log(f"- {path}\n")
