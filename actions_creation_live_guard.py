@@ -44,9 +44,7 @@ class ActionsCreationLiveGuardMixin:
             return False
         if result:
             try:
-                final_dir = getattr(self, "_active_patient_output_dir", None)
-                suffix = f" — {final_dir}" if final_dir else ""
-                self._set_status(f"Готово: файлы сохранены{suffix}")
+                self._set_status("Готово: файлы сохранены")
             except Exception as exc:
                 record_soft_exception("actions_creation_live_guard.set_success_status", exc)
         return result
