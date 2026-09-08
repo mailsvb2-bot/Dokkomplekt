@@ -102,7 +102,10 @@ jobs:
             echo "==> $scenario"
             xvfb-run -a python -u tools/doctor_emulation/run_all_scenarios.py "$scenario"
           done
-
+          if [ "${{ matrix.shard }}" = "2" ]; then
+            echo "==> production product-access create command"
+            xvfb-run -a python -u tools/doctor_emulation/run_product_access_scenario.py
+          fi
 
   build:
     runs-on: windows-latest
@@ -203,6 +206,7 @@ jobs:
         shell: cmd
         env:
           MEDICAL_AUTOFILL_SKIP_BUILD_PRECHECKS: '1'
+          DOKKOMPLEKT_LICENSE_PUBLIC_KEY_B64: ${{ secrets.DOKKOMPLEKT_LICENSE_PUBLIC_KEY_B64 }}
         run: build_exe_windows.bat
       - name: Install Inno Setup
         shell: pwsh
@@ -223,6 +227,13 @@ jobs:
           & .\dist\MedicalDiaryAutofill.exe --check-native-license-core *> packaged-native-verifier.log
           $code=$LASTEXITCODE
           Get-Content packaged-native-verifier.log
+          exit $code
+      - name: Smoke packaged EXE production license key
+        shell: pwsh
+        run: |
+          & .\dist\MedicalDiaryAutofill.exe --check-production-license-key *> packaged-license-key.log
+          $code=$LASTEXITCODE
+          Get-Content packaged-license-key.log
           exit $code
       - name: Smoke packaged EXE runtime bundle
         shell: pwsh
@@ -281,6 +292,7 @@ jobs:
           name: packaged-native-verifier-logs
           path: |
             packaged-native-verifier.log
+            packaged-license-key.log
             packaged-runtime-bundle.log
             packaged-user-journey.log
           if-no-files-found: ignore
