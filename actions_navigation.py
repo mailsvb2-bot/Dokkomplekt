@@ -63,7 +63,7 @@ class ActionsNavigationMixin:
             # Дата поступления берётся только из заголовка документа. Если
             # общий парсер где-то нашёл дату рождения, заголовочная дата
             # имеет приоритет.
-            from medical_current_episode_dates import extract_current_admission_date_from_primary_docx
+            from document_intelligence.current_episode_dates import extract_current_admission_date_from_primary_docx
             title_date = extract_current_admission_date_from_primary_docx(path)
             # Заголовочная дата имеет приоритет, но если её нет, сохраняем
             # строгий fallback из полного разбора первичного документа. Главное —
