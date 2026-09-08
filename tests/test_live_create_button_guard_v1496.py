@@ -51,12 +51,12 @@ def test_main_create_action_continues_directly_after_required_fields() -> None:
     assert app._confirm_patient_case_before_creation(marker) is False
 
 
-def test_main_create_action_delegates_once_and_reports_final_folder() -> None:
+def test_main_create_action_delegates_once_and_preserves_success_contract() -> None:
     app = _SuccessApp()
     assert app.create_selected_outputs(print_after=False) is True
     assert app.calls == [False]
     assert app.statuses[0].startswith("Проверяю данные")
-    assert app.statuses[-1] == "Готово: файлы сохранены — C:/result/patient"
+    assert app.statuses[-1] == "Готово: файлы сохранены"
 
 
 def test_unexpected_live_create_exception_is_never_invisible(monkeypatch) -> None:
