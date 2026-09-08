@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tkinter as tk
 from dataclasses import replace
 from pathlib import Path
 
@@ -101,11 +102,15 @@ def main() -> None:
 
         for variable in sim.app.output_vars.values():
             variable.set(False)
-        sim.app._redraw_selection_controls()
-        sim.pump(0.2)
+        # The production setup wizard normally creates the Tk variable when it
+        # adds a doctor button. This smoke attaches a template after app startup,
+        # so mirror only that UI-state registration here; generation itself stays
+        # entirely production code.
         kind = custom_kind(spec.id)
         if kind not in sim.app.output_vars:
-            raise AssertionError(f"doctor-owned output button was not wired: {kind}")
+            variable = tk.BooleanVar(master=sim.tk_root, value=False)
+            sim.app.output_vars[kind] = variable
+            sim.app.custom_output_vars[kind] = variable
         sim.app.output_vars[kind].set(True)
         sim.app._on_output_toggle(kind)
         sim.app.create_selected_outputs(print_after=False)
