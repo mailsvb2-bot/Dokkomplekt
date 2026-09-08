@@ -32,6 +32,42 @@ class ActionsCreationLiveGuardMixin:
         """Block only on truly missing required fields, then generate."""
         return bool(self._prompt_missing_required_fields_or_continue(review))
 
+    def _create_regular_custom_documents(self, current_pack, case, regular_ids, out_dir):
+        """Render doctor-owned templates with the proven historical compatibility rule.
+
+        The July 2026 working generation path rendered doctor templates with
+        ``strict=False`` after the required patient fields had already been
+        collected. Later code switched the renderer itself to ``strict=True``;
+        that made any empty optional ``{{...}}`` placeholder fatal and could roll
+        the whole output transaction back, so the doctor saw no documents at all.
+
+        Preserve current safety by validating every persisted required field
+        first. Only after that validation do we use the historical tolerant
+        placeholder rendering mode, where optional values may legitimately stay
+        blank. The flag is restored immediately so no other creation path is
+        weakened.
+        """
+        from universal_template_engine import missing_required_fields
+
+        selected = {str(item).strip() for item in regular_ids if str(item).strip()}
+        failures: list[str] = []
+        for document in tuple(getattr(current_pack, "documents", ()) or ()):
+            if getattr(document, "id", "") not in selected:
+                continue
+            missing = missing_required_fields(case, document)
+            if missing:
+                label = str(getattr(document, "button_label", "") or getattr(document, "id", "") or "Документ")
+                failures.append(f"{label}: {', '.join(missing)}")
+        if failures:
+            raise ValueError("Не заполнены обязательные поля документов: " + "; ".join(failures))
+
+        previous = bool(getattr(self, "_allow_missing_required_creation", False))
+        self._allow_missing_required_creation = True
+        try:
+            return super()._create_regular_custom_documents(current_pack, case, regular_ids, out_dir)
+        finally:
+            self._allow_missing_required_creation = previous
+
     def create_selected_outputs(self, *, print_after: bool = False) -> bool:
         """Run the existing generator and never let a live click fail invisibly."""
         try:
