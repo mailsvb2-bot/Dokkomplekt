@@ -22,7 +22,6 @@ class DiaryTemplateSelectionMixin:
             files = self._iter_diary_template_docx_files(root)
             day = int(day)
 
-            # 1) Самый строгий контракт: файл называется 15.docx / 15.docm.
             exact_names = {
                 f"{day:02d}.docx", f"{day}.docx", f"{day:02d}.docm", f"{day}.docm",
                 f"{day:02d}", f"{day}",
@@ -31,7 +30,6 @@ class DiaryTemplateSelectionMixin:
                 if path.name.strip().lower() in exact_names:
                     return path
 
-            # 2) Мягкие имена: 15(2).docx, №15.docx, шаблон 15.docx, 15 дневник.DOCX.
             matches = [path for path in files if self._is_numbered_diary_template_file(path, day)]
             if matches:
                 def priority(path: Path) -> tuple[int, int, str]:
@@ -41,8 +39,6 @@ class DiaryTemplateSelectionMixin:
                     return (0 if exactish else 1, 0 if starts_with_day else 1, path.name.lower())
                 return sorted(matches, key=priority)[0]
 
-            # 3) Запасной контур: если файл назван странно, определяем номер
-            # шаблона по первой строке таблицы внутри самого DOCX.
             content_matches = []
             for path in files:
                 if self._template_content_first_day(path) == day:
@@ -59,7 +55,6 @@ class DiaryTemplateSelectionMixin:
         examples: list[str] = []
         for day in days[:2]:
             examples.extend([f"{day:02d}", f"{day:02d}.docx", f"{day}", f"{day}.docx", f"{day:02d}(2).docx", f"№{day:02d}.docx"])
-        # Убираем повторы вроде 01 и 1 для однозначной подсказки.
         deduped_examples: list[str] = []
         for item in examples:
             if item not in deduped_examples:
@@ -121,7 +116,7 @@ class DiaryTemplateSelectionMixin:
             return ""
         path = str(primary_path)
         try:
-            from medical_current_episode_dates import extract_current_admission_date_from_primary_docx
+            from document_intelligence.current_episode_dates import extract_current_admission_date_from_primary_docx
             title_date = extract_current_admission_date_from_primary_docx(path)
         except Exception as exc:
             record_soft_exception("diary_template_selection.sync_admission_title", exc, detail=str(path))
@@ -129,11 +124,6 @@ class DiaryTemplateSelectionMixin:
         if not title_date:
             return ""
         current = current_semantic_date(self, "admission_date")
-        # Ручной/doctor-confirmed ввод всегда финальный. Даже force-вызовы из
-        # создания дневников, desktop-intake или смены первичного документа не
-        # должны перетирать дату, которую врач уже подтвердил в popup/UI. После
-        # выбора нового первичного документа runtime state сбрасывается отдельно,
-        # поэтому здесь можно безопасно сохранять ручной приоритет.
         if current and bool(getattr(self, "_manual_admission_date", False)):
             return title_date
         if force or not current:
@@ -141,25 +131,15 @@ class DiaryTemplateSelectionMixin:
         return title_date
 
     def _admission_datetime_for_diary_template(self) -> datetime | None:
-        # Для автоподбора шаблона дневников ручной doctor-confirmed ввод имеет
-        # приоритет: если врач исправил дату госпитализации, шаблон 01–31 должен
-        # выбираться по исправленной дате, а не по устаревшей дате заголовка.
         if bool(getattr(self, "_manual_admission_date", False)):
             manual_value = current_semantic_date(self, "admission_date")
             parsed_manual = parse_date(manual_value)
             if parsed_manual:
                 return parsed_manual
-        # Если ручной даты нет, сначала берём дату из самого первичного
-        # документа/направления. Это защищает от ситуации, когда в UI случайно
-        # попала дата рождения пациента.
         title_date = self._sync_admission_date_from_title(force=False)
         parsed_from_doc = parse_date(title_date)
         if parsed_from_doc:
             return parsed_from_doc
-        # Если первичный документ выбран, но дата в его заголовке не найдена,
-        # используем уже распознанную основным парсером дату поступления. Старый
-        # полный запрет на UI-дату ломал автоподбор 01-31 для документов, где
-        # дата находится в таблице/теле, а не в заголовке файла.
         data_date = ""
         try:
             data_date = str(getattr(getattr(self, "data", None), "admission_date", "") or "").strip()
@@ -175,15 +155,6 @@ class DiaryTemplateSelectionMixin:
         return None
 
     def _diary_template_day_candidates(self, admission_dt: datetime) -> list[tuple[int, str, datetime]]:
-        """Вернуть номера шаблонов, которые допустимо пробовать для даты поступления.
-
-        Основной контракт пользователя: число в дате госпитализации равно имени
-        шаблона дневников, то есть 02.04.2026 → 02 / 02.docx.
-        Дополнительный резерв нужен только для уже существующих папок, где
-        шаблоны исторически назывались по первой строке дневника: дата
-        поступления + 1 день. Если точного 02 нет, но есть 03, программа сможет
-        продолжить работу вместо ошибки.
-        """
         result: list[tuple[int, str, datetime]] = []
         seen: set[int] = set()
 
@@ -198,12 +169,6 @@ class DiaryTemplateSelectionMixin:
         return result
 
     def _auto_select_numbered_diary_template(self, *, ask_folder: bool = False) -> bool:
-        """Автоматически выбрать один шаблон 01–31 по дате госпитализации.
-
-        Главный контракт: 02.04.2026 → 02 / 02.docx / 2 / 2.docx.
-        Если такого файла физически нет, резервно пробуется дата + 1 день
-        для старых наборов шаблонов. Внутренний diary_filler.py не меняется.
-        """
         if self.diary_files and not getattr(self, "_diary_files_auto_selected", False):
             return True
 
