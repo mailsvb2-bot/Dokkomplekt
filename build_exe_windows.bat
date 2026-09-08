@@ -83,20 +83,24 @@ if errorlevel 1 (
 
 :AFTER_PRECHECKS
 
-echo [6/6] Собираю один EXE через PyInstaller...
+echo [6/6] Проверяю production Ed25519 public key...
 if not exist resources mkdir resources
 if not "%DOKKOMPLEKT_LICENSE_PUBLIC_KEY_B64%"=="" (
   > resources\license_public_key.b64 echo %DOKKOMPLEKT_LICENSE_PUBLIC_KEY_B64%
-  echo [INFO] Публичный Ed25519-ключ лицензирования встроен в resources.
-) else if not exist resources\license_public_key.b64 (
-  if /I "%CI%"=="true" (
-    echo [WARN] CI-сборка без production public key: платные лицензии в этом CI-артефакте не активируются.
-  ) else (
-    echo [ОШИБКА] Для production EXE задайте DOKKOMPLEKT_LICENSE_PUBLIC_KEY_B64.
-    echo Публичный ключ безопасно хранить в EXE; приватный issuer key в EXE попадать не должен.
-    exit /b 1
-  )
+  echo [INFO] Публичный Ed25519-ключ лицензирования записан в resources.
 )
+if not exist resources\license_public_key.b64 (
+  echo [ОШИБКА] Production EXE без DOKKOMPLEKT_LICENSE_PUBLIC_KEY_B64 запрещён.
+  echo Публичный ключ безопасно хранить в EXE; приватный issuer key в EXE попадать не должен.
+  exit /b 1
+)
+python -c "from pathlib import Path; from product_access.production_boundary import validate_license_public_key_b64; p=Path(r'resources\license_public_key.b64'); ok,reason=validate_license_public_key_b64(p.read_text(encoding='utf-8').strip()); print('[INFO] '+reason if ok else '[ОШИБКА] '+reason); raise SystemExit(0 if ok else 1)"
+if errorlevel 1 (
+  echo [ОШИБКА] Production EXE не собирается: public key отсутствует или повреждён.
+  exit /b 1
+)
+
+echo [6/6] Собираю один EXE через PyInstaller...
 set ADD_TEMPLATES=
 if exist templates (
   set ADD_TEMPLATES=--add-data "templates;templates"
@@ -124,7 +128,7 @@ python -m PyInstaller ^
 if exist dist\MedicalDiaryAutofill.exe (
   echo.
   echo ГОТОВО: dist\MedicalDiaryAutofill.exe
-  echo Этот файл можно отдавать пользователям. Он запускается без Python/pip.
+  echo Production public key проверен; файл можно отдавать пользователям без установки Python/pip.
   if "%CI%"=="" pause
   exit /b 0
 ) else (
