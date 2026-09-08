@@ -15,7 +15,7 @@ from medical_docx_reader import (
     _is_primary_title_context,
 )
 from medical_admission_resolver import extract_admission_date_from_primary_text
-from medical_current_episode_dates import (
+from document_intelligence.current_episode_dates import (
     extract_current_admission_date_from_primary_docx,
     extract_current_discharge_date_from_primary_docx,
     extract_current_discharge_date_from_primary_text,
