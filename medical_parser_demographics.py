@@ -140,36 +140,53 @@ class MedicalParserDemographicsMixin:
         # marker and near the top of the primary document; reject doctor/signature
         # neighbourhoods so this fallback cannot silently choose a clinician.
         non_empty = [(i, line) for i, line in enumerate(lines) if line]
-        for pos, (index, line) in enumerate(non_empty[:40]):
+        demographic_markers = (
+            "дата рождения", "год рождения", "г.р", "возраст",
+            "зарегистрирован", "место жительства", "адрес проживания",
+            "адрес регистрации",
+        )
+        role_aliases = tuple(self.FIELD_ALIASES.get("doctor", ())) + tuple(self.FIELD_ALIASES.get("head", ())) + (
+            "Подпись врача", "Направил врач", "Фельдшер",
+        )
+        organization_markers = (
+            "учреждение", "больница", "медицинск", "центр", "министерство",
+            "департамент", "организация", "поликлиника", "диспансер",
+            "гбуз", "фгбу", "фку", "ооо", "оао", "пао", "зао",
+        )
+        demographic_positions = [
+            pos
+            for pos, (_idx, value) in enumerate(non_empty[:40])
+            if any(marker in normalize_match(value) for marker in demographic_markers)
+        ]
+        standalone_candidates: List[Tuple[int, int, str]] = []
+        for pos, (_index, line) in enumerate(non_empty[:40]):
             full_match = self._FIO_FULL_LINE_RE.fullmatch(line)
             if not full_match:
                 continue
-            nearby_items = non_empty[max(0, pos - 3): min(len(non_empty), pos + 4)]
-            nearby = normalize_match(" ".join(value for _idx, value in nearby_items))
-            has_demographics = any(
-                marker in nearby
-                for marker in (
-                    "дата рождения", "год рождения", "г.р", "возраст",
-                    "зарегистрирован", "место жительства", "адрес проживания",
-                    "адрес регистрации",
-                )
-            )
-            role_window = normalize_match(
-                " ".join(
-                    value
-                    for _idx, value in non_empty[max(0, pos - 2): min(len(non_empty), pos + 3)]
-                    if value != line
-                )
-            )
+            candidate = clean_value(full_match.group(1))
+            candidate_norm = normalize_match(candidate)
+            if any(marker in candidate_norm for marker in organization_markers):
+                continue
+
+            role_items = non_empty[max(0, pos - 2): min(len(non_empty), pos + 3)]
             doctor_context = any(
-                marker in role_window
-                for marker in (
-                    "лечащий врач", "врач-психиатр", "врач психиатр", "заведующ",
-                    "зав. отд", "подпись врача", "направил врач", "фельдшер",
-                )
+                line_starts_with_label(value, role_aliases)
+                for _idx, value in role_items
+                if value != line
             )
-            if has_demographics and not doctor_context:
-                return clean_value(full_match.group(1))
+            if doctor_context or not demographic_positions:
+                continue
+
+            distance = min(abs(pos - marker_pos) for marker_pos in demographic_positions)
+            if distance <= 3:
+                standalone_candidates.append((distance, pos, candidate))
+
+        if standalone_candidates:
+            # Prefer the syntactic name nearest to a demographic field. This
+            # prevents a preceding all-caps institution heading from winning over
+            # the actual patient name while still supporting label-less Word forms.
+            standalone_candidates.sort(key=lambda item: (item[0], item[1]))
+            return standalone_candidates[0][2]
         return ""
 
     def _full_fio_from_candidate(self, value: str) -> str:
