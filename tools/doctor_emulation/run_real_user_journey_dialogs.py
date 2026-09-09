@@ -26,7 +26,7 @@ def main() -> None:
 
     real_folder_dialog = CombinedMedicalDiaryApp.configure_patient_folder_naming_dialog
     real_creation_guard = CombinedMedicalDiaryApp._confirm_patient_case_before_creation
-    sim = DoctorSim()
+    sim = DoctorSim(answers={("askyesno", "Формат результата"): False})
     CombinedMedicalDiaryApp.configure_patient_folder_naming_dialog = real_folder_dialog
     CombinedMedicalDiaryApp._confirm_patient_case_before_creation = real_creation_guard
     try:
