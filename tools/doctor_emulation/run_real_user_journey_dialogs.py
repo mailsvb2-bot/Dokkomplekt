@@ -107,11 +107,11 @@ def main() -> None:
         expected_parent = "Орлова М.И. май 2026"
         outputs = [
             path
-            for path in sim.root_dir.rglob("*.docx")
-            if path.parent.name == expected_parent
-            and "Документ с анализами" in path.name
+            for path in sim.outputs()
+            if "Документ с анализами" in path.name
         ]
-        check(outputs, [str(path) for path in sim.root_dir.rglob("*.docx")])
+        check(outputs, [str(path) for path in sim.outputs()])
+        check(outputs[0].parent.name == expected_parent, outputs[0])
         text = extract_docx_text(outputs[0])
         check("Орлова Мария Ивановна" in text, text)
         check("F32.1" in text, text)
