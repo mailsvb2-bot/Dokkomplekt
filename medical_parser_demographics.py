@@ -109,12 +109,22 @@ class MedicalParserDemographicsMixin:
         lines = [normalize_text(line or "") for line in str(text or "").splitlines()]
         all_aliases = self._all_inline_aliases()
 
+        clinician_caption_re = re.compile(
+            r"(?i)(?:лечащ\w*|врач\w*|доктор\w*|фельдшер\w*|заведующ\w*|"
+            r"хирург\w*|терапевт\w*|психиатр\w*|ординатор\w*)"
+        )
         for index, line in enumerate(lines):
             match = self._FIO_STRUCTURED_LABEL_RE.match(line)
             if not match:
                 continue
-            chunks: List[str] = []
             inline_tail = clean_value(line[match.end():])
+            # A caption such as ``Ф.И.О. лечащего врача`` begins with the same
+            # generic FIO prefix as a patient caption. Reject clinician-qualified
+            # captions before collecting split name cells; otherwise this early
+            # structured path bypasses the standalone clinician-role safeguards.
+            if inline_tail and clinician_caption_re.search(normalize_match(inline_tail)):
+                continue
+            chunks: List[str] = []
             if inline_tail:
                 chunks.append(inline_tail)
                 fio = self._full_fio_from_candidate(" ".join(chunks))
@@ -153,6 +163,12 @@ class MedicalParserDemographicsMixin:
             "департамент", "организация", "поликлиника", "диспансер",
             "гбуз", "фгбу", "фку", "ооо", "оао", "пао", "зао",
         )
+        document_heading_markers = (
+            "направление", "госпитализац", "первичный осмотр", "осмотр врача",
+            "выписной эпикриз", "эпикриз", "история болезни", "медицинская карта",
+            "заключение", "протокол", "акт обследования", "дневник наблюдения",
+        )
+        heading_function_words = {"на", "по", "для", "от", "из", "при", "и", "в", "к", "с"}
         demographic_positions = [
             pos
             for pos, (_idx, value) in enumerate(non_empty[:40])
@@ -165,7 +181,13 @@ class MedicalParserDemographicsMixin:
                 continue
             candidate = clean_value(full_match.group(1))
             candidate_norm = normalize_match(candidate)
-            if any(marker in candidate_norm for marker in organization_markers):
+            candidate_words = set(candidate_norm.split())
+            if (
+                any(marker in candidate_norm for marker in organization_markers)
+                or any(marker in candidate_norm for marker in document_heading_markers)
+                or bool(candidate_words & heading_function_words)
+                or looks_like_label(candidate)
+            ):
                 continue
 
             role_items = non_empty[max(0, pos - 2): min(len(non_empty), pos + 3)]
