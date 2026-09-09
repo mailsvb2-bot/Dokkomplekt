@@ -14,6 +14,7 @@ from medical_docx_reader import (
 )
 from medical_models import PatientData
 from medical_parser_sanitize import sanitize_diagnosis
+from medical_field_line_pairs import line_starts_with_label
 from medical_text_utils import (
     DIAGNOSIS_STOP_MARKERS,
     clean_value,
@@ -60,6 +61,117 @@ class MedicalParserDemographicsMixin:
 
             if data.fio and data.birth and data.registered and not self._fio_value_looks_overgrown(data.fio):
                 break
+
+        # Real Word forms often split a single FIO across several table cells or
+        # paragraphs. The generic inline reader intentionally consumes only one
+        # neighbouring value, so it can leave just the surname here. Upgrade that
+        # incomplete value from the same local demographic block before the core
+        # sanitizer rejects it as an invalid patient identity.
+        if not self._fio_is_usable(data.fio):
+            recovered_fio = self._recover_structured_fio(text)
+            if recovered_fio:
+                data.fio = recovered_fio
+
+    _FIO_STRUCTURED_LABEL_RE = re.compile(
+        r"^\s*(?:ф\.?\s*и\.?\s*о\.?|фио|фамилия\s*,?\s*имя\s*,?\s*отчество|пациент(?:ка)?|больн(?:ой|ая))"
+        r"(?:\s+(?:пациент(?:а|ки)|больн(?:ого|ой)))?"
+        r"(?:\s*\([^\n)]{0,60}\))?\s*[:№N#.-]*\s*",
+        flags=re.IGNORECASE,
+    )
+    _FIO_NAME_TOKEN = r"(?:[А-ЯЁ][а-яё]+|[А-ЯЁ]{2,})(?:-(?:[А-ЯЁ][а-яё]+|[А-ЯЁ]{2,}))?"
+    _FIO_FULL_RE = re.compile(
+        rf"(?<![А-ЯЁа-яё-])({_FIO_NAME_TOKEN}\s+{_FIO_NAME_TOKEN}\s+{_FIO_NAME_TOKEN})(?![А-ЯЁа-яё-])"
+    )
+    _FIO_FULL_LINE_RE = re.compile(
+        rf"^\s*({_FIO_NAME_TOKEN}\s+{_FIO_NAME_TOKEN}\s+{_FIO_NAME_TOKEN})\s*[.,;:]?\s*$"
+    )
+
+    @staticmethod
+    def _fio_is_usable(value: str) -> bool:
+        cleaned = clean_value(value)
+        if not cleaned:
+            return False
+        words = re.findall(r"[А-ЯЁA-Z][а-яёa-z]+|[А-ЯЁA-Z]\.", cleaned)
+        if len(words) >= 2:
+            return True
+        return len(re.findall(r"[А-ЯЁA-Z]{2,}", cleaned)) >= 2
+
+    def _recover_structured_fio(self, text: str) -> str:
+        """Recover a full patient name split by real Word table/form layout.
+
+        `extract_docx_text()` deliberately flattens table cells and paragraphs to
+        separate lines.  In production referrals this can turn one visible row
+        into ``Ф.И.О. больного`` / ``Баннина`` / ``Елена Геннадьевна``.  The
+        generic inline reader returns only the first value line, so the surname
+        later fails FIO validation.  Reassemble only a tiny, label-bound window;
+        never guess a patient from an arbitrary doctor/signature name.
+        """
+        lines = [normalize_text(line or "") for line in str(text or "").splitlines()]
+        all_aliases = self._all_inline_aliases()
+
+        for index, line in enumerate(lines):
+            match = self._FIO_STRUCTURED_LABEL_RE.match(line)
+            if not match:
+                continue
+            chunks: List[str] = []
+            inline_tail = clean_value(line[match.end():])
+            if inline_tail:
+                chunks.append(inline_tail)
+                fio = self._full_fio_from_candidate(" ".join(chunks))
+                if fio:
+                    return fio
+
+            # Three lines are enough for surname / name / patronymic while
+            # remaining narrow enough not to cross into a clinical section.
+            for next_index in range(index + 1, min(len(lines), index + 4)):
+                candidate = clean_value(lines[next_index])
+                if not candidate:
+                    continue
+                if line_starts_with_label(candidate, all_aliases) or looks_like_label(candidate):
+                    break
+                chunks.append(candidate)
+                fio = self._full_fio_from_candidate(" ".join(chunks))
+                if fio:
+                    return fio
+
+        # Some hospital forms render the caption as a drawing and the value as a
+        # normal body paragraph.  The raw XML scanner can then expose only the
+        # standalone full-name line.  Accept it only near another demographic
+        # marker and near the top of the primary document; reject doctor/signature
+        # neighbourhoods so this fallback cannot silently choose a clinician.
+        non_empty = [(i, line) for i, line in enumerate(lines) if line]
+        for pos, (index, line) in enumerate(non_empty[:40]):
+            full_match = self._FIO_FULL_LINE_RE.fullmatch(line)
+            if not full_match:
+                continue
+            nearby_items = non_empty[max(0, pos - 3): min(len(non_empty), pos + 4)]
+            nearby = normalize_match(" ".join(value for _idx, value in nearby_items))
+            has_demographics = any(
+                marker in nearby
+                for marker in (
+                    "дата рождения", "год рождения", "г.р", "возраст",
+                    "зарегистрирован", "место жительства", "адрес проживания",
+                    "адрес регистрации",
+                )
+            )
+            preceding = normalize_match(" ".join(value for _idx, value in non_empty[max(0, pos - 2):pos]))
+            doctor_context = any(
+                marker in preceding
+                for marker in (
+                    "лечащий врач", "врач-психиатр", "врач психиатр", "заведующ",
+                    "зав. отд", "подпись врача", "направил врач", "фельдшер",
+                )
+            )
+            if has_demographics and not doctor_context:
+                return clean_value(full_match.group(1))
+        return ""
+
+    def _full_fio_from_candidate(self, value: str) -> str:
+        candidate = normalize_text(value or "")
+        match = self._FIO_FULL_RE.search(candidate)
+        if not match:
+            return ""
+        return clean_value(match.group(1))
 
     @staticmethod
     def _fio_value_looks_overgrown(value: str) -> bool:
