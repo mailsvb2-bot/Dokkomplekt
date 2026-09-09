@@ -42,8 +42,10 @@ class ActionsFolderNamingPreflightMixin:
         """
         from desktop_patient_folder import FOLDER_NAMING_SCHEMA_VERSION, normalize_folder_naming_settings
 
-        current = normalize_folder_naming_settings(self._settings.get("folder_naming", {}))
-        if current.get("doctor_confirmed") and current.get("schema_version") == FOLDER_NAMING_SCHEMA_VERSION:
+        raw = self._settings.get("folder_naming", {})
+        current = normalize_folder_naming_settings(raw)
+        stored_schema = str(raw.get("schema_version", "") or "") if isinstance(raw, dict) else ""
+        if current.get("doctor_confirmed") and stored_schema == FOLDER_NAMING_SCHEMA_VERSION:
             return True
         return bool(super()._ensure_patient_folder_naming_configured(force=force))
 
