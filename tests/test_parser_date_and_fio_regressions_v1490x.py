@@ -152,6 +152,17 @@ def test_standalone_full_fio_near_demographics_is_recovered_but_doctor_is_not():
     )
     assert doctor_only.fio == ""
 
+    doctor_role_after = MedicalTextParser().parse_text(
+        """
+10.10.2024 Первичный осмотр
+Дата рождения: 12.03.1984
+Можарова Елена Александровна
+Лечащий врач
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert doctor_role_after.fio == ""
+
 
 def test_real_docx_table_split_fio_satisfies_strict_folder_rule(tmp_path):
     from docx import Document
