@@ -176,4 +176,4 @@ def test_real_docx_table_split_fio_satisfies_strict_folder_rule(tmp_path):
         fio=data.fio,
         settings={"parts": ["surname_initials"], "date_format": "short"},
         strict=True,
-    ) == "Баннина Е.Г."
+    ) == "Баннина Е.Г"
