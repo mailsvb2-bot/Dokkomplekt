@@ -173,6 +173,18 @@ def test_standalone_full_fio_near_demographics_is_recovered_but_doctor_is_not():
         )
         assert role_data.fio == ""
 
+    structured_clinician = MedicalTextParser().parse_text(
+        """
+10.10.2024 Первичный осмотр
+Ф.И.О. лечащего врача:
+Можарова
+Елена Александровна
+Дата рождения: 12.03.1984
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert structured_clinician.fio == ""
+
 
 def test_standalone_fio_prefers_patient_over_institution_heading():
     data = MedicalTextParser().parse_text(
@@ -193,6 +205,25 @@ def test_standalone_fio_prefers_patient_over_institution_heading():
 """
     )
     assert uppercase_patient.fio == "БАННИНА ЕЛЕНА ГЕННАДЬЕВНА"
+
+    heading_only = MedicalTextParser().parse_text(
+        """
+НАПРАВЛЕНИЕ НА ГОСПИТАЛИЗАЦИЮ
+Дата рождения: 12.03.1984
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert heading_only.fio == ""
+
+    heading_before_patient = MedicalTextParser().parse_text(
+        """
+НАПРАВЛЕНИЕ НА ГОСПИТАЛИЗАЦИЮ
+Баннина Елена Геннадьевна
+Дата рождения: 12.03.1984
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert heading_before_patient.fio == "Баннина Елена Геннадьевна"
 
 
 def test_real_docx_table_split_fio_satisfies_strict_folder_rule(tmp_path):
