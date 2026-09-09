@@ -163,6 +163,37 @@ def test_standalone_full_fio_near_demographics_is_recovered_but_doctor_is_not():
     )
     assert doctor_role_after.fio == ""
 
+    for role_layout in (
+        "Врач:\nМожарова Елена Александровна",
+        "Можарова Елена Александровна\nХирург",
+        "Терапевт:\nМожарова Елена Александровна",
+    ):
+        role_data = MedicalTextParser().parse_text(
+            f"10.10.2024 Первичный осмотр\nДата рождения: 12.03.1984\n{role_layout}\nДиагноз: F20.00 Шизофрения"
+        )
+        assert role_data.fio == ""
+
+
+def test_standalone_fio_prefers_patient_over_institution_heading():
+    data = MedicalTextParser().parse_text(
+        """
+ГОСУДАРСТВЕННОЕ БЮДЖЕТНОЕ УЧРЕЖДЕНИЕ
+Баннина Елена Геннадьевна
+Дата рождения: 12.03.1984
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert data.fio == "Баннина Елена Геннадьевна"
+
+    uppercase_patient = MedicalTextParser().parse_text(
+        """
+БАННИНА ЕЛЕНА ГЕННАДЬЕВНА
+Дата рождения: 12.03.1984
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert uppercase_patient.fio == "БАННИНА ЕЛЕНА ГЕННАДЬЕВНА"
+
 
 def test_real_docx_table_split_fio_satisfies_strict_folder_rule(tmp_path):
     from docx import Document
