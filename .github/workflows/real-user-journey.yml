@@ -1,0 +1,36 @@
+name: Real User Journey GUI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-user-journey-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-creation-dialogs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DOKKOMPLEKT_TEST_DISABLE_PRODUCT_ACCESS: '1'
+      MEDICAL_AUTOFILL_PORTABLE_SOURCE_DATA: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install GUI test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements_dev.txt
+          sudo apt-get update
+          sudo apt-get install -y xvfb python3-tk
+      - name: Prove folder memory contract
+        run: python -m pytest -q tests/test_folder_naming_memory_v1527.py
+      - name: Run real creation dialogs
+        run: xvfb-run -a python -u tools/doctor_emulation/run_real_user_journey_dialogs.py
