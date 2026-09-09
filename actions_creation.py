@@ -32,6 +32,21 @@ class ActionsFolderNamingPreflightMixin:
             self._folder_naming_preflight_confirmed = True
         return confirmed
 
+    def _ensure_patient_folder_naming_configured(self, *, force: bool = False) -> bool:
+        """Preserve an already confirmed naming rule during desktop intake.
+
+        Older intake code passes ``force=True`` to recover from a historical
+        folder-naming regression.  That flag must still re-open setup for old or
+        unconfirmed schemas, but it must not make a doctor reconfigure the same
+        valid rule for every patient.
+        """
+        from desktop_patient_folder import FOLDER_NAMING_SCHEMA_VERSION, normalize_folder_naming_settings
+
+        current = normalize_folder_naming_settings(self._settings.get("folder_naming", {}))
+        if current.get("doctor_confirmed") and current.get("schema_version") == FOLDER_NAMING_SCHEMA_VERSION:
+            return True
+        return bool(super()._ensure_patient_folder_naming_configured(force=force))
+
     def _build_patient_case_review_for_selection(
         self,
         selected_medical: list[str],
