@@ -154,9 +154,15 @@ class MedicalParserDemographicsMixin:
                     "адрес регистрации",
                 )
             )
-            preceding = normalize_match(" ".join(value for _idx, value in non_empty[max(0, pos - 2):pos]))
+            role_window = normalize_match(
+                " ".join(
+                    value
+                    for _idx, value in non_empty[max(0, pos - 2): min(len(non_empty), pos + 3)]
+                    if value != line
+                )
+            )
             doctor_context = any(
-                marker in preceding
+                marker in role_window
                 for marker in (
                     "лечащий врач", "врач-психиатр", "врач психиатр", "заведующ",
                     "зав. отд", "подпись врача", "направил врач", "фельдшер",
