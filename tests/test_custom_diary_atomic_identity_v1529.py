@@ -21,7 +21,7 @@ def _case(*, discharge: str = "03.01.2026") -> PatientCase:
         },
         confidence=1.0,
         source_document="test",
-     )
+    )
     return case
 
 
@@ -109,8 +109,13 @@ def test_equivalent_selected_diary_buttons_collapse_to_one_output(tmp_path: Path
     assert any("создан один общий дневник" in warning for warning in result.warnings)
 
 
-def test_report_failure_removes_already_created_diary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    texts = _texts(tmp_path)
+def test_report_failure_never_publishes_staged_custom_diary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    template = _template(tmp_path, "report-diary.docx")
+    pack = DocumentPack(
+        pack_id="report.failure",
+        name="Report failure",
+        documents=(DocumentTemplateSpec(id="diary", button_label="Дневники", template=str(template), category="diaries"),),
+    )
     output_dir = tmp_path / "out-report-failure"
 
     def fail_report_path(*_args, **_kwargs):
@@ -118,17 +123,22 @@ def test_report_failure_removes_already_created_diary(tmp_path: Path, monkeypatc
 
     monkeypatch.setattr("diary_batch.technical_report_path", fail_report_path)
 
-    with pytest.raises(OSError, match="report boom"):
-        fill_diary_batch(
-            status_files=(texts,),
-            diary_files=(),
-            output_dir=output_dir,
-            patient_name="Иванов Иван Иванович",
-            admission_value="01.01.2026",
-            discharge_value="03.01.2026",
-            diary_day_offsets=(1, 2),
-            write_report=True,
-         )
+    result = render_diary_documents_from_pack(
+        pack=pack,
+        case=_case(),
+        document_ids=("diary",),
+        output_dir=output_dir,
+        base_dir=None,
+        status_files=(_texts(tmp_path),),
+        patient_name="Иванов Иван Иванович",
+        admission_value="01.01.2026",
+        discharge_value="03.01.2026",
+        diary_day_offsets=(1, 2),
+        write_report=True,
+    )
 
+    assert not result.created_files
+    assert result.skipped
+    assert "report boom" in result.skipped[0]
     assert output_dir.exists()
-    assert not list(output_dir.glob("*.docx"))
+    assert not list(output_dir.iterdir())

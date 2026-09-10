@@ -84,7 +84,6 @@ def render_diary_documents_from_pack(
     skipped: list[str] = []
     warnings: list[str] = []
     matched_ids: set[str] = set()
-    published_auxiliary: list[Path] = []
     rendered_signatures: dict[tuple[object, ...], str] = {}
     doctor_schedule = _doctor_confirmed_schedule_from_offsets(
         frequency_mode=frequency_mode,
@@ -148,7 +147,6 @@ def render_diary_documents_from_pack(
             final_output_dir = Path(output_dir).expanduser()
             final_output_dir.mkdir(parents=True, exist_ok=True)
             published_this_call: list[Path] = []
-            published_aux_this_call: list[Path] = []
             try:
                 with TemporaryDirectory(prefix=".dokkomplekt-diary-", dir=final_output_dir) as staging_dir:
                     result = fill_diary_batch(
@@ -196,21 +194,14 @@ def render_diary_documents_from_pack(
                         destination = available_path(final_output_dir / source.name)
                         shutil.move(str(source), str(destination))
                         published_this_call.append(destination)
-                    report_path = getattr(result, "report_path", None)
-                    if report_path and Path(report_path).exists():
-                        report_source = Path(report_path)
-                        report_destination = available_path(final_output_dir / report_source.name)
-                        shutil.move(str(report_source), str(report_destination))
-                        published_aux_this_call.append(report_destination)
             except Exception:
-                for published_path in (*published_this_call, *published_aux_this_call):
+                for published_path in published_this_call:
                     try:
                         published_path.unlink(missing_ok=True)
                     except OSError as cleanup_exc:
                         record_soft_exception("universal_diary_generation.rollback_current_call", cleanup_exc, detail=str(published_path))
                 raise
             created.extend(published_this_call)
-            published_auxiliary.extend(published_aux_this_call)
             rendered_signatures[render_signature] = document.button_label
         except Exception as exc:
             skipped.append(f"{document.button_label}: {exc}")
@@ -220,7 +211,7 @@ def render_diary_documents_from_pack(
 
     if skipped:
         # Do not let the creation transaction publish a deceptively partial set.
-        for path in (*created, *published_auxiliary):
+        for path in created:
             try:
                 Path(path).unlink()
             except OSError as exc:
@@ -234,7 +225,7 @@ def _doctor_confirmed_schedule_from_offsets(
     *,
     frequency_mode: str,
     day_offsets: Sequence[int],
-    hour_offsets: Sequence[inut,
+    hour_offsets: Sequence[int],
     minute_offsets: Sequence[int],
 ) -> DiaryScheduleSpec | None:
     days = _positive_int_tuple(day_offsets, allow_zero=True)
