@@ -111,7 +111,7 @@ def render_diary_documents_from_pack(
                 effective_minute_offsets = tuple(max(1, int(item)) * 60 for item in effective.hour_offsets)
             result = fill_diary_batch(
                 status_files=effective_status_files,
-                diary_files=effective_date_files,
+                diary_files=tuple(Path(item).expanduser() for item in date_files if str(item).strip()),
                 output_dir=output_dir,
                 patient_name=patient_name or case.get("patient.fio") or "Пациент",
                 admission_value=admission_value or case.get("admission.date"),
