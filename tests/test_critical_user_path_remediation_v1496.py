@@ -170,7 +170,6 @@ def test_hourly_user_flow_gets_final_discharge_diary(tmp_path: Path) -> None:
 
 
 def test_custom_diary_set_rolls_back_when_any_selected_template_fails(tmp_path: Path, monkeypatch) -> None:
-    from document_intelligence import custom_diary_template_renderer
     import universal_diary_generation
 
     valid_template = tmp_path / "valid.docx"
@@ -187,12 +186,11 @@ def test_custom_diary_set_rolls_back_when_any_selected_template_fails(tmp_path: 
     )
     created = tmp_path / "created.docx"
 
-    def fake_render(**_kwargs):
+    def fake_fill_diary_batch(**_kwargs):
         created.write_bytes(b"created")
-        return SimpleNamespace(path=created)
+        return SimpleNamespace(created_files=[created])
 
-    monkeypatch.setattr(custom_diary_template_renderer, "render_custom_diary_template", fake_render)
-    monkeypatch.setattr(universal_diary_generation, "read_statuses_from_files", lambda _paths: ["status"])
+    monkeypatch.setattr(universal_diary_generation, "fill_diary_batch", fake_fill_diary_batch)
     monkeypatch.setattr(universal_diary_generation, "_effective_status_files", lambda _files, _template: (status_doc,))
 
     result = universal_diary_generation.render_diary_documents_from_pack(
