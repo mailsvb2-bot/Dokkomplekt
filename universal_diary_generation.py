@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import shutil
+from tempfile import TemporaryDirectory
 from typing import Sequence
 
 from diagnostic_logging import record_soft_exception
-from diary_batch import fill_diary_batch
+from diary_batch import _day_offsets_from_date_templates, fill_diary_batch
+from diary_dates import parse_full_datetime, parse_optional_discharge_date
+from diary_paths import available_path
 from diary_text_parser import extract_statuses_from_docx
 from diary_schedule import DiaryScheduleSpec
 from universal_fields import PatientCase
@@ -80,6 +84,8 @@ def render_diary_documents_from_pack(
     skipped: list[str] = []
     warnings: list[str] = []
     matched_ids: set[str] = set()
+    published_auxiliary: list[Path] = []
+    rendered_signatures: dict[tuple[object, ...], str] = {}
     doctor_schedule = _doctor_confirmed_schedule_from_offsets(
         frequency_mode=frequency_mode,
         day_offsets=diary_day_offsets,
@@ -109,47 +115,103 @@ def render_diary_documents_from_pack(
                 # the hourly rhythm to intraday minutes so fill_diary_batch can
                 # combine that rhythm with the dates parsed from the selected file.
                 effective_minute_offsets = tuple(max(1, int(item)) * 60 for item in effective.hour_offsets)
-            result = fill_diary_batch(
-                status_files=effective_status_files,
-                diary_files=tuple(Path(item).expanduser() for item in date_files if str(item).strip()),
-                output_dir=output_dir,
-                patient_name=patient_name or case.get("patient.fio") or "Пациент",
-                admission_value=admission_value or case.get("admission.date"),
-                gender_source_name=gender_source_name or case.get("patient.fio") or patient_name,
-                discharge_value=discharge_value or case.get("discharge.date"),
-                repeat_statuses=repeat_statuses,
-                reset_each_file=reset_each_file,
-                keep_signature=keep_signature,
-                fill_months=fill_months,
-                force_final_diary=force_final_diary,
-                remove_holiday_rows=remove_holiday_rows,
-                open_result_folder=False,
-                write_report=write_report,
-                diary_day_offsets=effective.day_offsets,
-                diary_hour_offsets=effective.hour_offsets if effective.mode == "hourly" else (),
-                diary_minute_offsets=effective_minute_offsets,
-                diary_frequency_mode=effective.mode,
-                text_output=True,
-                sick_leave_dynamic_epicrisis=sick_leave_dynamic_epicrisis,
-                treatment_correction=treatment_correction,
-                birth_date=birth_date,
-                complaints=complaints,
-                treatment=treatment,
-                profile_status=profile_status,
-                sick_leave_from=sick_leave_from,
+            render_signature: tuple[object, ...] = (
+                tuple(str(path.resolve()) for path in effective_status_files),
+                tuple(str(path.resolve()) for path in effective_date_files),
+                effective.mode,
+                tuple(effective.day_offsets),
+                tuple(effective.hour_offsets if effective.mode == "hourly" else ()),
+                tuple(effective_minute_offsets),
             )
-            if not result.created_files:
-                raise ValueError("текстовый дневник не был создан")
-            if effective.mode == "hourly":
-                from document_intelligence.diary_hourly_finalization import ensure_hourly_final_diary
-
-                ensure_hourly_final_diary(
-                    result,
-                    discharge_value=discharge_value or case.get("discharge.date"),
-                    patient_name=case.get("patient.fio") or patient_name,
-                    force_final_diary=force_final_diary,
+            existing_button = rendered_signatures.get(render_signature)
+            if existing_button is not None:
+                warnings.append(
+                    f"{document.button_label}: совпадает по текстам, датам и ритму с «{existing_button}»; создан один общий дневник"
                 )
-            created.extend(result.created_files)
+                continue
+            effective_admission = admission_value or case.get("admission.date")
+            effective_discharge = discharge_value or case.get("discharge.date")
+            if effective_date_files:
+                try:
+                    admission_date = parse_full_datetime(effective_admission).date()
+                except ValueError:
+                    admission_date = None
+                discharge_date = parse_optional_discharge_date(effective_discharge)
+                selected_offsets = _day_offsets_from_date_templates(
+                    effective_date_files,
+                    admission_date_value=admission_date,
+                    discharge_date_value=discharge_date,
+                )
+                if not selected_offsets:
+                    raise ValueError("в выбранном файле дат дневников не найдено подходящих дат в периоде госпитализации")
+
+            final_output_dir = Path(output_dir).expanduser()
+            final_output_dir.mkdir(parents=True, exist_ok=True)
+            published_this_call: list[Path] = []
+            published_aux_this_call: list[Path] = []
+            try:
+                with TemporaryDirectory(prefix=".dokkomplekt-diary-", dir=final_output_dir) as staging_dir:
+                    result = fill_diary_batch(
+                        status_files=effective_status_files,
+                        diary_files=tuple(Path(item).expanduser() for item in date_files if str(item).strip()),
+                        output_dir=staging_dir,
+                        patient_name=patient_name or case.get("patient.fio") or "Пациент",
+                        admission_value=effective_admission,
+                        gender_source_name=gender_source_name or case.get("patient.fio") or patient_name,
+                        discharge_value=effective_discharge,
+                        repeat_statuses=repeat_statuses,
+                        reset_each_file=reset_each_file,
+                        keep_signature=keep_signature,
+                        fill_months=fill_months,
+                        force_final_diary=force_final_diary,
+                        remove_holiday_rows=remove_holiday_rows,
+                        open_result_folder=False,
+                        write_report=write_report,
+                        diary_day_offsets=effective.day_offsets,
+                        diary_hour_offsets=effective.hour_offsets if effective.mode == "hourly" else (),
+                        diary_minute_offsets=effective_minute_offsets,
+                        diary_frequency_mode=effective.mode,
+                        text_output=True,
+                        sick_leave_dynamic_epicrisis=sick_leave_dynamic_epicrisis,
+                        treatment_correction=treatment_correction,
+                        birth_date=birth_date,
+                        complaints=complaints,
+                        treatment=treatment,
+                        profile_status=profile_status,
+                        sick_leave_from=sick_leave_from,
+                    )
+                    if not result.created_files:
+                        raise ValueError("текстовый дневник не был создан")
+                    if effective.mode == "hourly":
+                        from document_intelligence.diary_hourly_finalization import ensure_hourly_final_diary
+
+                        ensure_hourly_final_diary(
+                            result,
+                            discharge_value=effective_discharge,
+                            patient_name=case.get("patient.fio") or patient_name,
+                            force_final_diary=force_final_diary,
+                        )
+                    for staged_path in result.created_files:
+                        source = Path(staged_path)
+                        destination = available_path(final_output_dir / source.name)
+                        shutil.move(str(source), str(destination))
+                        published_this_call.append(destination)
+                    report_path = getattr(result, "report_path", None)
+                    if report_path and Path(report_path).exists():
+                        report_source = Path(report_path)
+                        report_destination = available_path(final_output_dir / report_source.name)
+                        shutil.move(str(report_source), str(report_destination))
+                        published_aux_this_call.append(report_destination)
+            except Exception:
+                for published_path in (*published_this_call, *published_aux_this_call):
+                    try:
+                        published_path.unlink(missing_ok=True)
+                    except OSError as cleanup_exc:
+                        record_soft_exception("universal_diary_generation.rollback_current_call", cleanup_exc, detail=str(published_path))
+                raise
+            created.extend(published_this_call)
+            published_auxiliary.extend(published_aux_this_call)
+            rendered_signatures[render_signature] = document.button_label
         except Exception as exc:
             skipped.append(f"{document.button_label}: {exc}")
 
@@ -158,7 +220,7 @@ def render_diary_documents_from_pack(
 
     if skipped:
         # Do not let the creation transaction publish a deceptively partial set.
-        for path in created:
+        for path in (*created, *published_auxiliary):
             try:
                 Path(path).unlink()
             except OSError as exc:
@@ -172,7 +234,7 @@ def _doctor_confirmed_schedule_from_offsets(
     *,
     frequency_mode: str,
     day_offsets: Sequence[int],
-    hour_offsets: Sequence[int],
+    hour_offsets: Sequence[inut,
     minute_offsets: Sequence[int],
 ) -> DiaryScheduleSpec | None:
     days = _positive_int_tuple(day_offsets, allow_zero=True)
