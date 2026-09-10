@@ -335,6 +335,7 @@ class ActionsUniversalFlowMixin:
             base_dir=self._universal_profile_path().parent,
             status_files=self.status_files,
             patient_name=patient_name,
+            date_files=list(self.diary_files),
             admission_value=admission_value,
             discharge_value=discharge_value,
             gender_source_name=case.get("patient.fio") or patient_name,

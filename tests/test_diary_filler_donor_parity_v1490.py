@@ -82,3 +82,89 @@ def test_default_diary_calendar_preserves_program_offsets_without_workday_shift(
     assert len(dates) == 8
     assert dates == tuple(dict.fromkeys(dates))
     assert dates[:4] == (date(2026, 1, 1), date(2026, 1, 2), date(2026, 1, 3), date(2026, 1, 8))
+
+
+def test_custom_diary_button_uses_block02_dates_and_texts_and_outputs_text_docx(tmp_path: Path) -> None:
+    from universal_diary_generation import render_diary_documents_from_pack
+    from universal_fields import PatientCase
+    from universal_profiles import DocumentPack, DocumentTemplateSpec
+
+    button_template = tmp_path / "doctor_diary_button.docx"
+    template_doc = Document()
+    table = template_doc.add_table(rows=64, cols=4)
+    for index, header in enumerate(("Число", "Месяц", "День госпитализации", "Дневник наблюдения")):
+        table.rows[0].cells[index].text = header
+    table.rows[1].cells[3].text = "EMBEDDED_TABLE_TEXT_MUST_NOT_APPEAR"
+    template_doc.save(button_template)
+
+    dates_file = tmp_path / "Даты.docx"
+    dates_doc = Document()
+    dates_doc.add_paragraph("07.11.2025")
+    dates_doc.add_paragraph("08.11.2025")
+    dates_doc.save(dates_file)
+
+    texts_file = tmp_path / "Тексты.docx"
+    texts_doc = Document()
+    texts_doc.add_paragraph("01.01.2026 Состояние стабильное, контактен, назначения выполняет без замечаний.")
+    texts_doc.save(texts_file)
+
+    case = PatientCase()
+    case.update_from_pairs(
+        {
+            "patient.fio": "Агафонов Артём Алексеевич",
+            "admission.date": "31.10.2025",
+            "discharge.date": "08.11.2025",
+        },
+        confidence=1.0,
+        source_document="test",
+    )
+    pack = DocumentPack(
+        pack_id="text.diary",
+        name="Text diary",
+        documents=(
+            DocumentTemplateSpec(
+                id="doctor_diary",
+                button_label="Дневники",
+                template=str(button_template),
+                category="diaries",
+                role_id="daily_diary",
+            ),
+        ),
+    )
+
+    result = render_diary_documents_from_pack(
+        pack=pack,
+        case=case,
+        document_ids=("doctor_diary",),
+        output_dir=tmp_path / "out",
+        base_dir=None,
+        status_files=(texts_file,),
+        date_files=(dates_file,),
+        patient_name="Агафонов Артём Алексеевич",
+        admission_value="31.10.2025",
+        discharge_value="08.11.2025",
+        diary_day_offsets=(1, 2, 3, 4),
+        force_final_diary=True,
+    )
+
+    assert not result.skipped
+    assert len(result.created_files) == 1
+    rendered = Document(str(result.created_files[0]))
+    assert rendered.tables == []
+    text = "\n".join(paragraph.text for paragraph in rendered.paragraphs)
+    assert "07.11.25" in text
+    assert "Состояние стабильное" in text
+    assert "08.11.25 Состояние улучшилось" in text
+    assert "01.11.25" not in text
+    assert "EMBEDDED_TABLE_TEXT_MUST_NOT_APPEAR" not in text
+
+
+def test_custom_diary_action_forwards_selected_block02_date_files() -> None:
+    import inspect
+
+    from actions_universal_flow import ActionsUniversalFlowMixin
+    from universal_diary_generation import CUSTOM_DIARY_OUTPUT_IS_TEXT_ONLY
+
+    source = inspect.getsource(ActionsUniversalFlowMixin._create_custom_diary_documents_impl)
+    assert "date_files=list(self.diary_files)" in source
+    assert CUSTOM_DIARY_OUTPUT_IS_TEXT_ONLY is True
