@@ -102,9 +102,16 @@ def render_diary_documents_from_pack(
             skipped.append(f"{document.button_label}: не выбраны тексты дневников и в этом шаблоне не найдено текстов наблюдения")
             continue
         try:
+            effective_date_files = tuple(Path(item).expanduser() for item in date_files if str(item).strip())
+            effective_minute_offsets = effective.minute_offsets if effective.mode == "hourly" else ()
+            if effective.mode == "hourly" and effective_date_files and not effective_minute_offsets and effective.hour_offsets:
+                # A selected block-02 Dates file constrains the calendar. Convert
+                # the hourly rhythm to intraday minutes so fill_diary_batch can
+                # combine that rhythm with the dates parsed from the selected file.
+                effective_minute_offsets = tuple(max(1, int(item)) * 60 for item in effective.hour_offsets)
             result = fill_diary_batch(
                 status_files=effective_status_files,
-                diary_files=tuple(Path(item).expanduser() for item in date_files if str(item).strip()),
+                diary_files=effective_date_files,
                 output_dir=output_dir,
                 patient_name=patient_name or case.get("patient.fio") or "Пациент",
                 admission_value=admission_value or case.get("admission.date"),
@@ -120,7 +127,7 @@ def render_diary_documents_from_pack(
                 write_report=write_report,
                 diary_day_offsets=effective.day_offsets,
                 diary_hour_offsets=effective.hour_offsets if effective.mode == "hourly" else (),
-                diary_minute_offsets=effective.minute_offsets if effective.mode == "hourly" else (),
+                diary_minute_offsets=effective_minute_offsets,
                 diary_frequency_mode=effective.mode,
                 text_output=True,
                 sick_leave_dynamic_epicrisis=sick_leave_dynamic_epicrisis,
@@ -133,6 +140,15 @@ def render_diary_documents_from_pack(
             )
             if not result.created_files:
                 raise ValueError("текстовый дневник не был создан")
+            if effective.mode == "hourly":
+                from document_intelligence.diary_hourly_finalization import ensure_hourly_final_diary
+
+                ensure_hourly_final_diary(
+                    result,
+                    discharge_value=discharge_value or case.get("discharge.date"),
+                    patient_name=case.get("patient.fio") or patient_name,
+                    force_final_diary=force_final_diary,
+                )
             created.extend(result.created_files)
         except Exception as exc:
             skipped.append(f"{document.button_label}: {exc}")
