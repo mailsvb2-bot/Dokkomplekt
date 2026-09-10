@@ -24,6 +24,29 @@ class MedicalTextParser(
     MedicalParserWorkMixin,
     MedicalParserBlocksMixin,
 ):
+    def parse_text(self, text: str):
+        # Normalize invisible Word formatting/noncharacter separators before the
+        # ordinary parser sees them. Word shows these as spacing, but Python's
+        # regex engine does not reliably treat them as whitespace.
+        from medical_docx_fio_recovery import normalize_word_parser_text
+
+        return super().parse_text(normalize_word_parser_text(text))
+
+    def parse_docx(self, path):
+        data = super().parse_docx(path)
+        from medical_docx_fio_recovery import reconcile_patient_fio_from_docx
+
+        reconciled = reconcile_patient_fio_from_docx(
+            path,
+            parsed_fio=data.fio,
+            all_aliases=self._all_inline_aliases(),
+        )
+        normalized = self._sanitize_fio_value(reconciled) if reconciled else ""
+        if normalized != data.fio:
+            data.fio = normalized
+            self._refresh_warnings(data)
+        return data
+
     FIELD_ALIASES: Dict[str, Sequence[str]] = {
         "case_number": ("История болезни №", "История болезни N", "ИБ №", "Nr historii choroby", "Numer historii choroby", "Historia choroby nr", "Nr dokumentacji", "Numer dokumentacji", "Nr karty"),
         "fio": ("Ф.И.О.", "Ф.И.О", "ФИО", "ФИО пациента", "Ф.И.О. пациента", "Ф.И.О пациента", "Фамилия Имя Отчество", "Пациент", "Пациентка", "Больной", "Больная", "Pacjent", "Pacjentka", "Imię i nazwisko", "Imie i nazwisko", "Nazwisko i imię", "Nazwisko i imie"),
