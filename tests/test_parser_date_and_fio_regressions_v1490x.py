@@ -98,3 +98,155 @@ def test_hourly_text_diary_route_restored():
         text = extract_docx_text(result.created_files[0])
         assert "10.06.26 15:00" in text
         assert "10.06.26 16:00" in text
+
+
+def test_fio_recovered_when_word_splits_patient_name_across_lines():
+    data = MedicalTextParser().parse_text(
+        """
+10.10.2024 Направление на госпитализацию
+Ф.И.О. больного:
+Баннина
+Елена Геннадьевна
+Дата рождения: 12.03.1984
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert data.fio == "Баннина Елена Геннадьевна"
+
+
+def test_fio_recovered_from_official_caption_with_commas_and_parenthetical():
+    data = MedicalTextParser().parse_text(
+        """
+10.10.2024 Направление на госпитализацию
+Фамилия, имя, отчество (при наличии)
+Баннина
+Елена
+Геннадьевна
+Год рождения: 1984
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert data.fio == "Баннина Елена Геннадьевна"
+
+
+def test_standalone_full_fio_near_demographics_is_recovered_but_doctor_is_not():
+    patient = MedicalTextParser().parse_text(
+        """
+10.10.2024 Направление на госпитализацию
+Баннина Елена Геннадьевна
+Дата рождения: 12.03.1984
+Зарегистрирована: Нижний Новгород
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert patient.fio == "Баннина Елена Геннадьевна"
+
+    doctor_only = MedicalTextParser().parse_text(
+        """
+10.10.2024 Первичный осмотр
+Лечащий врач:
+Можарова Елена Александровна
+Дата рождения: 12.03.1984
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert doctor_only.fio == ""
+
+    doctor_role_after = MedicalTextParser().parse_text(
+        """
+10.10.2024 Первичный осмотр
+Дата рождения: 12.03.1984
+Можарова Елена Александровна
+Лечащий врач
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert doctor_role_after.fio == ""
+
+    for role_layout in (
+        "Врач:\nМожарова Елена Александровна",
+        "Можарова Елена Александровна\nХирург",
+        "Терапевт:\nМожарова Елена Александровна",
+    ):
+        role_data = MedicalTextParser().parse_text(
+            f"10.10.2024 Первичный осмотр\nДата рождения: 12.03.1984\n{role_layout}\nДиагноз: F20.00 Шизофрения"
+        )
+        assert role_data.fio == ""
+
+    structured_clinician = MedicalTextParser().parse_text(
+        """
+10.10.2024 Первичный осмотр
+Ф.И.О. лечащего врача:
+Можарова
+Елена Александровна
+Дата рождения: 12.03.1984
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert structured_clinician.fio == ""
+
+
+def test_standalone_fio_prefers_patient_over_institution_heading():
+    data = MedicalTextParser().parse_text(
+        """
+ГОСУДАРСТВЕННОЕ БЮДЖЕТНОЕ УЧРЕЖДЕНИЕ
+Баннина Елена Геннадьевна
+Дата рождения: 12.03.1984
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert data.fio == "Баннина Елена Геннадьевна"
+
+    uppercase_patient = MedicalTextParser().parse_text(
+        """
+БАННИНА ЕЛЕНА ГЕННАДЬЕВНА
+Дата рождения: 12.03.1984
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert uppercase_patient.fio == "БАННИНА ЕЛЕНА ГЕННАДЬЕВНА"
+
+    heading_only = MedicalTextParser().parse_text(
+        """
+НАПРАВЛЕНИЕ НА ГОСПИТАЛИЗАЦИЮ
+Дата рождения: 12.03.1984
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert heading_only.fio == ""
+
+    heading_before_patient = MedicalTextParser().parse_text(
+        """
+НАПРАВЛЕНИЕ НА ГОСПИТАЛИЗАЦИЮ
+Баннина Елена Геннадьевна
+Дата рождения: 12.03.1984
+Диагноз: F20.00 Шизофрения
+"""
+    )
+    assert heading_before_patient.fio == "Баннина Елена Геннадьевна"
+
+
+def test_real_docx_table_split_fio_satisfies_strict_folder_rule(tmp_path):
+    from docx import Document
+    from desktop_patient_folder import build_patient_folder_name
+
+    primary = tmp_path / "Баннина Е.Г. Направление 10 октября 2024.docx"
+    doc = Document()
+    doc.add_paragraph("10.10.2024 Направление на госпитализацию")
+    table = doc.add_table(rows=3, cols=3)
+    table.cell(0, 0).text = "Ф.И.О. больного"
+    table.cell(0, 1).text = "Баннина"
+    table.cell(0, 2).text = "Елена Геннадьевна"
+    table.cell(1, 0).text = "Дата рождения"
+    table.cell(1, 1).text = "12.03.1984"
+    table.cell(2, 0).text = "Диагноз"
+    table.cell(2, 1).text = "F20.00 Шизофрения"
+    doc.save(primary)
+
+    data = MedicalTextParser().parse_docx(primary)
+    assert data.fio == "Баннина Елена Геннадьевна"
+    assert build_patient_folder_name(
+        fio=data.fio,
+        settings={"parts": ["surname_initials"], "date_format": "short"},
+        strict=True,
+    ) == "Баннина Е.Г"
