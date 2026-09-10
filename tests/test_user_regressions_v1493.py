@@ -170,7 +170,9 @@ def test_diary_public_layers_expose_only_semantic_calendar_route():
 
     assert "fill_diary_file(" not in batch_source
     assert "shutil.copy2" not in batch_source
-    assert "diary_files=[]" in custom_source
+    assert "diary_files=tuple(Path(item).expanduser() for item in date_files" in custom_source
+    assert "CUSTOM_DIARY_OUTPUT_IS_TEXT_ONLY = True" in custom_source
+    assert "render_custom_diary_template" not in custom_source
     assert "text_output=True" in custom_source
     assert "CUSTOM_DIARY_TABLE_FILLING_IS_DISABLED = True" in custom_source
     assert "DIARY_WIZARD_HAS_NO_LEGACY_TABLE_MODE = True" in wizard_source
