@@ -1,0 +1,1126 @@
+"""Universal DOCX template engine for configurable medical document packs.
+
+This module is the next layer after ``universal_scanner``.  The scanner answers
+"what did the source document mean?"; the template engine answers "which custom
+DOCX templates can be created from that meaning, what fields do they require,
+and how can a doctor move a pack between computers?".
+
+The implementation is intentionally deterministic and local-only.  It renders
+explicit ``{{field.id}}`` placeholders and refuses to silently ignore missing
+required medical fields.
+"""
+
+from __future__ import annotations
+
+from diagnostic_logging import record_soft_exception
+from dataclasses import asdict, dataclass, replace
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import shutil
+from typing import Iterable, Mapping, Sequence
+
+from docx import Document
+from medical_gender import remove_forbidden_hospitalization_phrase_from_document
+
+from universal_fields import PatientCase, FieldRegistry, default_field_registry, normalize_field_id, normalize_field_id_for_context
+from universal_profiles import (
+    PACK_MANIFEST_NAME,
+    TEMPLATE_DIR_NAME,
+    DocumentPack,
+    DocumentTemplateSpec,
+    available_template_copy_path,
+    resolve_pack_template_path,
+    save_document_pack,
+)
+
+PLACEHOLDER_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
+
+@dataclass(frozen=True)
+class TemplatePlaceholder:
+    """One ``{{field.id}}`` placeholder discovered in a DOCX template."""
+
+    field_id: str
+    block_hint: str
+    raw: str
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class TemplateValidationResult:
+    """Static validation for one custom DOCX template."""
+
+    template_path: str
+    placeholders: tuple[TemplatePlaceholder, ...]
+    unknown_fields: tuple[str, ...] = ()
+    missing_required_placeholders: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    visible_fields: tuple[str, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        # Doctors may use either technical placeholders or ordinary visible Word
+        # blanks such as ``ФИО: ______`` / an empty neighbouring table cell.
+        return bool(self.placeholders or self.visible_fields) and not self.unknown_fields and not self.missing_required_placeholders
+
+    def field_ids(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys([*(item.field_id for item in self.placeholders), *self.visible_fields]))
+
+    def to_dict(self) -> dict:
+        return {
+            "template_path": self.template_path,
+            "placeholders": [item.to_dict() for item in self.placeholders],
+            "unknown_fields": list(self.unknown_fields),
+            "missing_required_placeholders": list(self.missing_required_placeholders),
+            "warnings": list(self.warnings),
+            "visible_fields": list(self.visible_fields),
+            "ok": self.ok,
+        }
+
+
+@dataclass(frozen=True)
+class PackValidationResult:
+    """Validation summary for an entire configurable document pack."""
+
+    pack_id: str
+    errors: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    template_results: tuple[TemplateValidationResult, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors and all(item.ok for item in self.template_results)
+
+    def human_report(self) -> str:
+        lines = [f"Проверка профиля: {self.pack_id}", f"Статус: {'OK' if self.ok else 'есть ошибки'}"]
+        if self.errors:
+            lines.append("")
+            lines.append("Ошибки:")
+            lines.extend("• " + error for error in self.errors)
+        if self.warnings:
+            lines.append("")
+            lines.append("Предупреждения:")
+            lines.extend("• " + warning for warning in self.warnings)
+        if self.template_results:
+            lines.append("")
+            lines.append("Шаблоны:")
+            for result in self.template_results:
+                state = "OK" if result.ok else "ошибка"
+                lines.append(
+                    f"• {Path(result.template_path).name}: {state}, "
+                    f"placeholders={len(result.placeholders)}, visible_fields={len(result.visible_fields)}"
+                )
+                for unknown in result.unknown_fields:
+                    lines.append(f"  - неизвестное поле: {unknown}")
+                for missing in result.missing_required_placeholders:
+                    lines.append(f"  - нет обязательного заполняемого поля: {missing}")
+        return "\n".join(lines)
+
+    def to_dict(self) -> dict:
+        return {
+            "pack_id": self.pack_id,
+            "ok": self.ok,
+            "errors": list(self.errors),
+            "warnings": list(self.warnings),
+            "template_results": [item.to_dict() for item in self.template_results],
+        }
+
+
+@dataclass(frozen=True)
+class RenderResult:
+    """Result of rendering one custom DOCX document."""
+
+    output_path: str
+    replaced_fields: tuple[str, ...]
+    missing_fields: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return not self.missing_fields
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def normalize_placeholder_id(
+    raw_field_id: str,
+    *,
+    role_id: str = "",
+    category: str = "",
+    button_label: str = "",
+) -> str:
+    """Normalize template placeholder ids while allowing reserved aliases.
+
+    Doctors may write either canonical placeholders (``{{labs.results}}``),
+    export-style placeholders (``{{patientName}}`` / ``{{caseNo}}``) or
+    human-friendly analysis aliases such as ``{{АНАЛИЗЫ}}`` /
+    ``{{LABS_BLOCK}}``.  The important rule is that this DOCX layer must not
+    pre-lowercase the raw id before the universal field normalizer sees it:
+    camelCase splitting lives in :func:`normalize_field_id`, and losing the
+    capitals here silently turns ``patientName`` into an unknown
+    ``patientname`` field.
+    """
+
+    raw = str(raw_field_id or "").strip()
+    from medical_renderer_labs import canonical_labs_placeholder
+
+    # Preserve the historical labs shortcuts (LABS_BLOCK, БЛОК АНАЛИЗОВ, etc.)
+    # without flattening camelCase export ids before semantic normalization.
+    labs_key = "_".join(str(raw or "").strip().lower().replace("-", "_").split())
+    labs_alias = canonical_labs_placeholder(raw)
+    text = labs_alias if labs_alias != labs_key else raw
+
+    if str(text).strip().lower().startswith("document."):
+        return str(text).strip().lower()
+    if role_id or category or button_label:
+        return normalize_field_id_for_context(text, role_id=role_id, category=category, document_label=button_label)
+    return normalize_field_id(text)
+
+
+def _document_context_kwargs(document: object | None = None, **overrides: str) -> dict[str, str]:
+    if document is None:
+        return {
+            "role_id": str(overrides.get("role_id", "") or ""),
+            "category": str(overrides.get("category", "") or ""),
+            "button_label": str(overrides.get("button_label", "") or ""),
+        }
+    return {
+        "role_id": str(overrides.get("role_id", "") or getattr(document, "role_id", "") or ""),
+        "category": str(overrides.get("category", "") or getattr(document, "category", "") or ""),
+        "button_label": str(overrides.get("button_label", "") or getattr(document, "button_label", "") or ""),
+    }
+
+
+def extract_template_placeholders(
+    path: str | Path,
+    *,
+    role_id: str = "",
+    category: str = "",
+    button_label: str = "",
+) -> tuple[TemplatePlaceholder, ...]:
+    """Read a DOCX/DOCM template and return all semantic placeholders."""
+
+    candidate = _existing_docx(path, "шаблон документа")
+    from medical_docx_xml_fragments import ensure_docx_compatible
+    readable = ensure_docx_compatible(candidate, label="шаблон документа")
+    doc = Document(str(readable))
+    found: list[TemplatePlaceholder] = []
+
+    for paragraph, hint in _iter_docx_paragraphs(doc):
+        for match in PLACEHOLDER_RE.finditer(paragraph.text or ""):
+            found.append(TemplatePlaceholder(normalize_placeholder_id(match.group(1), role_id=role_id, category=category, button_label=button_label), hint, match.group(0)))
+    return tuple(found)
+
+
+def validate_template(
+    template_path: str | Path,
+    *,
+    required_fields: Sequence[str] = (),
+    registry: FieldRegistry | None = None,
+    role_id: str = "",
+    category: str = "",
+    button_label: str = "",
+) -> TemplateValidationResult:
+    """Validate technical placeholders and ordinary visible Word blanks."""
+
+    registry = registry or default_field_registry()
+    placeholders = extract_template_placeholders(template_path, role_id=role_id, category=category, button_label=button_label)
+    from document_intelligence.form_fill import semantic_fill_field_ids, visible_fill_field_ids
+
+    visible_fields = tuple(dict.fromkeys([
+        *visible_fill_field_ids(
+            template_path, role_id=role_id, category=category, button_label=button_label,
+        ),
+        *semantic_fill_field_ids(
+            template_path, role_id=role_id, category=category, button_label=button_label,
+        ),
+    ]))
+    known = set(registry.ids()) | {"document.id", "document.label", "document.category", "document.description"}
+    unknown = sorted({item.field_id for item in placeholders if item.field_id not in known and not item.field_id.startswith("custom.")})
+    placeholder_fields = {item.field_id for item in placeholders}
+    fillable_fields = placeholder_fields | set(visible_fields)
+    missing_required = sorted({
+        normalize_field_id_for_context(field_id, role_id=role_id, category=category, document_label=button_label)
+        for field_id in required_fields
+        if normalize_field_id_for_context(field_id, role_id=role_id, category=category, document_label=button_label) not in fillable_fields
+    })
+    warnings: list[str] = []
+    if not placeholders and visible_fields:
+        warnings.append("Шаблон будет заполняться по видимым семантическим полям Word без технических {{...}} меток.")
+    elif not placeholders and not visible_fields:
+        warnings.append("В шаблоне не найдено ни {{...}} меток, ни видимых полей вида «ФИО: ______» / пустой соседней ячейки.")
+    duplicate_fields = [field_id for field_id in placeholder_fields if sum(1 for item in placeholders if item.field_id == field_id) > 1]
+    if duplicate_fields:
+        warnings.append("Повторяющиеся поля в шаблоне: " + ", ".join(sorted(set(duplicate_fields))))
+    return TemplateValidationResult(
+        str(Path(template_path).expanduser()),
+        placeholders,
+        tuple(unknown),
+        tuple(missing_required),
+        tuple(warnings),
+        tuple(visible_fields),
+    )
+
+
+def infer_template_semantic_fields(
+    template_path: str | Path,
+    *,
+    registry: FieldRegistry | None = None,
+    role_id: str = "",
+    category: str = "medical",
+    button_label: str = "",
+) -> tuple[str, ...]:
+    """Return every semantic field that the template can fill, without assigning requiredness."""
+
+    path = _existing_docx(template_path, "шаблон документа")
+    registry = registry or default_field_registry()
+    placeholders = extract_template_placeholders(path, role_id=role_id, category=category, button_label=button_label)
+    from document_intelligence.form_fill import semantic_fill_field_ids, visible_fill_field_ids
+
+    visible_fields = tuple(dict.fromkeys([
+        *visible_fill_field_ids(path, role_id=role_id, category=category, button_label=button_label),
+        *semantic_fill_field_ids(path, role_id=role_id, category=category, button_label=button_label),
+    ]))
+    return tuple(
+        dict.fromkeys(
+            [
+                *(
+                    item.field_id
+                    for item in placeholders
+                    if not item.field_id.startswith("document.") and (item.field_id in registry or item.field_id.startswith("custom."))
+                ),
+                *(field_id for field_id in visible_fields if field_id in registry or field_id.startswith("custom.")),
+            ]
+        )
+    )
+
+
+def infer_document_spec_from_template(
+    template_path: str | Path,
+    *,
+    button_label: str | None = None,
+    document_id: str | None = None,
+    category: str = "medical",
+    registry: FieldRegistry | None = None,
+    role_id: str = "",
+) -> DocumentTemplateSpec:
+    """Create a dynamic document-button spec from a DOCX template."""
+
+    path = _existing_docx(template_path, "шаблон документа")
+    registry = registry or default_field_registry()
+    explicit_role_id = str(role_id or "").strip()
+    try:
+        from personal_document_buttons import suggest_button_label_for_template
+        suggestion = suggest_button_label_for_template(
+            path,
+            preferred_language="auto",
+            ui_language="ru",
+            explicit_specialty="",
+            fallback_label=button_label or path.stem,
+        )
+        label = (button_label or suggestion.label or path.stem).strip()
+        suggested_role_id = suggestion.role_id if suggestion.role_id != "unknown" else ""
+        role_id = explicit_role_id or suggested_role_id
+        button_language = suggestion.language_id
+        source_language = suggestion.source_language
+        label_source = "manual" if button_label else suggestion.source
+    except Exception as exc:
+        record_soft_exception("universal_template_engine.infer_spec", exc, detail=str(path))
+        label = (button_label or path.stem).strip()
+        role_id = explicit_role_id
+        button_language = "auto"
+        source_language = "auto"
+        label_source = "manual" if button_label else "template_title"
+    placeholders = extract_template_placeholders(path, role_id=role_id, category=category, button_label=label)
+    from document_intelligence.form_fill import semantic_fill_field_ids, visible_fill_field_ids
+
+    visible_fields = tuple(dict.fromkeys([
+        *visible_fill_field_ids(path, role_id=role_id, category=category, button_label=label),
+        *semantic_fill_field_ids(path, role_id=role_id, category=category, button_label=label),
+    ]))
+    semantic_fields = tuple(
+        dict.fromkeys(
+            [
+                *(
+                    item.field_id
+                    for item in placeholders
+                    if not item.field_id.startswith("document.") and (item.field_id in registry or item.field_id.startswith("custom."))
+                ),
+                *(field_id for field_id in visible_fields if field_id in registry or field_id.startswith("custom.")),
+            ]
+        )
+    )
+    from universal_main_documents import inferred_required_fields_for_role
+
+    required_fields = inferred_required_fields_for_role(
+        role_id,
+        semantic_fields,
+        explicit_placeholder_fields=(item.field_id for item in placeholders if not item.field_id.startswith("document.")),
+    )
+    optional_fields = tuple(field_id for field_id in semantic_fields if field_id not in set(required_fields))
+    doc_id = _safe_document_id(document_id or path.stem or label)
+    return DocumentTemplateSpec(
+        id=doc_id,
+        button_label=label,
+        template=path.name,
+        output_name="{{patient.fio}} " + label + ".docx",
+        required_fields=required_fields,
+        optional_fields=optional_fields,
+        category=category or "medical",
+        description=(
+            "Создано автоматически по техническим меткам и видимым полям пользовательского DOCX-шаблона."
+            if placeholders and visible_fields
+            else "Создано автоматически по меткам в пользовательском DOCX-шаблоне."
+            if placeholders
+            else "Создано автоматически по обычным видимым полям пользовательского DOCX-шаблона."
+        ),
+        role_id=role_id,
+        button_language=button_language,
+        source_language=source_language,
+        button_label_source=label_source,
+    )
+
+
+_AUTO_INFERRED_DESCRIPTIONS = frozenset({
+    "Создано автоматически по техническим меткам и видимым полям пользовательского DOCX-шаблона.",
+    "Создано автоматически по меткам в пользовательском DOCX-шаблоне.",
+    "Создано автоматически по обычным видимым полям пользовательского DOCX-шаблона.",
+})
+
+
+def migrate_auto_inferred_required_fields(pack: DocumentPack, *, base_dir: str | Path) -> bool:
+    """Repair old profiles that marked every discovered Word field as mandatory.
+
+    Migration is intentionally narrow: it changes only untouched auto-inferred
+    specs whose stored required_fields exactly equal the fields rediscovered from
+    the owned template and whose optional_fields are still empty.  A doctor- or
+    administrator-edited required-field policy is therefore preserved verbatim.
+    """
+
+    from universal_main_documents import inferred_required_fields_for_role
+
+    changed = False
+    migrated: list[DocumentTemplateSpec] = []
+    registry = pack.registry()
+    for document in pack.documents:
+        if document.description not in _AUTO_INFERRED_DESCRIPTIONS or document.optional_fields:
+            migrated.append(document)
+            continue
+        template_path = resolve_pack_template_path(document.template, base_dir)
+        if not template_path.exists():
+            migrated.append(document)
+            continue
+        try:
+            semantic_fields = infer_template_semantic_fields(
+                template_path,
+                registry=registry,
+                role_id=document.role_id,
+                category=document.category,
+                button_label=document.button_label,
+            )
+            placeholders = extract_template_placeholders(
+                template_path,
+                role_id=document.role_id,
+                category=document.category,
+                button_label=document.button_label,
+            )
+        except Exception as exc:
+            record_soft_exception("universal_template_engine.required_policy_migration", exc, detail=str(template_path))
+            migrated.append(document)
+            continue
+        if tuple(document.required_fields) != tuple(semantic_fields):
+            migrated.append(document)
+            continue
+        required_fields = inferred_required_fields_for_role(
+            document.role_id,
+            semantic_fields,
+            explicit_placeholder_fields=(item.field_id for item in placeholders if not item.field_id.startswith("document.")),
+        )
+        optional_fields = tuple(field_id for field_id in semantic_fields if field_id not in set(required_fields))
+        replacement = replace(document, required_fields=required_fields, optional_fields=optional_fields)
+        migrated.append(replacement)
+        changed = changed or replacement != document
+    if changed:
+        pack.documents = tuple(migrated)
+    return changed
+
+
+def build_document_pack_from_templates(
+    *,
+    pack_id: str,
+    name: str,
+    specialty: str = "",
+    template_paths: Sequence[str | Path],
+    registry: FieldRegistry | None = None,
+) -> DocumentPack:
+    """Build a custom DocumentPack from a list of DOCX templates."""
+
+    registry = registry or default_field_registry()
+    documents = tuple(infer_document_spec_from_template(path, registry=registry) for path in template_paths)
+    return DocumentPack(pack_id=pack_id, name=name, specialty=specialty, documents=documents)
+
+
+def validate_document_pack(pack: DocumentPack, *, base_dir: str | Path | None = None) -> PackValidationResult:
+    """Validate document ids, field ids and template files for a profile."""
+
+    registry = pack.registry()
+    errors: list[str] = []
+    warnings: list[str] = []
+    template_results: list[TemplateValidationResult] = []
+
+    if not pack.documents:
+        warnings.append("В профиле нет документов: блок 03 не сможет построить пользовательские кнопки.")
+    seen_ids: set[str] = set()
+    for document in pack.documents:
+        if not document.id.strip():
+            errors.append("Документ без id.")
+        if document.id in seen_ids:
+            errors.append(f"Дублируется id документа: {document.id}")
+        seen_ids.add(document.id)
+        context_kwargs = _document_context_kwargs(document)
+        for field_id in [*document.required_fields, *document.optional_fields]:
+            try:
+                normalized = normalize_field_id_for_context(field_id, **context_kwargs)
+            except ValueError as exc:
+                errors.append(f"{document.button_label}: некорректное поле {field_id!r}: {exc}")
+                continue
+            if normalized not in registry and not normalized.startswith("custom."):
+                errors.append(f"{document.button_label}: поле не найдено в реестре: {normalized}")
+        if not document.template:
+            errors.append(f"{document.button_label}: не указан template.")
+            continue
+        template_path = _resolve_pack_template_path(document.template, base_dir)
+        if template_path.exists() and template_path.suffix.lower() in {".docx", ".docm"}:
+            template_results.append(validate_template(template_path, required_fields=document.required_fields, registry=registry, role_id=document.role_id, category=document.category, button_label=document.button_label))
+        elif not any(ch in document.template for ch in "*?"):
+            errors.append(f"{document.button_label}: шаблон не найден рядом с профилем: {document.template}")
+    return PackValidationResult(pack.pack_id, tuple(errors), tuple(warnings), tuple(template_results))
+
+
+def build_render_context(case: PatientCase, document: DocumentTemplateSpec, *, output_language: str = "auto", spellcheck_enabled: bool = True) -> dict[str, str]:
+    """Create the placeholder replacement map for one patient case and document."""
+
+    raw_context = {field_id: value.value for field_id, value in case.values.items()}
+    try:
+        from medical_orthography import correct_case_values
+        context = correct_case_values(raw_context, language_id=output_language, enabled=spellcheck_enabled)
+    except Exception as exc:
+        record_soft_exception("universal_template_engine.orthography", exc)
+        # Orthography is a safety net, not a render blocker. Rendering must never
+        # fail only because a spelling dictionary/rule is unavailable.
+        context = raw_context
+    context.update(
+        {
+            "document.id": document.id,
+            "document.label": document.button_label,
+            "document.category": document.category,
+            "document.description": document.description,
+        }
+    )
+    if getattr(document, "category", "") == "diaries":
+        context.update(_diary_context_values(case, document))
+    return context
+
+
+def missing_required_fields(case: PatientCase, document: DocumentTemplateSpec) -> tuple[str, ...]:
+    """Return required fields that are absent before rendering."""
+
+    missing: list[str] = []
+    context_kwargs = _document_context_kwargs(document)
+    for field_id in document.required_fields:
+        normalized = normalize_field_id_for_context(field_id, **context_kwargs)
+        if not case.get(normalized).strip():
+            missing.append(normalized)
+    return tuple(dict.fromkeys(missing))
+
+
+def render_output_name(
+    document: DocumentTemplateSpec,
+    case: PatientCase,
+    *,
+    output_language: str = "auto",
+    spellcheck_enabled: bool = True,
+) -> str:
+    """Render and sanitize the output DOCX name for a custom document."""
+
+    context = build_render_context(case, document, output_language=output_language, spellcheck_enabled=spellcheck_enabled)
+    raw = _replace_placeholders(document.output_name or "{{patient.fio}} {{document.label}}.docx", context, missing_value="", document=document)
+    raw = re.sub(r"\s+", " ", raw).strip(" .") or (document.button_label or document.id or "Документ")
+    if not raw.lower().endswith(".docx"):
+        raw += ".docx"
+    from medical_formatting import safe_filename
+
+    return safe_filename(raw)
+
+
+
+
+def render_template_to_docx(
+    *,
+    template_path: str | Path,
+    output_path: str | Path,
+    case: PatientCase,
+    document: DocumentTemplateSpec,
+    strict: bool = True,
+    output_language: str = "auto",
+    spellcheck_enabled: bool = True,
+) -> RenderResult:
+    """Render a custom DOCX template using placeholders and visible Word blanks."""
+
+    template = _existing_docx(template_path, "шаблон документа")
+    from medical_docx_xml_fragments import ensure_docx_compatible
+    template = ensure_docx_compatible(template, label="шаблон документа")
+    missing_required = missing_required_fields(case, document)
+    if strict and missing_required:
+        raise ValueError("Не заполнены обязательные поля для документа: " + ", ".join(missing_required))
+
+    context = build_render_context(case, document, output_language=output_language, spellcheck_enabled=spellcheck_enabled)
+    doc = Document(str(template))
+    replaced: set[str] = set()
+    missing_seen: set[str] = set()
+
+    for paragraph, _hint in _iter_docx_paragraphs(doc):
+        _replace_paragraph_placeholders(paragraph, context, replaced, missing_seen, document=document)
+
+    if strict and missing_seen:
+        raise ValueError("Не заполнены поля шаблона: " + ", ".join(sorted(missing_seen)))
+    remove_forbidden_hospitalization_phrase_from_document(doc)
+    output = Path(output_path).expanduser()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(str(output))
+    try:
+        from document_intelligence.form_fill import fill_docx_visible_fields
+
+        visible_filled = fill_docx_visible_fields(
+            output,
+            context,
+            role_id=document.role_id,
+            category=document.category,
+            button_label=document.button_label,
+            skip_semantic_fields=tuple(replaced),
+        )
+        replaced.update(visible_filled)
+        if strict:
+            from document_intelligence.form_fill import visible_fill_field_ids
+
+            remaining_visible = visible_fill_field_ids(
+                output,
+                role_id=document.role_id,
+                category=document.category,
+                button_label=document.button_label,
+            )
+            unfilled_with_values = tuple(
+                field_id for field_id in remaining_visible
+                if str(context.get(field_id, "") or "").strip()
+            )
+            if unfilled_with_values:
+                raise ValueError(
+                    "Не удалось заполнить видимые поля Word-шаблона: "
+                    + ", ".join(unfilled_with_values)
+                )
+    except Exception as exc:
+        record_soft_exception("universal_template_engine.visible_field_fill", exc, detail=str(output))
+        if strict:
+            try:
+                output.unlink()
+            except OSError as cleanup_exc:
+                record_soft_exception("universal_template_engine.visible_field_fill_cleanup", cleanup_exc, detail=str(output))
+            raise
+    if strict:
+        from document_intelligence.form_fill import rendered_case_consistency_errors
+        consistency_errors = rendered_case_consistency_errors(output, case, document)
+        if consistency_errors:
+            try:
+                output.unlink()
+            except OSError as cleanup_exc:
+                record_soft_exception("universal_template_engine.consistency_cleanup", cleanup_exc, detail=str(output))
+            raise ValueError("Созданный документ расходится с канонической карточкой пациента: " + "; ".join(consistency_errors))
+    return RenderResult(str(output), tuple(sorted(replaced)), tuple(sorted(missing_seen)), ())
+
+
+def unique_document_id_for_pack(pack: DocumentPack, proposed_id: str, *, template_path: str | Path | None = None) -> str:
+    """Return a document id that does not replace another document in this pack."""
+
+    base = _safe_document_id(proposed_id or (Path(template_path).stem if template_path else "document"))
+    used = {document.id for document in pack.documents}
+    if base not in used:
+        return base
+    stem = _safe_document_id(Path(template_path).stem if template_path else base)
+    for index in range(2, 1000):
+        candidate = _safe_document_id(f"{base}_{stem}_{index}")
+        if candidate not in used:
+            return candidate
+    raise ValueError(f"Не удалось создать уникальный id документа: {base}")
+
+
+def attach_template_to_pack(
+    pack: DocumentPack,
+    template_path: str | Path,
+    profile_dir: str | Path,
+    *,
+    button_label: str | None = None,
+    document_id: str | None = None,
+    category: str = "medical",
+    registry: FieldRegistry | None = None,
+    role_id: str = "",
+    button_language: str = "auto",
+    source_language: str = "auto",
+    button_label_source: str = "manual",
+) -> tuple[DocumentTemplateSpec, Path]:
+    """Validate/read first, then copy one owned DOCX and mutate the pack atomically."""
+
+    source = _existing_docx(template_path, "шаблон документа")
+    from medical_docx_xml_fragments import ensure_docx_compatible
+    readable = ensure_docx_compatible(source, label="шаблон документа")
+    profile_root = Path(profile_dir).expanduser()
+    templates_dir = profile_root / TEMPLATE_DIR_NAME
+    templates_dir.mkdir(parents=True, exist_ok=True)
+
+    # Infer before touching the profile directory.  A broken DOCM/DOCX must not
+    # leave an orphan file behind after the operation fails.
+    draft = infer_document_spec_from_template(
+        readable, button_label=button_label, document_id=document_id,
+        category=category, registry=registry, role_id=role_id,
+    )
+    final_role = role_id or draft.role_id
+    final_validation = validate_template(
+        readable,
+        required_fields=draft.required_fields,
+        registry=registry,
+        role_id=final_role,
+        category=category,
+        button_label=button_label or draft.button_label,
+    )
+    if category != "diaries" and not final_validation.ok:
+        reasons: list[str] = []
+        if not final_validation.placeholders and not final_validation.visible_fields:
+            reasons.append("нет ни служебных меток, ни обычных видимых заполняемых полей Word")
+        if final_validation.unknown_fields:
+            reasons.append("неизвестные поля: " + ", ".join(final_validation.unknown_fields))
+        if final_validation.missing_required_placeholders:
+            reasons.append("нет обязательных заполняемых полей: " + ", ".join(final_validation.missing_required_placeholders))
+        raise ValueError("Шаблон не прошёл финальную семантическую проверку: " + "; ".join(reasons or ["ошибка шаблона"]))
+
+    target_name = source.with_suffix(".docx").name if source.suffix.lower() == ".docm" else source.name
+    target = available_template_copy_path(templates_dir / target_name)
+    copied = False
+    try:
+        if readable.resolve() != target.resolve():
+            shutil.copy2(readable, target)
+            copied = True
+        else:
+            target = readable
+        spec = replace(
+            draft,
+            id=unique_document_id_for_pack(pack, draft.id, template_path=target),
+            template=(PurePosixPath(TEMPLATE_DIR_NAME) / target.name).as_posix(),
+            role_id=final_role,
+            button_language=button_language or draft.button_language,
+            source_language=source_language or draft.source_language,
+            button_label_source=button_label_source or draft.button_label_source,
+        )
+        pack.add_document(spec)
+        return spec, target
+    except Exception:
+        if copied:
+            try:
+                target.unlink()
+            except OSError as cleanup_exc:
+                record_soft_exception("universal_template_engine.attach_template_cleanup", cleanup_exc, detail=str(target))
+        raise
+
+def export_document_pack_zip(pack: DocumentPack, target_zip: str | Path, *, template_base_dir: str | Path | None = None) -> Path:
+    from universal_profiles import export_document_pack_zip as _export
+    return _export(pack, target_zip, template_base_dir=template_base_dir)
+
+
+def inspect_document_pack_source(source_path: str | Path) -> DocumentPack:
+    from universal_profiles import inspect_document_pack_source as _inspect
+    return _inspect(source_path)
+
+
+def import_document_pack_zip(source_zip: str | Path, target_dir: str | Path) -> tuple[DocumentPack, Path]:
+    from universal_profiles import import_document_pack_zip as _import
+    return _import(source_zip, target_dir, validate_pack=validate_document_pack)
+def save_pack_report(report: PackValidationResult, path: str | Path) -> Path:
+    """Write a human-readable validation report for support/QA."""
+
+    target = Path(path).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(report.human_report() + "\n", encoding="utf-8")
+    return target
+
+
+
+
+
+
+def _diary_context_values(case: PatientCase, document: DocumentTemplateSpec) -> dict[str, str]:
+    try:
+        from diary_dates import parse_full_datetime
+        from diary_schedule import DiaryScheduleSpec, describe_schedule, planned_diary_datetimes
+        admission = parse_full_datetime(case.get("admission.date"))
+        spec = DiaryScheduleSpec.from_dict(getattr(document, "diary_schedule", None))
+        moments = planned_diary_datetimes(admission, spec, limit=20)
+        if spec.mode == "hourly" and spec.hour_offsets:
+            formatted = [item.strftime("%d.%m.%Y %H:%M") for item in moments]
+        else:
+            formatted = [item.strftime("%d.%m.%Y") for item in moments]
+        return {
+            "diary.schedule": describe_schedule(spec),
+            "diary.dates": "\n".join(formatted),
+            "diary.entries": "\n".join(f"{index + 1}. {value}" for index, value in enumerate(formatted)),
+            "diary.frequency": "ежечасно" if spec.mode == "hourly" else "ежедневно",
+        }
+    except Exception as exc:
+        record_soft_exception("universal_template_engine.diary_context", exc)
+        return {
+            "diary.schedule": "",
+            "diary.dates": "",
+            "diary.entries": "",
+            "diary.frequency": "",
+        }
+
+
+def _iter_table_paragraphs(table, prefix: str):
+    """Yield all paragraphs from a table, including arbitrarily nested tables."""
+    seen_cells: set[int] = set()
+    for row_index, row in enumerate(table.rows):
+        for cell_index, cell in enumerate(row.cells):
+            cell_key = id(cell._tc)
+            if cell_key in seen_cells:
+                continue
+            seen_cells.add(cell_key)
+            cell_prefix = f"{prefix}.row[{row_index}].cell[{cell_index}]"
+            for paragraph_index, paragraph in enumerate(cell.paragraphs):
+                yield paragraph, f"{cell_prefix}.paragraph[{paragraph_index}]"
+            for nested_index, nested in enumerate(cell.tables):
+                yield from _iter_table_paragraphs(nested, f"{cell_prefix}.table[{nested_index}]")
+
+
+def _iter_docx_paragraphs(doc: Document):
+    """Yield every visible Word paragraph, including text boxes/shapes.
+
+    python-docx's high-level ``document.paragraphs`` omits paragraphs nested in
+    ``w:txbxContent``.  We first yield the structured body/table/header/footer
+    paragraphs, then walk raw XML and wrap any still-unseen ``w:p`` elements.
+    This keeps ordinary run formatting support while closing the text-box gap.
+    """
+    from docx.text.paragraph import Paragraph
+    from docx.oxml.ns import qn
+
+    seen: set[object] = set()
+
+    def emit(paragraph, hint: str):
+        key = paragraph._p
+        if key in seen:
+            return
+        seen.add(key)
+        yield paragraph, hint
+
+    for paragraph_index, paragraph in enumerate(doc.paragraphs):
+        yield from emit(paragraph, f"paragraph[{paragraph_index}]")
+    for table_index, table in enumerate(doc.tables):
+        for paragraph, hint in _iter_table_paragraphs(table, f"table[{table_index}]"):
+            yield from emit(paragraph, hint)
+    for section_index, section in enumerate(doc.sections):
+        for area_name, area in (("header", section.header), ("footer", section.footer)):
+            for paragraph_index, paragraph in enumerate(area.paragraphs):
+                yield from emit(paragraph, f"section[{section_index}].{area_name}.paragraph[{paragraph_index}]")
+            for table_index, table in enumerate(area.tables):
+                for paragraph, hint in _iter_table_paragraphs(table, f"section[{section_index}].{area_name}.table[{table_index}]"):
+                    yield from emit(paragraph, hint)
+
+    # Raw descendants include Word drawing/text-box paragraphs omitted by the
+    # high-level collections above.  Paragraph(..., owner) is sufficient because
+    # placeholder replacement only needs runs/text and the owning part.
+    for raw_index, element in enumerate(doc.element.body.iter(qn("w:p"))):
+        if element not in seen:
+            yield from emit(Paragraph(element, doc), f"body.xml.paragraph[{raw_index}]")
+    for section_index, section in enumerate(doc.sections):
+        for area_name, area in (("header", section.header), ("footer", section.footer)):
+            root = getattr(area, "_element", None)
+            if root is None:
+                continue
+            for raw_index, element in enumerate(root.iter(qn("w:p"))):
+                if element not in seen:
+                    yield from emit(Paragraph(element, area), f"section[{section_index}].{area_name}.xml.paragraph[{raw_index}]")
+
+
+def _resolve_pack_template_path(template_value: str, base_dir: str | Path | None) -> Path:
+    return resolve_pack_template_path(template_value, base_dir)
+
+
+def _replace_placeholders(text: str, context: Mapping[str, str], *, missing_value: str, document: DocumentTemplateSpec | None = None) -> str:
+    def repl(match: re.Match[str]) -> str:
+        field_id = normalize_placeholder_id(match.group(1), **_document_context_kwargs(document))
+        return str(context.get(field_id, missing_value))
+
+    return PLACEHOLDER_RE.sub(repl, text or "")
+
+
+def _replace_placeholders_with_report(text: str, context: Mapping[str, str], *, document: DocumentTemplateSpec | None = None) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+    replaced: list[str] = []
+    missing: list[str] = []
+
+    def repl(match: re.Match[str]) -> str:
+        field_id = normalize_placeholder_id(match.group(1), **_document_context_kwargs(document))
+        value = str(context.get(field_id, ""))
+        if value:
+            replaced.append(field_id)
+            return value
+        missing.append(field_id)
+        return ""
+
+    return PLACEHOLDER_RE.sub(repl, text or ""), tuple(dict.fromkeys(replaced)), tuple(dict.fromkeys(missing))
+
+
+def _replace_paragraph_placeholders(
+    paragraph,
+    context: Mapping[str, str],
+    replaced: set[str],
+    missing_seen: set[str],
+    *,
+    document: DocumentTemplateSpec | None = None,
+) -> None:
+    """Replace placeholders while preserving surrounding run formatting.
+
+    Older builds used ``paragraph.text = ...`` for every replacement.  That was
+    reliable for split placeholders but it flattened all runs in the paragraph.
+    This routine edits only the runs that contain the placeholder text.  If a
+    placeholder is split across runs, the replacement inherits the first run's
+    formatting while text before/after the placeholder keeps its own runs.
+    """
+
+    source = "".join(run.text for run in paragraph.runs) if paragraph.runs else (paragraph.text or "")
+    if "{{" not in source:
+        return
+    matches = list(PLACEHOLDER_RE.finditer(source))
+    if not matches:
+        return
+
+    replacements: list[tuple[int, int, str]] = []
+    for match in matches:
+        field_id = normalize_placeholder_id(match.group(1), **_document_context_kwargs(document))
+        value = str(context.get(field_id, ""))
+        if value:
+            replaced.add(field_id)
+        else:
+            missing_seen.add(field_id)
+        replacements.append((match.start(), match.end(), value))
+
+    if not paragraph.runs:
+        paragraph.text = _replace_placeholders(source, context, missing_value="", document=document)
+        return
+
+    run_spans: list[tuple[int, int]] = []
+    cursor = 0
+    for run in paragraph.runs:
+        end = cursor + len(run.text or "")
+        run_spans.append((cursor, end))
+        cursor = end
+    if cursor != len(source):
+        paragraph.text = _replace_placeholders(source, context, missing_value="", document=document)
+        return
+
+    def locate(offset: int) -> tuple[int, int]:
+        for index, (start, end) in enumerate(run_spans):
+            if start <= offset < end:
+                return index, offset - start
+            if offset == end and index + 1 < len(run_spans) and run_spans[index + 1][0] == end:
+                continue
+        last = max(0, len(run_spans) - 1)
+        return last, max(0, min(offset - run_spans[last][0], len(paragraph.runs[last].text or "")))
+
+    for start, end, value in reversed(replacements):
+        start_run, start_offset = locate(start)
+        end_run, end_offset = locate(max(start, end - 1))
+        end_offset += 1
+        if start_run == end_run:
+            run = paragraph.runs[start_run]
+            text = run.text or ""
+            run.text = text[:start_offset] + value + text[end_offset:]
+            continue
+        first = paragraph.runs[start_run]
+        first.text = (first.text or "")[:start_offset] + value
+        for index in range(start_run + 1, end_run):
+            paragraph.runs[index].text = ""
+        last = paragraph.runs[end_run]
+        last.text = (last.text or "")[end_offset:]
+
+
+def _replace_paragraph_text(paragraph, replace_func) -> None:
+    """Backward-compatible fallback used by older private imports."""
+
+    old_text = paragraph.text
+    if "{{" not in old_text:
+        return
+    new_text = replace_func(old_text)
+    if new_text != old_text:
+        paragraph.text = new_text
+
+
+def _existing_docx(path: str | Path, label: str) -> Path:
+    candidate = Path(path).expanduser()
+    if not candidate.exists() or not candidate.is_file():
+        raise FileNotFoundError(f"Не найден файл ({label}): {candidate}")
+    if candidate.suffix.lower() not in {".docx", ".docm"}:
+        raise ValueError(f"Неверный формат файла ({label}): {candidate.suffix or 'без расширения'}. Разрешено: .docx, .docm.")
+    return candidate
+
+
+def _safe_document_id(value: str) -> str:
+    text = re.sub(r"[^a-zA-Zа-яА-Я0-9]+", "_", str(value or "").strip().lower()).strip("_")
+    translit = {
+        "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e", "ж": "zh", "з": "z", "и": "i", "й": "y",
+        "к": "k", "л": "l", "м": "m", "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u", "ф": "f",
+        "х": "h", "ц": "c", "ч": "ch", "ш": "sh", "щ": "sch", "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+    }
+    ascii_text = "".join(translit.get(ch, ch) for ch in text)
+    ascii_text = re.sub(r"[^a-z0-9_]+", "_", ascii_text).strip("_")
+    if not ascii_text or not ascii_text[0].isalpha():
+        ascii_text = "document_" + (ascii_text or "custom")
+    return ascii_text
+
+
+# --- Safe template marking for the visual mouse/color scanner ---
+
+def placeholder_for_field(field_id: str) -> str:
+    """Return a canonical DOCX placeholder for a semantic field."""
+
+    return "{{" + normalize_placeholder_id(field_id) + "}}"
+
+
+@dataclass(frozen=True)
+class TemplateMarkResult:
+    template_path: str
+    field_id: str
+    placeholder: str
+    strategy: str
+    replacements: int
+    backup_path: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.replacements > 0
+
+
+def replace_selection_with_placeholder(
+    template_path: str | Path,
+    selected_text: str,
+    field_id: str,
+    *,
+    create_backup: bool = True,
+) -> TemplateMarkResult:
+    """Replace the selected text in a DOCX template with ``{{field.id}}``."""
+
+    return _apply_visual_placeholder(template_path, selected_text, field_id, mode="template_replace", create_backup=create_backup)
+
+
+def insert_placeholder_after_selection(
+    template_path: str | Path,
+    selected_text: str,
+    field_id: str,
+    *,
+    create_backup: bool = True,
+) -> TemplateMarkResult:
+    """Insert ``{{field.id}}`` after the selected anchor paragraph/cell."""
+
+    return _apply_visual_placeholder(template_path, selected_text, field_id, mode="template_insert_after", create_backup=create_backup)
+
+
+def _replace_substring_preserving_runs(paragraph, start: int, end: int, value: str) -> None:
+    if not paragraph.runs:
+        text = paragraph.text or ""
+        paragraph.text = text[:start] + value + text[end:]
+        return
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    for run in paragraph.runs:
+        nxt = cursor + len(run.text or "")
+        spans.append((cursor, nxt))
+        cursor = nxt
+
+    def locate(offset: int) -> tuple[int, int]:
+        for idx, (a, b) in enumerate(spans):
+            if a <= offset < b:
+                return idx, offset - a
+        idx = max(0, len(spans) - 1)
+        return idx, max(0, min(offset - spans[idx][0], len(paragraph.runs[idx].text or "")))
+
+    sr, so = locate(start)
+    er, eo = locate(max(start, end - 1))
+    eo += 1
+    if sr == er:
+        run = paragraph.runs[sr]
+        text = run.text or ""
+        run.text = text[:so] + value + text[eo:]
+        return
+    first = paragraph.runs[sr]
+    first.text = (first.text or "")[:so] + value
+    for idx in range(sr + 1, er):
+        paragraph.runs[idx].text = ""
+    last = paragraph.runs[er]
+    last.text = (last.text or "")[eo:]
+
+
+def _apply_visual_placeholder(
+    template_path: str | Path,
+    selected_text: str,
+    field_id: str,
+    *,
+    mode: str,
+    create_backup: bool,
+) -> TemplateMarkResult:
+    path = _existing_docx(template_path, "шаблон для цветной разметки")
+    from medical_docx_xml_fragments import ensure_docx_compatible
+    readable = ensure_docx_compatible(path, label="шаблон для цветной разметки")
+    selected = " ".join(str(selected_text or "").replace("\r", "\n").split())
+    if not selected:
+        raise ValueError("Выделите текст/строку в шаблоне, куда нужно поставить поле.")
+    placeholder = placeholder_for_field(field_id)
+    backup = ""
+    if create_backup:
+        backup_path = _available_visual_backup_path(path)
+        shutil.copy2(path, backup_path)
+        backup = str(backup_path)
+    doc = Document(str(readable))
+    matches: list[tuple[object, int, int]] = []
+    for paragraph, _hint in _iter_docx_paragraphs(doc):
+        current = paragraph.text or ""
+        pos = current.find(selected)
+        if pos >= 0:
+            matches.append((paragraph, pos, pos + len(selected)))
+    if not matches:
+        return TemplateMarkResult(str(path), normalize_placeholder_id(field_id), placeholder, mode, 0, backup)
+    if len(matches) > 1:
+        raise ValueError(
+            f"Выделенный текст встречается в шаблоне {len(matches)} раз. "
+            "Выберите более длинный уникальный фрагмент, чтобы программа не изменила не то место."
+        )
+    paragraph, start, end = matches[0]
+    if mode == "template_replace":
+        _replace_substring_preserving_runs(paragraph, start, end, placeholder)
+    elif mode == "template_insert_after":
+        suffix = "\n" if paragraph.text and not paragraph.text.endswith("\n") else ""
+        paragraph.add_run(suffix + placeholder)
+    else:
+        raise ValueError(f"Неизвестный режим цветной разметки: {mode}")
+    save_target = path if readable == path else path.with_suffix(".docx")
+    doc.save(str(save_target))
+    return TemplateMarkResult(str(save_target), normalize_placeholder_id(field_id), placeholder, mode, 1, backup)
+
+
+def _available_visual_backup_path(path: Path) -> Path:
+    base = path.with_name(path.stem + ".before_visual_marker" + path.suffix)
+    if not base.exists():
+        return base
+    for index in range(2, 1000):
+        candidate = path.with_name(f"{path.stem}.before_visual_marker_{index}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"Не удалось создать резервную копию шаблона: {path}")
