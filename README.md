@@ -1,6 +1,13 @@
 # MedicalDiaryAutofill / Dokkomplekt
 
-Version: `v1.4.95_diary_dates_picker_ux_fix`
+Version: `v1.4.96_live_fio_real_path_fix`
+
+## v1.4.96 — live FIO real path fix
+
+- ФИО пациента восстанавливается из реальной Word/XML-разметки, включая content controls и формы, которые `python-docx` не показывает как обычную таблицу.
+- ФИО врача не может быть повышено до ФИО пациента; filename-инициалы используются только как безопасная подсказка имени файлов/папки.
+- Поле «ФИО или название файла» получает безопасный output hint, но такой hint не подменяет ФИО внутри медицинских документов без ручного подтверждения врача.
+- Версия в заголовке окна поднята до 1.4.96, чтобы новую сборку нельзя было спутать со старым 1.4.95.
 
 ## v1.4.95 — diary dates picker UX fix
 
@@ -20,7 +27,7 @@ Version: `v1.4.95_diary_dates_picker_ux_fix`
 - Repairs redundant trial-state reconciliation so a stale pre-release Windows Registry guard cannot re-expire a valid public trial.
 - Trial keeps the 30-document total allowance but no longer blocks normal multi-document patient sets at three files per run.
 - Packaged user-journey now proves trial watermarking, usage reservation and transactional publication of real DOCX outputs.
-- Windows CI adds a full patient-creation pass with product-access enforcement enabled.
+- Windows CI adds a full patient-creation pass with product access enforcement enabled.
 
 ## v1.4.92 — production trial / uninstall hotfix
 

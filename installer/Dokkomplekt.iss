@@ -1,5 +1,5 @@
 #define MyAppName "Dokkomplekt"
-#define MyAppVersion "1.4.95"
+#define MyAppVersion "1.4.96"
 #define MyAppExeName "MedicalDiaryAutofill.exe"
 
 [Setup]

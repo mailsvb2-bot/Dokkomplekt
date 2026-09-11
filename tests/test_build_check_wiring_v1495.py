@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_VERSION = "1.4.95"
-CURRENT_VERSION_LABEL = "v1.4.95_diary_dates_picker_ux_fix"
-CURRENT_VERSION_TUPLE = "(1, 4, 95, 0)"
+CURRENT_VERSION = "1.4.96"
+CURRENT_VERSION_LABEL = "v1.4.96_live_fio_real_path_fix"
+CURRENT_VERSION_TUPLE = "(1, 4, 96, 0)"
 HOTFIX_PHRASE = "discharge custom case propagation"
 
 
