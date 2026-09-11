@@ -134,14 +134,21 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
     """
 
     case = PatientCase()
-    objective_status = _first_text(data.somatic_status, data.profile_status)
+    objective_status = data.somatic_status
+    try:
+        from medical_expert import build_expert_anamnesis
+        expert_anamnesis = build_expert_anamnesis(data)
+    except Exception:
+        expert_anamnesis = ""
     discharge_summary = _discharge_summary(data)
     vk_mse_work_position = _first_text(
         data.vk_mse_work_position,
         ", ".join(part for part in (data.vk_mse_work_org, data.vk_mse_position) if part),
     )
     pairs = {
-        "patient.fio": data.output_fio or data.fio,
+        # Medical identity is canonical and may never come from the filename/output hint.
+        # ``output_fio`` exists only for filesystem naming when a full medical FIO is absent.
+        "patient.fio": data.fio,
         "patient.birth_date": _birth_date_for_case(data.birth),
         "patient.age": _age_at_admission(data.birth, data.admission_date),
         "patient.address": data.registered,
@@ -153,6 +160,7 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
         "complaints": data.complaints,
         "anamnesis.life": data.life_anamnesis,
         "anamnesis.disease": data.disease_anamnesis,
+        "anamnesis.expert": expert_anamnesis,
         "expert.work_status": data.expert_work_status,
         "expert.work_org": data.expert_work_org,
         "expert.position": data.expert_position,
@@ -160,11 +168,17 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
         "expert.sick_leave_from": data.expert_sick_leave_from,
         "expert.sick_leave_number": data.expert_sick_leave_number,
         "status.objective": objective_status,
+        # Keep the neutral specialty status as the universal canonical key.
+        # Psychiatry templates may additionally address the same legacy PatientData
+        # value through the narrower status.mental semantic field.
         "status.specialty": data.profile_status,
+        "status.mental": data.profile_status,
         "status.somatic": data.somatic_status,
         "diagnosis.main": data.diagnosis,
         "diagnosis.icd10": _icd10_code_from_diagnosis(data.diagnosis),
+        "examination.plan": data.examination_plan,
         "treatment.plan": data.treatment_plan,
+        "epidemiology": data.epidemiology,
         "condition.discharge": discharge_summary,
         "treatment.result": discharge_summary,
         "epicrisis.text": data.epi_text,
@@ -235,5 +249,22 @@ def merge_patient_cases(base: PatientCase, overlay: PatientCase) -> PatientCase:
     for field_id, value in overlay.values.items():
         old = merged.values.get(field_id)
         if old is None or value.confidence >= old.confidence:
+            merged.values[field_id] = value
+    return merged
+
+
+def supplement_patient_case(base: PatientCase, supplement: PatientCase) -> PatientCase:
+    """Fill only missing semantic fields without replacing canonical patient data.
+
+    Profile/scanner extraction is allowed to enrich a case with specialty/custom
+    fields, but it must never override patient identity, dates, diagnosis or any
+    value already resolved from the selected primary document plus explicit
+    doctor confirmations.
+    """
+
+    merged = PatientCase(values=dict(base.values))
+    for field_id, value in supplement.values.items():
+        old = merged.values.get(field_id)
+        if old is None or not str(old.value or "").strip():
             merged.values[field_id] = value
     return merged

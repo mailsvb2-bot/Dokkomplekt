@@ -1,6 +1,14 @@
 # MedicalDiaryAutofill / Dokkomplekt
 
-Version: `v1.4.96_live_fio_real_path_fix`
+Version: `v1.4.97_unified_patient_case_architecture`
+
+## v1.4.97 — unified patient case architecture
+
+- Один canonical `PatientData → PatientCase` теперь является источником медицинских данных для создаваемых документов; `output_fio` больше не подменяет `patient.fio`.
+- Scanner только дополняет отсутствующие поля и не перезаписывает подтверждённые ФИО/диагноз; автоматические UI-значения не считаются врачебным override.
+- Уже заполненный текст DOCX врача трактуется как структура шаблона, а не как данные нового пациента: renderer заменяет зарегистрированные semantic fields, включая табличные формы и строки `ФИО, дата рождения, адрес`.
+- После генерации действует consistency gate: медицинский DOCX с идентичностью/значениями, несовместимыми с canonical case, не выдаётся пользователю и физически удаляется.
+- Архитектурный regression contour `v1531` включён в обязательные проверки релиза.
 
 ## v1.4.96 — live FIO real path fix
 

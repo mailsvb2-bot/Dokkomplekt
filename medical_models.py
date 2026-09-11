@@ -328,7 +328,7 @@ def build_patient_case_review(
     needs_treatment = _treatment_required(selected_medical, ())
 
     fields.append(PatientCaseField("fio", "ФИО пациента в документах", fio, _manual_status(fio, False, required=medical_or_diary), "из первичного документа", required=medical_or_diary))
-    fields.append(PatientCaseField("output_fio", "Имя пациента для файлов", output_fio, _manual_status(output_fio, manual_patient_name, required=medical_or_diary), "карточка пациента", required=medical_or_diary))
+    fields.append(PatientCaseField("output_fio", "Имя пациента для файлов", output_fio, _manual_status(output_fio, manual_patient_name, required=False), "карточка пациента", required=False))
     fields.append(PatientCaseField("case_number", "Номер истории болезни", case_number, _manual_status(case_number, manual_case_number, required=needs_case), "первичный документ или окно ввода", required=needs_case))
     fields.append(PatientCaseField("birth", "Дата/год рождения", birth, _manual_status(birth, False, required=False), "из первичного документа", required=False))
     fields.append(PatientCaseField("admission_date", "Дата поступления", admission_date, _date_status(admission_date, manual_admission_date, required=medical_or_diary), "заголовок, первичный документ или поле в программе", required=medical_or_diary))

@@ -229,14 +229,16 @@ def validate_template(
 
     registry = registry or default_field_registry()
     placeholders = extract_template_placeholders(template_path, role_id=role_id, category=category, button_label=button_label)
-    from document_intelligence.form_fill import visible_fill_field_ids
+    from document_intelligence.form_fill import semantic_fill_field_ids, visible_fill_field_ids
 
-    visible_fields = visible_fill_field_ids(
-        template_path,
-        role_id=role_id,
-        category=category,
-        button_label=button_label,
-    )
+    visible_fields = tuple(dict.fromkeys([
+        *visible_fill_field_ids(
+            template_path, role_id=role_id, category=category, button_label=button_label,
+        ),
+        *semantic_fill_field_ids(
+            template_path, role_id=role_id, category=category, button_label=button_label,
+        ),
+    ]))
     known = set(registry.ids()) | {"document.id", "document.label", "document.category", "document.description"}
     unknown = sorted({item.field_id for item in placeholders if item.field_id not in known and not item.field_id.startswith("custom.")})
     placeholder_fields = {item.field_id for item in placeholders}
@@ -248,7 +250,7 @@ def validate_template(
     })
     warnings: list[str] = []
     if not placeholders and visible_fields:
-        warnings.append("Шаблон будет заполняться по обычным видимым полям Word без технических {{...}} меток.")
+        warnings.append("Шаблон будет заполняться по видимым семантическим полям Word без технических {{...}} меток.")
     elif not placeholders and not visible_fields:
         warnings.append("В шаблоне не найдено ни {{...}} меток, ни видимых полей вида «ФИО: ______» / пустой соседней ячейки.")
     duplicate_fields = [field_id for field_id in placeholder_fields if sum(1 for item in placeholders if item.field_id == field_id) > 1]
@@ -277,14 +279,12 @@ def infer_template_semantic_fields(
     path = _existing_docx(template_path, "шаблон документа")
     registry = registry or default_field_registry()
     placeholders = extract_template_placeholders(path, role_id=role_id, category=category, button_label=button_label)
-    from document_intelligence.form_fill import visible_fill_field_ids
+    from document_intelligence.form_fill import semantic_fill_field_ids, visible_fill_field_ids
 
-    visible_fields = visible_fill_field_ids(
-        path,
-        role_id=role_id,
-        category=category,
-        button_label=button_label,
-    )
+    visible_fields = tuple(dict.fromkeys([
+        *visible_fill_field_ids(path, role_id=role_id, category=category, button_label=button_label),
+        *semantic_fill_field_ids(path, role_id=role_id, category=category, button_label=button_label),
+    ]))
     return tuple(
         dict.fromkeys(
             [
@@ -336,14 +336,12 @@ def infer_document_spec_from_template(
         source_language = "auto"
         label_source = "manual" if button_label else "template_title"
     placeholders = extract_template_placeholders(path, role_id=role_id, category=category, button_label=label)
-    from document_intelligence.form_fill import visible_fill_field_ids
+    from document_intelligence.form_fill import semantic_fill_field_ids, visible_fill_field_ids
 
-    visible_fields = visible_fill_field_ids(
-        path,
-        role_id=role_id,
-        category=category,
-        button_label=label,
-    )
+    visible_fields = tuple(dict.fromkeys([
+        *visible_fill_field_ids(path, role_id=role_id, category=category, button_label=label),
+        *semantic_fill_field_ids(path, role_id=role_id, category=category, button_label=label),
+    ]))
     semantic_fields = tuple(
         dict.fromkeys(
             [
@@ -559,6 +557,8 @@ def render_output_name(
     return safe_filename(raw)
 
 
+
+
 def render_template_to_docx(
     *,
     template_path: str | Path,
@@ -629,6 +629,15 @@ def render_template_to_docx(
             except OSError as cleanup_exc:
                 record_soft_exception("universal_template_engine.visible_field_fill_cleanup", cleanup_exc, detail=str(output))
             raise
+    if strict:
+        from document_intelligence.form_fill import rendered_case_consistency_errors
+        consistency_errors = rendered_case_consistency_errors(output, case, document)
+        if consistency_errors:
+            try:
+                output.unlink()
+            except OSError as cleanup_exc:
+                record_soft_exception("universal_template_engine.consistency_cleanup", cleanup_exc, detail=str(output))
+            raise ValueError("Созданный документ расходится с канонической карточкой пациента: " + "; ".join(consistency_errors))
     return RenderResult(str(output), tuple(sorted(replaced)), tuple(sorted(missing_seen)), ())
 
 

@@ -78,16 +78,16 @@ class ActionsNavigationMixin:
             # Such a hint must help folder/file naming but must NOT silently
             # replace the full patient FIO inside generated medical documents.
             display_fio = str(data.fio or data.output_fio or "").strip()
-            if display_fio and (not self._manual_patient_name or not self.patient_name_var.get().strip()):
+            if not self._manual_patient_name:
                 self._set_ui_var(self.patient_name_var, display_fio)
-            if data.admission_date and (not self._manual_admission_date or not current_semantic_date(self, "admission_date")):
-                self._set_ui_var(self.admission_date_var, data.admission_date)
-            if data.discharge_date and (not getattr(self, "_manual_discharge_date", False) or not current_semantic_date(self, "discharge_date")):
+            if not self._manual_admission_date:
+                self._set_ui_var(self.admission_date_var, data.admission_date or "")
+            if not getattr(self, "_manual_discharge_date", False):
                 # Discharge was parsed from the primary document but never pushed
                 # into the UI/semantic layer, so the diary/epicrisis flow kept
                 # asking for it and could not build documents. Push it like
                 # admission, unless the doctor already typed one manually.
-                self._set_ui_var(self.discharge_date_var, data.discharge_date)
+                self._set_ui_var(self.discharge_date_var, data.discharge_date or "")
             if data.case_number and not self.case_number_var.get().strip():
                 case_value = sanitize_case_number_candidate(data.case_number, patient_name=self.patient_name_var.get().strip() or data.fio)
                 if case_value:
@@ -95,8 +95,12 @@ class ActionsNavigationMixin:
                     data.case_number = case_value
                 else:
                     data.case_number = ""
-            if data.diagnosis and (not self._manual_diagnosis or not self.diagnosis_var.get().strip()):
-                self._set_ui_var(self.diagnosis_var, normalize_diagnosis_with_icd10(data.diagnosis, language_id=self._diagnosis_language() if hasattr(self, "_diagnosis_language") else "ru"))
+            if not self._manual_diagnosis:
+                normalized_ui_diagnosis = (
+                    normalize_diagnosis_with_icd10(data.diagnosis, language_id=self._diagnosis_language() if hasattr(self, "_diagnosis_language") else "ru")
+                    if data.diagnosis else ""
+                )
+                self._set_ui_var(self.diagnosis_var, normalized_ui_diagnosis)
             # Если папки уже известны, автоматически подставляем только
             # текст дневников по диагнозу. Даты строит календарь программы.
             self._auto_select_diary_text_by_diagnosis(ask_folder=False)

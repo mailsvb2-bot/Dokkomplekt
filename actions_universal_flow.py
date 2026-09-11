@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List
 
-from universal_case_adapter import merge_case_values, merge_patient_cases, patient_data_to_case
+from universal_case_adapter import patient_data_to_case, supplement_patient_case
 from medical_primary_document_state import selected_primary_document_path
 from medical_date_state import current_semantic_date
 
@@ -39,14 +39,17 @@ class ActionsUniversalFlowMixin:
             from universal_scanner import scan_docx
 
             scan = scan_docx(navigation, registry=current_pack.registry(), rules=current_pack.extraction_rules)
-            case = merge_patient_cases(case, scan.patient_case())
+            # The selected primary document plus explicit doctor confirmations are
+            # the canonical patient case. Profile rules may enrich missing fields
+            # only; they must never replace resolved identity/dates/diagnosis.
+            case = supplement_patient_case(case, scan.patient_case())
         except Exception as exc:
             from diagnostic_logging import record_soft_exception
             record_soft_exception("actions_universal_flow.current_patient_case_scan", exc, detail=navigation)
             self._log(f"\n⚠ Не удалось применить правила профиля к исходному документу: {exc}\n")
-        confirmed_values = self._confirmed_universal_overlay_values()
-        if confirmed_values:
-            case = merge_case_values(case, confirmed_values, source_document="doctor_confirmed_ui_state")
+        # _medical_override_data() has already applied explicit doctor
+        # confirmations. Do not overlay the Tk widget contents a second time:
+        # widget state is a projection of the case, not another patient database.
         return case
 
     def _confirmed_universal_overlay_values(self) -> dict[str, str]:
