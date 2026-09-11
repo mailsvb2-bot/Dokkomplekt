@@ -281,13 +281,24 @@ def _replace_structured_patient_sentences(document: Document, values: Mapping[st
     return filled
 
 
-def _fill_prefilled_semantic_paragraphs(document: Document, values: Mapping[str, str], *, role_id: str = "", category: str = "", button_label: str = "") -> list[str]:
+def _fill_prefilled_semantic_paragraphs(
+    document: Document,
+    values: Mapping[str, str],
+    *,
+    role_id: str = "",
+    category: str = "",
+    button_label: str = "",
+    skip_field_ids: Iterable[str] = (),
+) -> list[str]:
     filled: list[str] = []
+    skipped = {str(field_id).strip() for field_id in skip_field_ids if str(field_id).strip()}
     for paragraph in iter_all_story_paragraphs(document):
         slot = _semantic_inline_slot(paragraph.text, role_id=role_id, category=category, button_label=button_label)
         if slot is None:
             continue
         field_id, start, end = slot
+        if field_id in skipped:
+            continue
         definition = _semantic_definition(field_id)
         value = str(values.get(field_id, "") or "").strip()
         # Fixed signature names belong to the doctor/template profile, not patient data.
@@ -516,12 +527,18 @@ def fill_docx_visible_fields(
     role_id: str = "",
     category: str = "",
     button_label: str = "",
+    skip_semantic_fields: Iterable[str] = (),
 ) -> tuple[str, ...]:
     document = Document(str(path))
     filled = [
         *_replace_structured_patient_sentences(document, values),
         *_fill_prefilled_semantic_paragraphs(
-            document, values, role_id=role_id, category=category, button_label=button_label,
+            document,
+            values,
+            role_id=role_id,
+            category=category,
+            button_label=button_label,
+            skip_field_ids=skip_semantic_fields,
         ),
         *_fill_semantic_block_sections(
             document, values, role_id=role_id, category=category, button_label=button_label,

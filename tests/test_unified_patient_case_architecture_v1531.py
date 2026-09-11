@@ -99,6 +99,40 @@ def test_prefilled_doctor_template_is_layout_not_patient_database(tmp_path: Path
         assert stale not in text
 
 
+def test_explicit_placeholders_are_not_reinterpreted_by_visible_semantic_pass(tmp_path: Path):
+    template = tmp_path / "combined_dates.docx"
+    output = tmp_path / "combined_dates_rendered.docx"
+    doc = Document()
+    doc.add_paragraph("ФИО: {{patient.fio}}")
+    doc.add_paragraph("Поступил: {{admission.date}}  Выписан: {{discharge.date}}")
+    doc.add_paragraph("Диагноз: {{diagnosis.main}}")
+    doc.save(template)
+
+    case = PatientCase()
+    case.update_from_pairs(
+        {
+            "patient.fio": "Орлова Мария Ивановна",
+            "admission.date": "05.05.2026",
+            "discharge.date": "19.05.2026",
+            "diagnosis.main": "F32.1 Депрессивный эпизод средней степени",
+        },
+        source_document="primary.docx",
+    )
+    spec = DocumentTemplateSpec(
+        id="discharge",
+        button_label="Выписной эпикриз",
+        template=str(template),
+        role_id="discharge_epicrisis",
+        required_fields=("patient.fio", "admission.date", "discharge.date", "diagnosis.main"),
+    )
+
+    render_template_to_docx(template_path=template, output_path=output, case=case, document=spec, strict=True)
+    text = _docx_text(output)
+    assert "Поступил: 05.05.2026" in text
+    assert "Выписан: 19.05.2026" in text
+    assert "{{" not in text
+
+
 def test_consistency_gate_deletes_document_that_cannot_match_canonical_identity(tmp_path: Path):
     template = tmp_path / "unmapped_medical_template.docx"
     output = tmp_path / "must_not_survive.docx"

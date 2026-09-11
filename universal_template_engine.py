@@ -601,6 +601,7 @@ def render_template_to_docx(
             role_id=document.role_id,
             category=document.category,
             button_label=document.button_label,
+            skip_semantic_fields=tuple(replaced),
         )
         replaced.update(visible_filled)
         if strict:
@@ -745,6 +746,7 @@ def inspect_document_pack_source(source_path: str | Path) -> DocumentPack:
 def import_document_pack_zip(source_zip: str | Path, target_dir: str | Path) -> tuple[DocumentPack, Path]:
     from universal_profiles import import_document_pack_zip as _import
     return _import(source_zip, target_dir, validate_pack=validate_document_pack)
+
 
 def save_pack_report(report: PackValidationResult, path: str | Path) -> Path:
     """Write a human-readable validation report for support/QA."""
