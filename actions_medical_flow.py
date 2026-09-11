@@ -76,9 +76,12 @@ class ActionsMedicalFlowMixin:
         elif self.case_number_var.get().strip():
             self.case_number_var.set("")
         manual_patient_name = self.patient_name_var.get().strip()
-        if not data.fio and manual_patient_name:
+        # Only an actual doctor edit may substitute a missing full FIO in the
+        # medical document. An automatically displayed filename hint is safe for
+        # folder/file naming only and must not leak into document patient fields.
+        if not data.fio and manual_patient_name and bool(getattr(self, "_manual_patient_name", False)):
             data.fio = manual_patient_name
-        data.output_fio = manual_patient_name or data.fio
+        data.output_fio = manual_patient_name or data.output_fio or data.fio
         confirmed_admission = self._confirmed_admission_date_override()
         if confirmed_admission:
             data.admission_date = confirmed_admission
