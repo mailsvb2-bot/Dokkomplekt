@@ -98,13 +98,16 @@ class ActionsMedicalFlowMixin:
             return current_semantic_date(self, key)
 
         shared_discharge = current_semantic_date(self, "discharge_date")
-        if shared_discharge:
+        if shared_discharge and (
+            bool(getattr(self, "_manual_discharge_date", False))
+            or bool(str(getattr(self, "_popup_discharge_date_override", "") or "").strip())
+        ):
             data.discharge_date = shared_discharge
         popup_diag = self._popup_diagnosis_override.strip()
         ui_diag = self.diagnosis_var.get().strip()
         if popup_diag:
             data.diagnosis = sanitize_diagnosis(popup_diag)
-        elif ui_diag:
+        elif ui_diag and bool(getattr(self, "_manual_diagnosis", False)):
             data.diagnosis = sanitize_diagnosis(ui_diag)
         if data.diagnosis:
             try:

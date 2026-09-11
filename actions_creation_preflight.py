@@ -160,12 +160,14 @@ class ActionsCreationReviewMixin:
     def _clear_required_review_value(self, key: str) -> None:
         """Clear a patient/preflight field when the doctor intentionally erases it."""
         data = getattr(self, "data", None)
-        if key in {"fio", "output_fio"}:
+        if key == "fio":
             self._set_ui_var(self.patient_name_var, "")
             self._manual_patient_name = False
             if data is not None:
-                data.output_fio = ""
                 data.fio = ""
+        elif key == "output_fio":
+            if data is not None:
+                data.output_fio = ""
         elif key == "case_number":
             self.case_number_var.set("")
             if data is not None:
@@ -242,13 +244,16 @@ class ActionsCreationReviewMixin:
             self._clear_required_review_value(key)
             return
         data = getattr(self, "data", None)
-        if key in {"fio", "output_fio"}:
+        if key == "fio":
             self._set_ui_var(self.patient_name_var, value)
             self._manual_patient_name = True
             if data is not None:
+                data.fio = value
+                if not getattr(data, "output_fio", ""):
+                    data.output_fio = value
+        elif key == "output_fio":
+            if data is not None:
                 data.output_fio = value
-                if not getattr(data, "fio", ""):
-                    data.fio = value
         elif key == "case_number":
             self._store_case_number_value(value)
         elif key == "admission_date":
