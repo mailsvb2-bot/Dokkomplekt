@@ -604,6 +604,19 @@ def _normalized_case_text(value: object) -> str:
     return " ".join(str(value or "").lower().replace("ё", "е").split())
 
 
+def _normalized_identity_text(value: object) -> str:
+    """Normalize FIO punctuation/spacing without weakening identity matching.
+
+    Orthography may render initials as ``И. И.`` even when the canonical case
+    stores ``И.И.``.  Consistency checks must compare the letters themselves,
+    not typography around them.  Removing only non-word separators preserves
+    every surname/name/initial character and digit while making those two
+    spellings equivalent.
+    """
+    normalized = str(value or "").casefold().replace("ё", "е")
+    return re.sub(r"[\W_]+", "", normalized, flags=re.UNICODE)
+
+
 def _normalized_icd_code(value: object) -> str:
     match = re.search(r"(?i)([A-ZА-ЯЁ])\s*(\d{2})(?:[.,]\s*([0-9A-ZА-ЯЁ]+))?", str(value or ""))
     if not match:
@@ -653,7 +666,9 @@ def rendered_case_consistency_errors(output: str | Path, case: object, document:
     }
     expected_fio = case_get("patient.fio")
     if expected_fio and ("patient.fio" in declared or role in medical_roles):
-        if _normalized_case_text(expected_fio) not in normalized_text:
+        normalized_identity = _normalized_identity_text(expected_fio)
+        rendered_identity = _normalized_identity_text(text)
+        if normalized_identity and normalized_identity not in rendered_identity:
             errors.append("ФИО созданного документа не совпадает с канонической карточкой пациента")
 
     demographic_re = re.compile(
@@ -664,7 +679,7 @@ def rendered_case_consistency_errors(output: str | Path, case: object, document:
         match = demographic_re.match(line)
         if not match:
             continue
-        if expected_fio and _normalized_case_text(match.group("fio")) != _normalized_case_text(expected_fio):
+        if expected_fio and _normalized_identity_text(match.group("fio")) != _normalized_identity_text(expected_fio):
             errors.append("в демографической строке остались данные другого пациента")
         expected_birth = case_get("patient.birth_date")
         if expected_birth and match.group("birth") != expected_birth:
