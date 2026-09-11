@@ -136,8 +136,23 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
     case = PatientCase()
     objective_status = data.somatic_status
     try:
-        from medical_expert import build_expert_anamnesis
-        expert_anamnesis = build_expert_anamnesis(data)
+        from copy import copy
+        from medical_expert import build_expert_anamnesis, normalize_yes_no
+
+        expert_data = data
+        work_status = normalize_yes_no(data.expert_work_status)
+        has_work_details = bool(
+            str(data.expert_work_org or data.work_org or "").strip()
+            or str(data.expert_position or data.position or "").strip()
+        )
+        # A bare affirmative flag is not medical narrative.  Preserve explicit
+        # work details, explicit "not working" semantics and any independently
+        # confirmed sick-leave facts, but never manufacture "Работает." from a
+        # yes/no control with no organization or position behind it.
+        if work_status == "да" and not has_work_details:
+            expert_data = copy(data)
+            expert_data.expert_work_status = ""
+        expert_anamnesis = build_expert_anamnesis(expert_data)
     except Exception:
         expert_anamnesis = ""
     discharge_summary = _discharge_summary(data)
