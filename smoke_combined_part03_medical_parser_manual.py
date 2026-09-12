@@ -110,6 +110,7 @@ assert format_military_commissariat_area("Сормовский и Московс
 
 manual_data = service.parse_navigation(nav)
 manual_data.discharge_date = "11.06.2026"
+manual_data.admission_mode = "первично"
 manual_data.diagnosis = "F99.9 Тестовый диагноз из UI"
 manual_data.rvk_act_number = "77-А"
 manual_data.rvk_military_commissariat = "Ленинского"

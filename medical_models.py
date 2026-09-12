@@ -38,6 +38,8 @@ class PatientData:
     disability: str = ""
     rvk_referral: str = ""
     admission: str = ""
+    # Doctor-confirmed way this hospitalization starts; only these two values are valid.
+    admission_mode: str = ""  # первично / повторно
 
     complaints: str = ""
     life_anamnesis: str = ""

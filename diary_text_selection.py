@@ -235,6 +235,46 @@ def _semantic_keys(value: str) -> set[str]:
     return keys
 
 
+
+def diary_filename_matches_diagnosis(diagnosis: str, filename: str) -> bool:
+    """Return True only when a diary-text filename genuinely names the diagnosis.
+
+    Automatic selection must be deterministic and diagnosis-owned.  A merely
+    related word is not enough: explicit ICD conflicts are rejected, while a
+    filename such as ``шизофрения.docx`` is accepted for a fuller diagnosis
+    such as ``F20.0 Параноидная шизофрения``.
+    """
+    diagnosis_norm = normalize_diary_diagnosis_name(diagnosis)
+    filename_norm = normalize_diary_diagnosis_name(filename)
+    if not diagnosis_norm or not filename_norm:
+        return False
+
+    diag_bases, diag_leaves = _explicit_icd_codes(diagnosis)
+    name_bases, name_leaves = _explicit_icd_codes(filename)
+    if diag_bases and name_bases:
+        if not (diag_bases & name_bases):
+            return False
+        if diag_leaves and name_leaves and not (diag_leaves & name_leaves):
+            return False
+        # A compatible code is a strong guard, but not permission to select an
+        # unrelated filename. The disease wording still has to correspond.
+
+    if diagnosis_norm == filename_norm or diagnosis_norm in filename_norm or filename_norm in diagnosis_norm:
+        return True
+
+    diag_stems = {_stem_russian_word(word) for word in _significant_words(diagnosis_norm)}
+    name_stems = {_stem_russian_word(word) for word in _significant_words(filename_norm)}
+    diag_stems.discard("")
+    name_stems.discard("")
+    if not diag_stems or not name_stems:
+        return False
+
+    # The meaningful disease words from the filename must all be present in the
+    # diagnosis (or vice versa when the filename carries a fuller wording).
+    # This keeps ``шизофрения`` -> ``параноидная шизофрения`` working without
+    # allowing a one-word fuzzy overlap to select a different disease template.
+    return name_stems.issubset(diag_stems) or diag_stems.issubset(name_stems)
+
 def diary_diagnosis_match_score(diagnosis: str, filename: str) -> int:
     diag_bases, diag_leaves = _explicit_icd_codes(diagnosis)
     name_bases, name_leaves = _explicit_icd_codes(filename)
@@ -332,8 +372,10 @@ def find_diary_text_file_for_diagnosis(folder: str | Path, diagnosis: str) -> Pa
     diagnosis_keys = _semantic_keys(diagnosis)
     candidates: list[tuple[int, int, int, str, Path]] = []
     for path in iter_diary_text_docx_files(folder):
+        if not diary_filename_matches_diagnosis(diagnosis, path.stem):
+            continue
         score = diary_diagnosis_match_score(diagnosis, path.stem)
-        if score < MIN_AUTO_DIARY_MATCH_SCORE:
+        if score <= 0:
             continue
         name_norm = normalize_diary_diagnosis_name(path.stem)
         name_keys = _semantic_keys(path.stem)

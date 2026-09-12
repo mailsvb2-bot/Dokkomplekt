@@ -42,7 +42,25 @@ def _normalize_icd10_code(value: str) -> str:
     translation = cast(dict[str | int, str | int | None], {"А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P", "С": "C", "Т": "T", "Х": "X"})
     code = code.translate(str.maketrans(translation))
     return code
-_LABEL_VALUE_RE_TEMPLATE = r"(?is)(?:^|[\n\r]|\b){label}\s*(?:[:\-–—№Nn]+)?\s*(.+?)(?=$|[\n\r])"
+_WORD_BOUNDARY_CLASS = r"0-9A-Za-zА-Яа-яЁёĄąĆćĘęŁłŃńÓóŚśŹźŻż"
+
+
+def _bounded_label_pattern(label: str) -> str:
+    """Return a registry-label regex that cannot match inside a longer word.
+
+    This is critical for short medical labels: ``ЭПИ`` must not match the
+    beginning of ``эпидемиологический`` or the middle of ``эпикриз``.
+    """
+    raw = str(label or "").strip()
+    escaped = re.escape(raw)
+    if not raw:
+        return r"$^"
+    left = rf"(?<![{_WORD_BOUNDARY_CLASS}])" if raw[0].isalnum() else ""
+    right = rf"(?![{_WORD_BOUNDARY_CLASS}])" if raw[-1].isalnum() else ""
+    return left + escaped + right
+
+
+_LABEL_VALUE_RE_TEMPLATE = r"(?is){label}[ \t]*(?:[:\-–—№Nn]+)?[ \t]*(.+?)(?=$|[\n\r]|\|)"
 _BLOCK_GUARD_WORDS = (
     "Ф.И.О.", "ФИО", "Дата рождения", "Год рождения", "Возраст", "История болезни",
     "Дата поступления", "Дата госпитализации", "Дата приема", "Дата приёма", "Дата осмотра", "Дата выписки", "Жалобы",
@@ -258,6 +276,7 @@ def scan_docx(
     matches.extend(_scan_with_registry_aliases(blocks, registry))
     matches.extend(_scan_known_regexes(blocks, registry))
     matches.extend(_scan_block_fields(joined, blocks, registry))
+    matches.extend(_scan_labs_results(joined, blocks, registry))
     matches.extend(_scan_with_saved_rules(blocks, registry, rules))
 
     deduped = _dedupe_matches(matches)
@@ -295,6 +314,11 @@ def _scan_with_registry_aliases(blocks: Sequence[DocumentBlock], registry: Field
     matches: list[FieldMatch] = []
     for block in blocks:
         for definition in registry.definitions():
+            # ``labs.types`` describes a set of studies; OAK/OAM/EEG result
+            # values must live in ``labs.results`` and are extracted as one
+            # bounded block below.
+            if definition.value_kind == "block":
+                continue
             for alias in registry.aliases_for(definition.id):
                 value_span = _value_after_label(block.text, alias)
                 if not value_span:
@@ -355,9 +379,11 @@ def _scan_block_fields(joined: str, blocks: Sequence[DocumentBlock], registry: F
     block_field_ids = [definition.id for definition in registry.definitions() if definition.value_kind == "block"]
     guard_regex = _marker_regex(_all_aliases_for_fields(registry, block_field_ids))
     for field_id in block_field_ids:
+        if field_id == "labs.types":
+            continue
         definition = registry.require(field_id)
         for alias in registry.aliases_for(field_id):
-            pattern = re.compile(rf"(?is){re.escape(alias)}\s*[:\-–—]?\s*(.+?)(?=\n\s*(?:{guard_regex})\s*(?:[:\-–—]|\n|$)|$)")
+            pattern = re.compile(rf"(?is)(?:^|\n)\s*{_bounded_label_pattern(alias)}[ \t]*[:\-–—]?[ \t]*(.+?)(?=\n\s*(?:{guard_regex})(?:\s*[:\-–—]\s*|\s+|$)|$)")
             match = pattern.search(joined)
             if not match:
                 continue
@@ -368,6 +394,27 @@ def _scan_block_fields(joined: str, blocks: Sequence[DocumentBlock], registry: F
                 break
     return matches
 
+
+
+def _scan_labs_results(joined: str, blocks: Sequence[DocumentBlock], registry: FieldRegistry) -> list[FieldMatch]:
+    """Extract laboratory/instrumental results as one canonical block.
+
+    Individual test labels are not independent PatientCase fields.  Keeping the
+    whole verified block prevents one OAK value from being copied into OAM/EEG
+    and keeps EPI/epidemiology outside the laboratory section.
+    """
+    try:
+        from medical_renderer_labs import extract_labs_from_text
+        value = extract_labs_from_text(joined)
+    except Exception:
+        value = ""
+    value = _trim_value(value) if value else ""
+    if not value:
+        return []
+    definition = registry.require("labs.results")
+    start = joined.find(value)
+    block_index = _block_index_for_joined_offset(blocks, joined, max(0, start))
+    return [FieldMatch(definition.id, definition.label, value, 0.90, "labs_block", block_index, max(0, start), max(0, start) + len(value), "laboratory section")]
 
 def _scan_with_saved_rules(blocks: Sequence[DocumentBlock], registry: FieldRegistry, rules: Sequence[ExtractionRule]) -> list[FieldMatch]:
     matches: list[FieldMatch] = []
@@ -394,7 +441,7 @@ def _scan_with_saved_rules(blocks: Sequence[DocumentBlock], registry: FieldRegis
         elif rule.strategy == "block_between_markers" and rule.label:
             joined = "\n".join(block.text for block in blocks)
             guard_regex = _marker_regex(_all_aliases_for_fields(registry, [definition.id]))
-            pattern = re.compile(rf"(?is){re.escape(rule.label)}\s*[:\-–—]?\s*(.+?)(?=\n\s*(?:{guard_regex})\s*(?:[:\-–—]|\n|$)|$)")
+            pattern = re.compile(rf"(?is)(?:^|\n)\s*{_bounded_label_pattern(rule.label)}[ \t]*[:\-–—]?[ \t]*(.+?)(?=\n\s*(?:{guard_regex})(?:\s*[:\-–—]\s*|\s+|$)|$)")
             match = pattern.search(joined)
             if match:
                 value = _trim_value(match.group(1))
@@ -434,7 +481,7 @@ def _dedupe_matches(matches: Iterable[FieldMatch]) -> list[FieldMatch]:
 def _value_after_label(text: str, label: str) -> tuple[str, int, int] | None:
     if not label.strip():
         return None
-    pattern = re.compile(_LABEL_VALUE_RE_TEMPLATE.format(label=re.escape(label)), re.IGNORECASE)
+    pattern = re.compile(_LABEL_VALUE_RE_TEMPLATE.format(label=_bounded_label_pattern(label)), re.IGNORECASE)
     match = pattern.search(text)
     if not match:
         return None
@@ -489,7 +536,7 @@ def _looks_like_only_label(value: str, label: str) -> bool:
 
 
 def _marker_regex(markers: Sequence[str]) -> str:
-    escaped = [re.escape(marker) for marker in markers if marker.strip()]
+    escaped = [_bounded_label_pattern(marker) for marker in markers if marker.strip()]
     return "|".join(sorted(set(escaped), key=len, reverse=True)) or r"$^"
 
 

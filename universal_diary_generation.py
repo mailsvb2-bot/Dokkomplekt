@@ -177,6 +177,8 @@ def render_diary_documents_from_pack(
                         treatment=treatment,
                         profile_status=profile_status,
                         sick_leave_from=sick_leave_from,
+                        treating_physician=case.get("doctor.name"),
+                        department_head=case.get("head.name"),
                     )
                     if not result.created_files:
                         raise ValueError("текстовый дневник не был создан")

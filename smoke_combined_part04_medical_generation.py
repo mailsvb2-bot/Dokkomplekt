@@ -110,6 +110,7 @@ else:
     # --- Medical documents without EPI: no ЭПИ mentions should remain ---
     manual_no_epi = service.parse_navigation(nav)
     manual_no_epi.discharge_date = "11.06.2026"
+    manual_no_epi.admission_mode = "повторно"
     manual_no_epi.diagnosis = "F88 Диагноз без дополнительного исследования"
     manual_no_epi.rvk_act_number = "88-Б"
     manual_no_epi.rvk_military_commissariat = "Советского района"

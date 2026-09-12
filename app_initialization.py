@@ -157,6 +157,8 @@ class AppInitializationMixin:
         self.primary_document_type_display_var = tk.StringVar(value="Первичный осмотр")
         self.assigned_treatment_var = tk.StringVar()
         self.case_number_var = tk.StringVar()
+        # Patient-scoped choice used by discharge epicrisis and RVK act.
+        self.admission_mode_var = tk.StringVar()
 
         # Экспертный анамнез / больничный лист.
         # Видимый старт всегда пустой: значения задаются врачом для текущего случая
@@ -344,6 +346,7 @@ class AppInitializationMixin:
         # может автоматически выбрать нужный DOCX по diagnosis_var.
         self.diary_texts_dir: str = ""
         self._diary_text_files_auto_selected = False
+        self._diary_text_auto_selected_diagnosis = ""
         self.diary_files: List[str] = []
         # Папка, выбранная кнопкой «Шаблоны дневников». Сама кнопка теперь
         # выбирает именно папку 01–31, а не отдельный DOCX-файл. Конкретный

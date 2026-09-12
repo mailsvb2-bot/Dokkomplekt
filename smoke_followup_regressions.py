@@ -41,6 +41,7 @@ class _FakeFiles(FilesMixin):
         self.diary_texts_dir = ""
         self.diary_template_dir = ""
         self._diary_text_files_auto_selected = False
+        self._diary_text_auto_selected_diagnosis = ""
         self._diary_files_auto_selected = False
         self.diagnosis_var = _Var("F20.0 Параноидная шизофрения")
         self.output_dir_var = _Var("")
@@ -135,6 +136,40 @@ def test_manual_diary_text_selection_is_not_overridden(tmp: Path) -> None:
     # A later automatic pass must respect the manual override and not switch to auto.
     assert fake._auto_select_diary_text_by_diagnosis(ask_folder=False) is True
     assert fake.status_files == [str(manual)]
+
+
+def test_nonempty_diary_files_without_auto_provenance_are_not_silently_deleted(tmp: Path) -> None:
+    texts = tmp / "texts-provenance"
+    texts.mkdir()
+    selected = texts / "тексты F32.docx"
+    _empty_docx(selected)
+    fake = _FakeFiles(tmp)
+    fake.diagnosis_var.set("F32.1 Депрессивный эпизод")
+    fake.status_files = [str(selected)]
+    fake._diary_text_files_auto_selected = True
+    fake._diary_text_auto_selected_diagnosis = ""
+    assert fake._auto_select_diary_text_by_diagnosis(ask_folder=False) is True
+    assert fake.status_files == [str(selected)]
+    assert fake._diary_text_files_auto_selected is False
+
+
+def test_popup_diagnosis_reselects_previous_auto_diary_text(tmp: Path) -> None:
+    texts = tmp / "diagnosis-texts"
+    texts.mkdir()
+    schizophrenia = texts / "F20.0 шизофрения.docx"
+    depression = texts / "F32.1 депрессивный эпизод.docx"
+    _empty_docx(schizophrenia)
+    _empty_docx(depression)
+    fake = _FakeFiles(tmp)
+    fake.diary_texts_dir = str(texts)
+    fake._popup_diagnosis_override = ""
+    assert fake._auto_select_diary_text_by_diagnosis(ask_folder=False) is True
+    assert fake.status_files == [str(schizophrenia)]
+    assert fake._diary_text_files_auto_selected is True
+
+    fake._popup_diagnosis_override = "F32.1 Депрессивный эпизод"
+    assert fake._auto_select_diary_text_by_diagnosis(ask_folder=False) is True
+    assert fake.status_files == [str(depression)]
 
 
 def test_manual_diary_date_template_selection_is_not_auto_replaced(tmp: Path) -> None:
@@ -306,6 +341,7 @@ def main() -> None:
         tmp = Path(tmp_dir)
         test_table_diagnosis_boundaries(tmp)
         test_manual_diary_text_selection_is_not_overridden(tmp)
+        test_popup_diagnosis_reselects_previous_auto_diary_text(tmp)
         test_manual_diary_date_template_selection_is_not_auto_replaced(tmp)
         test_primary_parser_reads_header_footer(tmp)
         test_custom_renderer_preserves_run_formatting(tmp)

@@ -27,6 +27,24 @@ ADMISSION_RESOLVER_COMPARES_MARKER_DISTANCE_WITH_ORIGINAL_POSITIONS = True
 DISCHARGE_RESOLVER_USES_EXPLICIT_DISCHARGE_MARKERS = True
 DISCHARGE_RESOLVER_REJECTS_ADMISSION_AND_BIRTH_CONTEXT = True
 
+VALID_ADMISSION_MODES = ("первично", "повторно")
+
+
+def normalize_admission_mode(value: object) -> str:
+    """Normalize explicit doctor/source wording to the two supported admission modes."""
+    text = " ".join(str(value or "").strip().casefold().replace("ё", "е").split())
+    if text in {"первично", "первичный", "первичная", "впервые", "первый раз"}:
+        return "первично"
+    if text in {"повторно", "повторный", "повторная", "не впервые", "повторный раз"}:
+        return "повторно"
+    return ""
+
+
+def admission_to_department_phrase(value: object) -> str:
+    """Build the canonical department-admission phrase without guessing a mode."""
+    mode = normalize_admission_mode(value)
+    return f"В 3 отделение КДП поступает {mode}" if mode else "В 3 отделение КДП поступает"
+
 _ADMISSION_MARKERS = (
     "дата поступления",
     "дата госпитализации",

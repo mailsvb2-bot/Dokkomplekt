@@ -65,6 +65,10 @@ class DialogDocumentDetailsMixin:
         treatment_var = tk.StringVar(value=self.assigned_treatment_var.get().strip() or self._treatment_popup_default())
         diagnosis_var = tk.StringVar(value=self.diagnosis_var.get().strip() or sanitize_diagnosis(getattr(getattr(self, "data", None), "diagnosis", "")))
         discharge_var = tk.StringVar(value=self._discharge_popup_default())
+        from medical_admission_resolver import normalize_admission_mode
+        admission_mode_var = tk.StringVar(value=normalize_admission_mode(
+            self.admission_mode_var.get() if hasattr(self, "admission_mode_var") else ""
+        ))
         act_var = tk.StringVar(value=self.rvk_act_number_var.get().strip())
         default_military = self.rvk_military_commissariat_var.get().strip()
         if not default_military:
@@ -102,6 +106,19 @@ class DialogDocumentDetailsMixin:
             add_entry("Лечение", treatment_var, width=64)
         if need_discharge_date:
             add_entry("Дата выписки", discharge_var, width=28)
+        tk.Label(frame, text="Поступает первично или повторно?", bg=PANEL, fg=TEXT, font=self._font(10), anchor="w").grid(
+            row=row, column=0, sticky="w", pady=(0, 4)
+        )
+        row += 1
+        admission_mode_frame = tk.Frame(frame, bg=PANEL)
+        admission_mode_frame.grid(row=row, column=0, sticky="w", pady=(0, 10))
+        row += 1
+        for idx, value in enumerate(("первично", "повторно")):
+            tk.Radiobutton(
+                admission_mode_frame, text=value.capitalize(), variable=admission_mode_var, value=value,
+                bg=PANEL, fg=TEXT, selectcolor=FIELD, activebackground=PANEL, activeforeground=TEXT,
+                font=self._font(10), cursor="hand2",
+            ).grid(row=0, column=idx, sticky="w", padx=(0, 18))
         number_entry = add_entry("Номер медицинского заключения", act_var, width=36)
         tk.Label(frame, text="Военкомат", bg=PANEL, fg=TEXT, font=self._font(10), anchor="w").grid(
             row=row, column=0, sticky="w", pady=(0, 6)
@@ -181,6 +198,13 @@ class DialogDocumentDetailsMixin:
                     parent=win,
                 )
                 return
+            admission_mode = normalize_admission_mode(admission_mode_var.get())
+            if not admission_mode:
+                messagebox.showwarning("Не заполнено поле", "Выберите, пациент поступает первично или повторно.", parent=win)
+                return
+            self.admission_mode_var.set(admission_mode)
+            if hasattr(self, "data"):
+                self.data.admission_mode = admission_mode
             if not act_var.get().strip():
                 messagebox.showwarning("Не заполнено поле", "Укажите номер медицинского заключения.", parent=win)
                 return

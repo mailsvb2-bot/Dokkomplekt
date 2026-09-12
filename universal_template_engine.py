@@ -559,6 +559,40 @@ def render_output_name(
 
 
 
+
+def _apply_role_owned_medical_postprocessing(output: Path, case: PatientCase, document: DocumentTemplateSpec) -> None:
+    """Enforce user-confirmed role-owned wording after generic DOCX field filling."""
+    try:
+        from docx import Document as _Document
+        from docx.shared import RGBColor
+        from medical_admission_resolver import admission_to_department_phrase, normalize_admission_mode
+        from medical_docx_editor_utils import iter_all_paragraphs, set_paragraph_text
+        from medical_text_utils import normalize_match
+        from universal_main_documents import document_role_matches_builtin_kind
+
+        is_discharge = document_role_matches_builtin_kind(document, "discharge")
+        is_rvk = document_role_matches_builtin_kind(document, "rvk")
+        if not (is_discharge or is_rvk):
+            return
+        doc = _Document(str(output))
+        changed = False
+        admission_mode = normalize_admission_mode(case.get("admission.mode"))
+        for paragraph in iter_all_paragraphs(doc):
+            normalized = normalize_match(paragraph.text or "")
+            if admission_mode and normalized.startswith("в 3 отделение кдп поступает"):
+                set_paragraph_text(paragraph, admission_to_department_phrase(admission_mode))
+                changed = True
+                continue
+            if is_discharge and normalized.startswith(("находился на лечении", "находилась на лечении")):
+                for run in paragraph.runs:
+                    run.font.color.rgb = RGBColor(0, 0, 0)
+                changed = True
+        if changed:
+            doc.save(str(output))
+    except Exception as exc:
+        record_soft_exception("universal_template_engine.role_owned_postprocessing", exc, detail=str(output))
+        raise
+
 def render_template_to_docx(
     *,
     template_path: str | Path,
@@ -622,6 +656,7 @@ def render_template_to_docx(
                     "Не удалось заполнить видимые поля Word-шаблона: "
                     + ", ".join(unfilled_with_values)
                 )
+        _apply_role_owned_medical_postprocessing(output, case, document)
     except Exception as exc:
         record_soft_exception("universal_template_engine.visible_field_fill", exc, detail=str(output))
         if strict:

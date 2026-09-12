@@ -41,7 +41,7 @@ def _document_text(path: Path) -> str:
 def main() -> None:
     # False here deliberately chooses Word/DOCX in the real format popup.
     # This is the user-facing format required by the production workflow.
-    sim = DoctorSim(answers={("askyesno", "Формат результата"): False})
+    sim = DoctorSim(answers={("askyesno", "Формат результата"): False, ("field", "Поступает первично или повторно"): "первично"})
     try:
         access_dir = sim.root_dir / "production-access"
         os.environ["DOKKOMPLEKT_TEST_DISABLE_PRODUCT_ACCESS"] = "0"

@@ -132,6 +132,13 @@ class MedicalRendererSpecialMixin:
             )
         if data.psych_account:
             editor.replace_first_matching_paragraph(["На учёте", "На учете"], f"Профильное наблюдение {data.psych_account}.")
+        from medical_admission_resolver import admission_to_department_phrase
+        editor.replace_block(
+            ["В 3 отделение КДП поступает", "Поступает"],
+            "",
+            admission_to_department_phrase(data.admission_mode),
+            RVK_MARKERS,
+        )
         editor.replace_block(["Жалобы"], "Жалобы:", data.complaints or "не предъявляет", RVK_MARKERS, allow_empty=True)
         editor.replace_block(["Анамнез жизни"], "Анамнез жизни:", data.life_anamnesis, RVK_MARKERS)
         editor.replace_block(["Анамнез заболевания"], "Анамнез заболевания:", data.disease_anamnesis, RVK_MARKERS)

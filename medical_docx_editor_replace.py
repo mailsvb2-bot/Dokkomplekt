@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Sequence
+from typing import TYPE_CHECKING, Optional, Sequence
 
 from docx.oxml import OxmlElement
 from docx.text.paragraph import Paragraph
@@ -11,6 +11,15 @@ from medical_docx_editor_utils import insert_paragraph_after, paragraph_matches_
 
 
 class DocxEditorReplaceMixin:
+    if TYPE_CHECKING:
+        @property
+        def paragraphs(self) -> list[Paragraph]: ...
+
+        def find_paragraph_index(self, markers: Sequence[str]) -> Optional[int]: ...
+        def find_next_marker_index(
+            self, start: int, markers: Sequence[str], *, exclude: Sequence[str] = ()
+        ) -> Optional[int]: ...
+
     def replace_first_matching_paragraph(self, markers: Sequence[str], text: str) -> bool:
         idx = self.find_paragraph_index(markers)
         if idx is None:

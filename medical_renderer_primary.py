@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from docx import Document
+from docx.shared import RGBColor
 
 from medical_constants import TARGET_MEDICAL_FACILITY
 from medical_docx_editor import (
@@ -110,12 +111,22 @@ class MedicalRendererPrimaryMixin:
         birth_text = format_birth_for_person_line(data.birth)
         person_line = f"{data.fio}, {birth_text}, зарегистрирован по адресу: {data.registered}".strip(" ,")
         editor.replace_first_matching_paragraph(["г.р.,", "зарегистрирован по адресу"], person_line)
-        period = f"Находился на лечении в медицинской организации по профилю с {data.admission_date} по {data.discharge_date}".strip()
-        editor.replace_first_matching_paragraph(["Находился на лечении"], period)
+        period = f"Находился на лечении в {TARGET_MEDICAL_FACILITY} с {data.admission_date} по {data.discharge_date}".strip()
+        period_index = editor.find_paragraph_index(["Находился на лечении", "Находилась на лечении"])
+        if period_index is not None:
+            set_paragraph_text(editor.paragraphs[period_index], period)
+            for run in editor.paragraphs[period_index].runs:
+                run.font.color.rgb = RGBColor(0, 0, 0)
 
         put_expert_anamnesis(editor, data, DISCHARGE_MARKERS, ["В 3 отделение КДП поступает"])
 
-        editor.replace_block(["В 3 отделение КДП поступает", "Поступает"], "Поступает:", data.admission, DISCHARGE_MARKERS)
+        from medical_admission_resolver import admission_to_department_phrase
+        editor.replace_block(
+            ["В 3 отделение КДП поступает", "Поступает"],
+            "",
+            admission_to_department_phrase(data.admission_mode),
+            DISCHARGE_MARKERS,
+        )
         editor.replace_block(["Жалобы при поступлении", "Жалобы"], "Жалобы при поступлении:", data.complaints, DISCHARGE_MARKERS)
         editor.replace_block(["Анамнез жизни"], "Анамнез жизни:", data.life_anamnesis, DISCHARGE_MARKERS)
         editor.replace_block(["Анамнез заболевания"], "Анамнез заболевания:", data.disease_anamnesis, DISCHARGE_MARKERS)
@@ -139,4 +150,10 @@ class MedicalRendererPrimaryMixin:
         signature = f"  Зав. отд. {data.head}                                                                                                 Врач\t{data.doctor}"
         editor.replace_first_matching_paragraph(["Зав. отд.", "Врач"], signature)
         finalize_medical_document(doc, data)
+        # Gender adaptation may rebuild this paragraph and thereby re-inherit
+        # a red template style. The final saved treatment-period line is always black.
+        period_index = editor.find_paragraph_index(["Находился на лечении", "Находилась на лечении"])
+        if period_index is not None:
+            for run in editor.paragraphs[period_index].runs:
+                run.font.color.rgb = RGBColor(0, 0, 0)
         doc.save(str(output_path))

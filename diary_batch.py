@@ -7,6 +7,7 @@ from typing import Iterable, Sequence
 import re
 
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 from diagnostic_logging import record_soft_exception
 from diary_dates import parse_full_date, parse_full_datetime, parse_optional_discharge_date
@@ -21,11 +22,31 @@ from medical_docx_xml_fragments import ensure_docx_compatible, existing_word_fil
 from medical_formatting import redact_technical_text, safe_filename, technical_ref, technical_report_path
 
 MAX_INTRADAY_TEXT_DIARY_ENTRIES = 20000
-TEXT_DIARY_SIGNATURE_LOCK_VERSION = "v1.0"
+TEXT_DIARY_SIGNATURE_LOCK_VERSION = "v1.1"
 TEXT_DIARY_SIGNATURE_LINES = (
     "Лечащий врач ____________________",
-    "Зав. отделением ____________________",
+    "Зав.отделением ____________________",
 )
+
+
+def _signature_person_name(value: object) -> str:
+    text = " ".join(str(value or "").strip().split())
+    if not text:
+        return ""
+    # Source templates often include the role together with the person's name.
+    # Keep the person only so the output owns one canonical role label.
+    text = re.sub(
+        r"(?i)^\s*(?:лечащий\s+врач|врач(?:-психиатр)?|заведующ(?:ий|ая)\s+отделением|зав\.?\s*отделением|зав\.?\s*отд\.?)\s*[:—–-]?\s*",
+        "",
+        text,
+    ).strip()
+    return text
+
+
+def text_diary_signature_lines(treating_physician: object = "", department_head: object = "") -> tuple[str, str]:
+    doctor = _signature_person_name(treating_physician) or "____________________"
+    head = _signature_person_name(department_head) or "____________________"
+    return (f"Лечащий врач {doctor}", f"Зав.отделением {head}")
 
 
 @dataclass(frozen=True)
@@ -37,6 +58,8 @@ class DynamicEpicrisisInput:
     treatment: str = ""
     profile_status: str = ""
     treatment_correction: str = ""
+    treating_physician: str = ""
+    department_head: str = ""
 
 
 def default_observation_diary_dates(admission: date, *, limit: int = 20, discharge_date: date | None = None) -> tuple[date, ...]:
@@ -84,8 +107,7 @@ def build_dynamic_epicrisis_text(data: DynamicEpicrisisInput) -> str:
         f"Профильный статус: {data.profile_status or 'без существенной динамики'}.",
         correction,
         "Продолжение лечения по листу нетрудоспособности.",
-        "Заведующий отделением ____________________",
-        "Лечащий врач ____________________",
+        *text_diary_signature_lines(data.treating_physician, data.department_head),
     ])
 
 
@@ -408,13 +430,34 @@ def _neutral_final_diary_entry(date_value: date, patient_gender: str | None) -> 
     return date_value, f"{date_value:%d.%m.%y} {adapted_final_text}".rstrip()
 
 
-def _add_text_diary_signature_block(doc: Document) -> None:
-    """Append the legacy doctor/head signature block after one diary entry."""
-    for line in TEXT_DIARY_SIGNATURE_LINES:
-        doc.add_paragraph(line)
+def _add_text_diary_signature_block(
+    doc: Document,
+    *,
+    treating_physician: str = "",
+    department_head: str = "",
+) -> None:
+    """Append both source-owned signature roles, right-aligned, after one diary entry."""
+    for line in text_diary_signature_lines(treating_physician, department_head):
+        paragraph = doc.add_paragraph(line)
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
 
-def _create_text_diary_document(output_dir: Path, patient_name: str, entries: Sequence[tuple[date, str]], epicrisis_entries: Sequence[tuple[date, str]]) -> Path:
+def _right_align_all_text_diary_signatures(doc: Document) -> None:
+    """Right-align signature paragraphs, including signatures inside dynamic epicrises."""
+    for paragraph in doc.paragraphs:
+        if is_signature_paragraph_text(paragraph.text):
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+
+def _create_text_diary_document(
+    output_dir: Path,
+    patient_name: str,
+    entries: Sequence[tuple[date, str]],
+    epicrisis_entries: Sequence[tuple[date, str]],
+    *,
+    treating_physician: str = "",
+    department_head: str = "",
+) -> Path:
     target = available_path(output_dir / safe_filename(make_diary_output_name(safe_filename_part(patient_name), file_index=1, total_files=1)))
     doc = Document()
     blocks: list[tuple[date, int, tuple[str, ...]]] = []
@@ -430,7 +473,10 @@ def _create_text_diary_document(output_dir: Path, patient_name: str, entries: Se
         for line in lines:
             doc.add_paragraph(line)
         if block_kind == 0:
-            _add_text_diary_signature_block(doc)
+            _add_text_diary_signature_block(
+                doc, treating_physician=treating_physician, department_head=department_head
+            )
+    _right_align_all_text_diary_signatures(doc)
     doc.save(str(target))
     return target
 
@@ -453,6 +499,8 @@ def _fill_text_diary_batch(
     treatment: str,
     profile_status: str,
     sick_leave_from: str,
+    treating_physician: str,
+    department_head: str,
     write_report: bool,
     diary_day_offsets: Sequence[int],
     force_final_diary: bool,
@@ -486,9 +534,26 @@ def _fill_text_diary_batch(
     epicrisis_entries: list[tuple[date, str]] = []
     if sick_leave_dynamic_epicrisis:
         epicrisis_base_date = _dynamic_epicrisis_base_date(admission_date_value, sick_leave_from)
-        data = DynamicEpicrisisInput(patient_name, birth_date, f"{epicrisis_base_date:%d.%m.%Y}", complaints, treatment, profile_status, treatment_correction)
+        data = DynamicEpicrisisInput(
+            patient_name=patient_name,
+            birth_date=birth_date,
+            sick_leave_from=f"{epicrisis_base_date:%d.%m.%Y}",
+            complaints=complaints,
+            treatment=treatment,
+            profile_status=profile_status,
+            treatment_correction=treatment_correction,
+            treating_physician=treating_physician,
+            department_head=department_head,
+        )
         epicrisis_entries = [(d, build_dynamic_epicrisis_text(data)) for d in dynamic_epicrisis_dates(epicrisis_base_date, discharge_date=discharge_date_value, limit=12)]
-    created = _create_text_diary_document(result_dir, patient_name, entries, epicrisis_entries)
+    created = _create_text_diary_document(
+        result_dir,
+        patient_name,
+        entries,
+        epicrisis_entries,
+        treating_physician=treating_physician,
+        department_head=department_head,
+    )
     report_path: Path | None = None
     if write_report:
         patient_filename = safe_filename_part(patient_name)
@@ -537,6 +602,8 @@ def fill_diary_batch(
     treatment: str = "",
     profile_status: str = "",
     sick_leave_from: str = "",
+    treating_physician: str = "",
+    department_head: str = "",
 ) -> DiaryBatchResult:
     """Validate diary inputs and create text-route diary output for one patient."""
     _ = (reset_each_file, keep_signature, fill_months, remove_holiday_rows, text_output)
@@ -581,6 +648,8 @@ def fill_diary_batch(
         treatment=treatment,
         profile_status=profile_status,
         sick_leave_from=sick_leave_from,
+        treating_physician=treating_physician,
+        department_head=department_head,
         write_report=write_report,
         diary_day_offsets=tuple(int(x) for x in diary_day_offsets),
         diary_hour_offsets=tuple(int(x) for x in diary_hour_offsets),

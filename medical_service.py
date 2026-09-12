@@ -205,6 +205,10 @@ class MedicalDocumentService:
         if {"discharge", "rvk"} & selected_set:
             data.discharge_date = self._normalize_required_date(data.discharge_date, "Дата выписки")
             self._ensure_discharge_not_before_admission(data.admission_date, data.discharge_date)
+            from medical_admission_resolver import normalize_admission_mode
+            data.admission_mode = normalize_admission_mode(data.admission_mode)
+            if not data.admission_mode:
+                raise ValueError("Укажите, пациент поступает первично или повторно.")
         expert_sick_needed = self._infer_expert_sick_leave_needed(data)
         if expert_sick_needed:
             data.expert_sick_leave_needed = expert_sick_needed
@@ -252,6 +256,12 @@ class MedicalDocumentService:
             data.rvk_military_commissariat = self._require_text(data.rvk_military_commissariat, "военкомат для Акта РВК")
 
     def _normalize_available_selected_data(self, data: PatientData, selected: Sequence[str]) -> None:
+        selected_set = set(selected)
+        if {"discharge", "rvk"} & selected_set:
+            from medical_admission_resolver import normalize_admission_mode
+            data.admission_mode = normalize_admission_mode(data.admission_mode)
+            if not data.admission_mode:
+                raise ValueError("Укажите, пациент поступает первично или повторно.")
         if data.admission_date:
             data.admission_date = self._normalize_required_date(data.admission_date, "Дата госпитализации")
         if data.discharge_date:
