@@ -1,0 +1,36 @@
+name: Materialize exact PR 59 follow-up
+
+on:
+  push:
+    branches:
+      - transport/document-generation-1498-ci2
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply exact patch and update PR branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_head='6014faf15bf607f63d6dcfbf56b9209dfeca80e8'
+          expected_tree='24615f61d6e2d90b4b7bb8605503018e7c9e16cc'
+          expected_patch_sha='eb1ee00f8b353f26ecf4b0bc1948e9c2a4a38bdba83ecf480a4e67632ea3e042'
+          git fetch origin fix/document-generation-1498
+          test "$(git rev-parse origin/fix/document-generation-1498)" = "$expected_head"
+          git checkout --detach "$expected_head"
+          curl -fsS https://paste.rs/lF2W6 | base64 -d | gzip -dc > /tmp/fix.patch
+          echo "$expected_patch_sha  /tmp/fix.patch" | sha256sum -c -
+          git apply --index /tmp/fix.patch
+          test "$(git write-tree)" = "$expected_tree"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Fix diary selection provenance and CI type contracts'
+          test "$(git rev-parse HEAD^{tree})" = "$expected_tree"
+          git push origin HEAD:refs/heads/fix/document-generation-1498 --force-with-lease=refs/heads/fix/document-generation-1498:$expected_head
