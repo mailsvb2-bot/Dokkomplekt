@@ -1,6 +1,10 @@
 # MedicalDiaryAutofill / Dokkomplekt
 
-Version: `v1.4.98_document_generation_hotfix`
+Version: `v1.4.99_embedded_diary_text_source_hotfix`
+
+## v1.4.99 — embedded diary text source hotfix
+
+Исправлен реальный путь doctor-owned кнопки «Дневн»: если тексты наблюдений находятся внутри самого DOCX-шаблона врача, мастер дневников использует тот же подтверждённый источник и больше не откатывает создание с ложным сообщением «Выберите тексты дневников». Добавлена сквозная проверка embedded diary text source propagation на датах 30.09.2025 → 05.06.2026 и реальный renderer без внешнего `status_files`.
 
 ## v1.4.98 — document generation hotfix
 

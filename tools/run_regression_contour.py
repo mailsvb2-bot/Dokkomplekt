@@ -52,6 +52,7 @@ COMMANDS: tuple[tuple[str, ...], ...] = (
         "tests/test_unified_patient_case_architecture_v1531.py",
         "tests/test_user_reported_generation_fixes_v1498.py",
         "tests/test_user_reported_formatting_and_rvk_v1498.py",
+        "tests/test_embedded_diary_text_wizard_regression_v1498.py",
     ),
     (sys.executable, "smoke_user_reported_regressions.py"),
     (sys.executable, "smoke_followup_regressions.py"),

@@ -265,7 +265,9 @@ class ActionsUniversalFlowMixin:
                 regular_ids.append(document_id)
         return diary_ids, regular_ids
 
-    def _ensure_diary_text_files_for_creation(self, current_pack=None, diary_ids: List[str] | None = None) -> None:
+    def _ensure_diary_text_files_for_creation(
+        self, current_pack=None, diary_ids: List[str] | None = None
+    ) -> tuple[str, ...]:
         """Ensure custom diaries have a real text source before generation.
 
         External diagnosis-matched text files remain preferred when selected.  If
@@ -273,14 +275,21 @@ class ActionsUniversalFlowMixin:
         texts, the template itself is the text source and no redundant chooser is
         shown.
         """
+        def selected_file_labels() -> tuple[str, ...]:
+            return tuple(
+                Path(item).name
+                for item in (getattr(self, "status_files", None) or ())
+                if str(item).strip()
+            )
+
         status_files = getattr(self, "status_files", None)
         auto_selected = bool(getattr(self, "_diary_text_files_auto_selected", False))
         if status_files and not auto_selected:
-            return
+            return selected_file_labels()
         if auto_selected:
             auto_select = getattr(self, "_auto_select_diary_text_by_diagnosis", None)
             if callable(auto_select) and auto_select(ask_folder=False) and getattr(self, "status_files", None):
-                return
+                return selected_file_labels()
         if current_pack is not None and diary_ids:
             try:
                 from universal_diary_generation import diary_documents_have_embedded_status_texts
@@ -290,13 +299,20 @@ class ActionsUniversalFlowMixin:
                     document_ids=diary_ids,
                     base_dir=self._universal_profile_path().parent,
                 ):
-                    return
+                    labels: list[str] = []
+                    for document_id in diary_ids:
+                        document = current_pack.document_by_id(document_id)
+                        title = str(getattr(document, "name", "") or "").strip() if document is not None else ""
+                        template = str(getattr(document, "template", "") or "").strip() if document is not None else ""
+                        label = title or (Path(template).name if template else "") or str(document_id)
+                        labels.append(f"тексты внутри шаблона: {label}")
+                    return tuple(labels or ("тексты внутри выбранного шаблона дневников",))
             except Exception as exc:
                 from diagnostic_logging import record_soft_exception
                 record_soft_exception("actions_universal_flow.embedded_diary_text_probe", exc)
         auto_select = getattr(self, "_auto_select_diary_text_by_diagnosis", None)
         if callable(auto_select) and auto_select(ask_folder=False) and getattr(self, "status_files", None):
-            return
+            return selected_file_labels()
         chooser = getattr(self, "choose_status_files", None)
         if callable(chooser):
             chooser()
@@ -304,15 +320,20 @@ class ActionsUniversalFlowMixin:
             raise ValueError(
                 "Выберите файл(ы) с текстами дневников или используйте свой шаблон, в котором уже есть тексты наблюдения."
             )
+        return selected_file_labels()
 
     def _create_custom_diary_documents_impl(self, current_pack, case, diary_ids: List[str], out_dir) -> List[Path]:
         """Create doctor-owned custom diary documents with confirmed text files and calendar settings."""
-        self._ensure_diary_text_files_for_creation(current_pack, diary_ids)
+        text_source_labels = self._ensure_diary_text_files_for_creation(current_pack, diary_ids)
 
         from diary_creation_wizard import confirm_diary_creation, current_diary_calendar_schedule
 
-        if not confirm_diary_creation(self):
-            raise ValueError("Создание дневников из вашего шаблона остановлено: проверьте дату госпитализации, дату выписки, тексты и выбранный принцип дневников.")
+        if not confirm_diary_creation(self, text_source_labels=text_source_labels):
+            review = getattr(self, "_last_diary_wizard_review", None)
+            warnings = tuple(getattr(review, "warnings", ()) or ()) if review is not None else ()
+            if warnings:
+                raise ValueError("Мастер дневников: " + "; ".join(str(item) for item in warnings))
+            raise ValueError("Создание дневников отменено в мастере дневников.")
         diary_schedule = current_diary_calendar_schedule(self, fallback=self._selected_profile_diary_schedule())
         diary_mode = getattr(diary_schedule, "mode", "daily") if diary_schedule else "daily"
 
