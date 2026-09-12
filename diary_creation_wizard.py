@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 import os
 
 from diagnostic_logging import record_soft_exception
@@ -291,11 +292,18 @@ def prompt_diary_calendar_principle(app: object) -> bool:
             current = str(style or "").strip() or current
 
 
-def build_diary_wizard_review(app: object) -> DiaryWizardReview:
+def build_diary_wizard_review(
+    app: object,
+    *,
+    text_source_labels: Sequence[str] | None = None,
+) -> DiaryWizardReview:
     patient = _get_var(app, "patient_name_var")
     admission = current_semantic_date(app, "admission_date") or _get_var(app, "admission_date_var")
     discharge = current_semantic_date(app, "discharge_date") or _get_var(app, "discharge_date_var")
-    texts = tuple(Path(item).name for item in getattr(app, "status_files", []) or [])
+    if text_source_labels is None:
+        texts = tuple(Path(item).name for item in getattr(app, "status_files", []) or [])
+    else:
+        texts = tuple(str(item).strip() for item in text_source_labels if str(item).strip())
     sick_leave_dynamic_epicrisis = _normalize_yes_no(_get_var(app, "expert_sick_leave_needed_var")) == "да"
     schedule = current_diary_calendar_schedule(app)
     frequency_mode = schedule.mode if schedule.mode in {"daily", "hourly"} else "daily"
@@ -320,10 +328,14 @@ def build_diary_wizard_review(app: object) -> DiaryWizardReview:
     return DiaryWizardReview(patient, admission, discharge, texts, sick_leave_dynamic_epicrisis, frequency_mode, day_offsets, hour_offsets, minute_offsets, describe_schedule(schedule), tuple(warnings))
 
 
-def confirm_diary_creation(app: object) -> bool:
+def confirm_diary_creation(
+    app: object,
+    *,
+    text_source_labels: Sequence[str] | None = None,
+) -> bool:
     if not prompt_diary_calendar_principle(app):
         return False
-    review = build_diary_wizard_review(app)
+    review = build_diary_wizard_review(app, text_source_labels=text_source_labels)
     try:
         if hasattr(app, "_last_diary_wizard_review"):
             app._last_diary_wizard_review = review
