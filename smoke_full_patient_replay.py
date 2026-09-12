@@ -180,6 +180,7 @@ def _build_app(primary_path: Path, patient_dir: Path, profile_path: Path, pack):
     app.admission_date_var = _Var("")
     app.discharge_date_var = _Var("")
     app.diagnosis_var = _Var("")
+    app.admission_mode_var = _Var("")
     app.case_number_var = _Var("")
     app.assigned_treatment_var = _Var("")
     app.epi_path_var = _Var("")
@@ -258,7 +259,13 @@ def _run_application_user_journey() -> None:
         profile_path, pack = _build_profile(root)
         app = _build_app(primary, patient_dir, profile_path, pack)
         popup_calls: list[tuple[str, list[str]]] = []
-        popup_values = {"Номер истории болезни": "К-777", "Лечение": "терапия из пользовательского popup", "Диагноз": "K35.8 Острый аппендицит", "Дата выписки": "05092026"}
+        popup_values = {
+            "Номер истории болезни": "К-777",
+            "Лечение": "терапия из пользовательского popup",
+            "Диагноз": "K35.8 Острый аппендицит",
+            "Поступает первично или повторно": "первично",
+            "Дата выписки": "05092026",
+        }
         def prompt_fields(title, rows, **_kwargs):
             labels = [label for label, _default in rows]
             popup_calls.append((title, labels))
@@ -272,6 +279,9 @@ def _run_application_user_journey() -> None:
         assert "Номер истории болезни" in popup_calls[0][1]
         assert "Лечение" in popup_calls[0][1]
         assert "Дата выписки" in popup_calls[0][1]
+        assert "Поступает первично или повторно" in popup_calls[0][1]
+        assert app.admission_mode_var.get() == "первично"
+        assert app.data.admission_mode == "первично"
         created = sorted(path for path in patient_dir.glob("*.docx") if path != primary)
         assert len(created) == 3, [path.name for path in created]
         by_name = {path.name: extract_docx_text(path) for path in created}
