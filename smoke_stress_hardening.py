@@ -19,7 +19,7 @@ from docx import Document
 
 from project_auditor import audit_project
 from universal_fields import PatientCase
-from universal_generation import _available_batch_path, analyze_pack_readiness, render_documents_from_pack
+from universal_generation import PackGenerationResult, _available_batch_path, analyze_pack_readiness, render_documents_from_pack
 from universal_profiles import DocumentPack, DocumentTemplateSpec
 from app_initialization import AppInitializationMixin
 from files_mixin import FilesMixin
@@ -44,10 +44,14 @@ from settings_mixin import SettingsMixin
 
 ROOT = Path(__file__).resolve().parent
 SELF_TEST_NAME = "smoke_stress_hardening.py"
-STRESS_HARDENING_LOCK_VERSION = "v1.3"
+STRESS_HARDENING_LOCK_VERSION = "v1.4"
 STRESS_PROJECT_AUDITOR_IGNORES_GENERATED_OUTPUTS = True
 STRESS_BATCH_ALLOCATOR_HAS_NO_999_LIMIT = True
-STRESS_RENDER_BUDGET_SECONDS = 4.0
+STRESS_RENDER_SOFT_TARGET_SECONDS = 4.0
+STRESS_RENDER_HARD_LIMIT_SECONDS = 20.0
+STRESS_RENDER_SMALL_BATCH = 9
+STRESS_RENDER_LARGE_BATCH = 36
+STRESS_RENDER_MAX_SCALING_RATIO = 6.0
 STRESS_RENDER_MAX_ATTEMPTS = 2
 STRESS_AUDITOR_BUDGET_SECONDS = 8.0
 STRESS_V1428_REGRESSION_GUARDS = True
@@ -250,7 +254,7 @@ def _case(**values: str) -> PatientCase:
 
 
 def assert_stress_hardening_lock() -> None:
-    if STRESS_HARDENING_LOCK_VERSION != "v1.3":
+    if STRESS_HARDENING_LOCK_VERSION != "v1.4":
         raise AssertionError("Stress hardening lock changed unexpectedly")
     if not STRESS_PROJECT_AUDITOR_IGNORES_GENERATED_OUTPUTS:
         raise AssertionError("Project auditor must ignore generated smoke outputs")
@@ -258,6 +262,10 @@ def assert_stress_hardening_lock() -> None:
         raise AssertionError("Batch output allocator must stay free of 999 duplicate limit")
     if not STRESS_V1428_REGRESSION_GUARDS:
         raise AssertionError("v1.4.28 regression guards must stay enabled")
+    if STRESS_RENDER_SMALL_BATCH != 9 or STRESS_RENDER_LARGE_BATCH != 36:
+        raise AssertionError("Render stress scaling batches must stay at 9 and 36 documents")
+    if STRESS_RENDER_MAX_SCALING_RATIO != 6.0:
+        raise AssertionError("Render stress scaling limit changed unexpectedly")
     if STRESS_RENDER_MAX_ATTEMPTS != 2:
         raise AssertionError("Render stress must retry once to filter hosted-runner jitter")
     _assert_v1427_regression_guards()
@@ -333,47 +341,93 @@ def _assert_large_medpack_readiness_is_fast() -> None:
             raise AssertionError(f"Medpack readiness stress too slow: {elapsed:.3f}s")
 
 
+def _render_stress_batch(root: Path, *, count: int, label: str) -> tuple[float, PackGenerationResult]:
+    documents = tuple(
+        DocumentTemplateSpec(
+            id=f"{label}_{index}",
+            button_label="Одинаковый документ",
+            template="template.docx",
+            output_name="{{patient.fio}} Одинаковый документ.docx",
+            required_fields=("patient.fio", "diagnosis.main"),
+        )
+        for index in range(count)
+    )
+    pack = DocumentPack(pack_id=f"render_stress_{label}", name="Render stress", documents=documents)
+    case = _case(**{"patient.fio": "Иванов Иван", "diagnosis.main": "K35.8"})
+    started = time.perf_counter()
+    result = render_documents_from_pack(
+        pack=pack,
+        case=case,
+        document_ids=[document.id for document in documents],
+        output_dir=root / label,
+        base_dir=root,
+        strict=True,
+        output_language="ru",
+        spellcheck_enabled=True,
+    )
+    return time.perf_counter() - started, result
+
+
 def _assert_batch_render_is_reasonably_fast() -> None:
+    """Reject super-linear batch regressions without benchmarking runner horsepower.
+
+    Hosted GitHub runners can differ substantially in CPU and disk speed between
+    regions.  A fixed four-second pass/fail threshold therefore produced false
+    failures for byte-identical trees.  The invariant that matters here is batch
+    scaling: increasing the workload from 9 to 36 documents (4x) must not make
+    rendering grow pathologically.  A generous 6x ratio still catches the old
+    O(N²) output-name allocator while tolerating normal scheduling/I/O jitter.
+    The historical four-second target remains diagnostic, and a separate hard
+    limit still catches hangs or catastrophic per-document slowdowns.
+    """
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         _make_docx(root / "template.docx", "Пациент {{patient.fio}}. Диагноз {{diagnosis.main}}.")
-        documents = tuple(
-            DocumentTemplateSpec(
-                id=f"doc_{index}",
-                button_label="Одинаковый документ",
-                template="template.docx",
-                output_name="{{patient.fio}} Одинаковый документ.docx",
-                required_fields=("patient.fio", "diagnosis.main"),
-            )
-            for index in range(36)
-        )
-        pack = DocumentPack(pack_id="render_stress", name="Render stress", documents=documents)
-        case = _case(**{"patient.fio": "Иванов Иван", "diagnosis.main": "K35.8"})
-        timings: list[float] = []
+
+        small_timings: list[float] = []
         for attempt in range(STRESS_RENDER_MAX_ATTEMPTS):
-            started = time.perf_counter()
-            result = render_documents_from_pack(
-                pack=pack,
-                case=case,
-                document_ids=[document.id for document in documents],
-                output_dir=root / f"out_{attempt + 1}",
-                base_dir=root,
-                strict=True,
-                output_language="ru",
-                spellcheck_enabled=True,
+            elapsed, result = _render_stress_batch(
+                root, count=STRESS_RENDER_SMALL_BATCH, label=f"small_{attempt + 1}"
             )
-            elapsed = time.perf_counter() - started
-            timings.append(elapsed)
-            if not result.ok or len(result.created_files) != len(documents):
+            small_timings.append(elapsed)
+            if not result.ok or len(result.created_files) != STRESS_RENDER_SMALL_BATCH:
+                raise AssertionError(result.human_report())
+
+        large_timings: list[float] = []
+        for attempt in range(STRESS_RENDER_MAX_ATTEMPTS):
+            elapsed, result = _render_stress_batch(
+                root, count=STRESS_RENDER_LARGE_BATCH, label=f"large_{attempt + 1}"
+            )
+            large_timings.append(elapsed)
+            if not result.ok or len(result.created_files) != STRESS_RENDER_LARGE_BATCH:
                 raise AssertionError(result.human_report())
             if len(set(result.created_files)) != len(result.created_files):
                 raise AssertionError("Batch render created duplicate output paths")
-            if elapsed <= STRESS_RENDER_BUDGET_SECONDS:
-                return
-        rendered = ", ".join(f"{elapsed:.3f}s" for elapsed in timings)
-        raise AssertionError(
-            f"Batch render stress too slow on {STRESS_RENDER_MAX_ATTEMPTS} attempts: {rendered}"
-        )
+
+        # Compare the same retry statistic on both workloads.  Using a slow
+        # small-batch outlier as the denominator would hide a real scaling
+        # regression, which is exactly what this guard exists to detect.
+        small_best = min(small_timings)
+        large_best = min(large_timings)
+        scaling_ratio = large_best / max(small_best, 0.001)
+        if large_best > STRESS_RENDER_HARD_LIMIT_SECONDS:
+            raise AssertionError(
+                f"Batch render exceeded hard limit: {large_best:.3f}s > "
+                f"{STRESS_RENDER_HARD_LIMIT_SECONDS:.1f}s"
+            )
+        if scaling_ratio > STRESS_RENDER_MAX_SCALING_RATIO:
+            raise AssertionError(
+                "Batch render scaling regressed: "
+                f"9-doc best={small_best:.3f}s, "
+                f"36-doc best={large_best:.3f}s, ratio={scaling_ratio:.2f}x > "
+                f"{STRESS_RENDER_MAX_SCALING_RATIO:.1f}x"
+            )
+        if large_best > STRESS_RENDER_SOFT_TARGET_SECONDS:
+            print(
+                "STRESS RENDER SOFT TARGET EXCEEDED: "
+                f"best={large_best:.3f}s target={STRESS_RENDER_SOFT_TARGET_SECONDS:.1f}s; "
+                f"scaling={scaling_ratio:.2f}x remains healthy"
+            )
 
 
 
