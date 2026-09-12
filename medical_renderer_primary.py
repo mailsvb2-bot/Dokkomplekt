@@ -120,7 +120,7 @@ class MedicalRendererPrimaryMixin:
 
         put_expert_anamnesis(editor, data, DISCHARGE_MARKERS, ["В 3 отделение КДП поступает"])
 
-        from medical_admission_mode import admission_to_department_phrase
+        from medical_admission_resolver import admission_to_department_phrase
         editor.replace_block(
             ["В 3 отделение КДП поступает", "Поступает"],
             "",

@@ -132,7 +132,7 @@ class MedicalRendererSpecialMixin:
             )
         if data.psych_account:
             editor.replace_first_matching_paragraph(["На учёте", "На учете"], f"Профильное наблюдение {data.psych_account}.")
-        from medical_admission_mode import admission_to_department_phrase
+        from medical_admission_resolver import admission_to_department_phrase
         editor.replace_block(
             ["В 3 отделение КДП поступает", "Поступает"],
             "",

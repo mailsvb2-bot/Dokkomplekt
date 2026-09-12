@@ -617,7 +617,7 @@ class DialogExpertMixin:
         detail_rows: list[tuple[str, str]] = []
         detail_fields: list[str] = []
 
-        from medical_admission_mode import normalize_admission_mode
+        from medical_admission_resolver import normalize_admission_mode
         current_admission_mode = normalize_admission_mode(
             self.admission_mode_var.get() if hasattr(self, "admission_mode_var") else ""
         )

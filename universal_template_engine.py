@@ -565,7 +565,7 @@ def _apply_role_owned_medical_postprocessing(output: Path, case: PatientCase, do
     try:
         from docx import Document as _Document
         from docx.shared import RGBColor
-        from medical_admission_mode import admission_to_department_phrase, normalize_admission_mode
+        from medical_admission_resolver import admission_to_department_phrase, normalize_admission_mode
         from medical_docx_editor_utils import iter_all_paragraphs, set_paragraph_text
         from medical_text_utils import normalize_match
         from universal_main_documents import document_role_matches_builtin_kind

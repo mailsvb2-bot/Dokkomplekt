@@ -21,7 +21,9 @@ def test_diary_single_route_ignores_calendar_table_file(tmp_path: Path) -> None:
     source.add_paragraph("02.06.2026 Second diary text is long enough for extraction and output.")
     source.add_paragraph("02.06.2026 Second diary text is long enough for extraction and output.")
     source.save(status_docx)
-    assert len(extract_statuses_from_docx(status_docx)) == 2
+    statuses = extract_statuses_from_docx(status_docx)
+    assert len(statuses) == 3
+    assert statuses[1] == statuses[2] == "Second diary text is long enough for extraction and output."
 
     table_docx = tmp_path / "calendar_table.docx"
     template = Document()

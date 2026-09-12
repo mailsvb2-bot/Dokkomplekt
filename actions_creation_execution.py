@@ -12,7 +12,7 @@ from medical_date_state import current_semantic_date
 class ActionsCreationExecutionMixin:
 
     def _rvk_needs_popup(self) -> bool:
-        from medical_admission_mode import normalize_admission_mode
+        from medical_admission_resolver import normalize_admission_mode
 
         admission_mode = normalize_admission_mode(
             self.admission_mode_var.get() if getattr(self, "admission_mode_var", None) is not None else ""

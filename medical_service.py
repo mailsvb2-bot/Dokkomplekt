@@ -205,7 +205,7 @@ class MedicalDocumentService:
         if {"discharge", "rvk"} & selected_set:
             data.discharge_date = self._normalize_required_date(data.discharge_date, "Дата выписки")
             self._ensure_discharge_not_before_admission(data.admission_date, data.discharge_date)
-            from medical_admission_mode import normalize_admission_mode
+            from medical_admission_resolver import normalize_admission_mode
             data.admission_mode = normalize_admission_mode(data.admission_mode)
             if not data.admission_mode:
                 raise ValueError("Укажите, пациент поступает первично или повторно.")
@@ -258,7 +258,7 @@ class MedicalDocumentService:
     def _normalize_available_selected_data(self, data: PatientData, selected: Sequence[str]) -> None:
         selected_set = set(selected)
         if {"discharge", "rvk"} & selected_set:
-            from medical_admission_mode import normalize_admission_mode
+            from medical_admission_resolver import normalize_admission_mode
             data.admission_mode = normalize_admission_mode(data.admission_mode)
             if not data.admission_mode:
                 raise ValueError("Укажите, пациент поступает первично или повторно.")

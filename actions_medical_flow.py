@@ -176,7 +176,7 @@ class ActionsMedicalFlowMixin:
         elif data.expert_sick_leave_needed == "нет":
             data.sick_leave = "не нужен"
 
-        from medical_admission_mode import normalize_admission_mode
+        from medical_admission_resolver import normalize_admission_mode
         data.admission_mode = normalize_admission_mode(
             self.admission_mode_var.get() if hasattr(self, "admission_mode_var") else data.admission_mode
         )

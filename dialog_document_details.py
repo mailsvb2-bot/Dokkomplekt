@@ -65,7 +65,7 @@ class DialogDocumentDetailsMixin:
         treatment_var = tk.StringVar(value=self.assigned_treatment_var.get().strip() or self._treatment_popup_default())
         diagnosis_var = tk.StringVar(value=self.diagnosis_var.get().strip() or sanitize_diagnosis(getattr(getattr(self, "data", None), "diagnosis", "")))
         discharge_var = tk.StringVar(value=self._discharge_popup_default())
-        from medical_admission_mode import normalize_admission_mode
+        from medical_admission_resolver import normalize_admission_mode
         admission_mode_var = tk.StringVar(value=normalize_admission_mode(
             self.admission_mode_var.get() if hasattr(self, "admission_mode_var") else ""
         ))

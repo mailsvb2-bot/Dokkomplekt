@@ -114,7 +114,7 @@ class MedicalParserCoreMixin:
             # stricter than the block parser.
             data.has_treatment_section = True
 
-        from medical_admission_mode import normalize_admission_mode
+        from medical_admission_resolver import normalize_admission_mode
         explicit_mode = normalize_admission_mode(data.admission_mode) or normalize_admission_mode(data.admission)
         if not explicit_mode:
             mode_match = re.search(
