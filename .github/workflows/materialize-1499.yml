@@ -1,0 +1,55 @@
+name: Materialize 1.4.99 candidate
+
+on:
+  push:
+    branches:
+      - transport/materialize-1499
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact parent
+        uses: actions/checkout@v4
+        with:
+          ref: abae073508ed01fc60d8e5c136276c92a135e896
+          fetch-depth: 0
+
+      - name: Fetch and verify patch blob
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/blobs/438b0ff19fbf5af4f7dacac326e2c1c85fb1aade" \
+            -o /tmp/dok1499-blob.json
+          python - <<'PY'
+          import base64, gzip, hashlib, json
+          from pathlib import Path
+          payload = json.loads(Path('/tmp/dok1499-blob.json').read_text())
+          compressed = base64.b64decode(payload['content'])
+          assert hashlib.sha256(compressed).hexdigest() == 'c51e3ee7e40a3b1a041a5393da14703de1f1ae8fdb063ff1fbadef4b128c3b3c'
+          patch = gzip.decompress(compressed)
+          assert hashlib.sha256(patch).hexdigest() == 'a4f1e62b76ff56844cb31b1115054df4fdd01321a7d54cfb0d47e57812b1a0f4'
+          Path('/tmp/dok1499.patch').write_bytes(patch)
+          PY
+
+      - name: Apply exact candidate and publish branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "abae073508ed01fc60d8e5c136276c92a135e896"
+          git apply --index /tmp/dok1499.patch
+          test "$(git write-tree)" = "5c88806b8bea1314fd79659038e9277c500ec3d0"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Release 1.4.99 embedded diary text source hotfix"
+          test "$(git rev-parse HEAD^{tree})" = "5c88806b8bea1314fd79659038e9277c500ec3d0"
+          git push --force origin HEAD:refs/heads/fix/embedded-diary-text-source-1499
