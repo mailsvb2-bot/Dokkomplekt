@@ -404,9 +404,12 @@ def _assert_batch_render_is_reasonably_fast() -> None:
             if len(set(result.created_files)) != len(result.created_files):
                 raise AssertionError("Batch render created duplicate output paths")
 
-        small_reference = max(small_timings)
+        # Compare the same retry statistic on both workloads.  Using a slow
+        # small-batch outlier as the denominator would hide a real scaling
+        # regression, which is exactly what this guard exists to detect.
+        small_best = min(small_timings)
         large_best = min(large_timings)
-        scaling_ratio = large_best / max(small_reference, 0.001)
+        scaling_ratio = large_best / max(small_best, 0.001)
         if large_best > STRESS_RENDER_HARD_LIMIT_SECONDS:
             raise AssertionError(
                 f"Batch render exceeded hard limit: {large_best:.3f}s > "
@@ -415,7 +418,7 @@ def _assert_batch_render_is_reasonably_fast() -> None:
         if scaling_ratio > STRESS_RENDER_MAX_SCALING_RATIO:
             raise AssertionError(
                 "Batch render scaling regressed: "
-                f"9-doc reference={small_reference:.3f}s, "
+                f"9-doc best={small_best:.3f}s, "
                 f"36-doc best={large_best:.3f}s, ratio={scaling_ratio:.2f}x > "
                 f"{STRESS_RENDER_MAX_SCALING_RATIO:.1f}x"
             )
