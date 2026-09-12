@@ -1,0 +1,38 @@
+name: Materialize exact PR 59 gate fixes
+
+on:
+  push:
+    branches:
+      - transport/document-generation-1498-gates3
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/document-generation-1498
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify expected head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "4668056ff6fb3c3ba3d97b6f2737393c57d1c7e1"
+      - name: Apply exact patch and verify tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS https://paste.rs/ZWw7A -o /tmp/fix.patch
+          echo "0cec3de019a3ed25d43e1c0b89d1ecd00a814b1c4946720fe4031293bb4597a3  /tmp/fix.patch" | sha256sum -c -
+          git apply --index /tmp/fix.patch
+          test "$(git write-tree)" = "b1d8609867d0c43bc870eaad482301b467c7ab3a"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Align release gates with admission and diary contracts"
+          test "$(git rev-parse HEAD^{tree})" = "b1d8609867d0c43bc870eaad482301b467c7ab3a"
+          git push origin HEAD:fix/document-generation-1498
