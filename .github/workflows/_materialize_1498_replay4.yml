@@ -1,0 +1,38 @@
+name: Materialize exact PR 59 replay fix
+
+on:
+  push:
+    branches:
+      - transport/document-generation-1498-replay4
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/document-generation-1498
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify expected head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "14bae3be572e34bf432553b568b848ed3243c28d"
+      - name: Apply exact replay patch and verify tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS https://paste.rs/RBlDz -o /tmp/fix.patch
+          echo "24cd8aadb2f48baf2be4ee41566c6d370da02d094d97c1afd91bf14aebbb0d0d  /tmp/fix.patch" | sha256sum -c -
+          git apply --index /tmp/fix.patch
+          test "$(git write-tree)" = "f4c45b3baae0158a622996bbd720f901c6bd0234"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update full patient replay for admission mode"
+          test "$(git rev-parse HEAD^{tree})" = "f4c45b3baae0158a622996bbd720f901c6bd0234"
+          git push origin HEAD:fix/document-generation-1498
