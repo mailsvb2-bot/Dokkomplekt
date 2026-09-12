@@ -3,11 +3,9 @@ from __future__ import annotations
 from datetime import date
 from typing import Sequence
 
-NEUTRAL_FINAL_DIARY_TEXT = (
-    "Состояние улучшилось. Жалоб активно не предъявляет. Отрицательной динамики не отмечается. "
-    "Общее самочувствие стабильное, режим соблюдает, назначения выполняет. "
-    "На текущую дату оформлена выписка из стационара. Даны рекомендации"
-)
+from diary_constants import FINAL_DIARY_TEXT
+
+NEUTRAL_FINAL_DIARY_TEXT = FINAL_DIARY_TEXT
 
 
 # Preserve doctor-owned values: the legacy table filler is intentionally closed

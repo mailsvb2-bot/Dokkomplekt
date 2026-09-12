@@ -114,6 +114,16 @@ class MedicalParserCoreMixin:
             # stricter than the block parser.
             data.has_treatment_section = True
 
+        from medical_admission_mode import normalize_admission_mode
+        explicit_mode = normalize_admission_mode(data.admission_mode) or normalize_admission_mode(data.admission)
+        if not explicit_mode:
+            mode_match = re.search(
+                r"(?i)В\s*3\s+отделени[ея]\s+КДП\s+поступает\s+(первично|повторно)(?![А-Яа-яЁё])",
+                text,
+            )
+            explicit_mode = normalize_admission_mode(mode_match.group(1)) if mode_match else ""
+        data.admission_mode = explicit_mode
+
         data.admission_date = extract_admission_date_from_primary_text(text) or self._extract_admission_date(text)
         data.discharge_date = extract_current_discharge_date_from_primary_text(text)
         self._repair_compact_demographics(data, text)

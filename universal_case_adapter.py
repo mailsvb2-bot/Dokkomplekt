@@ -171,6 +171,7 @@ def patient_data_to_case(data: PatientData, *, source_document: str = "") -> Pat
         "patient.position": data.position,
         "case.number": data.case_number,
         "admission.date": data.admission_date,
+        "admission.mode": data.admission_mode,
         "discharge.date": data.discharge_date,
         "complaints": data.complaints,
         "anamnesis.life": data.life_anamnesis,

@@ -297,6 +297,7 @@ class MedicalTextParser(
         "disability": ("Оформление инвалидности", "Инвалидность"),
         "rvk_referral": ("Направление от РВК", "РВК"),
         "admission": ("Поступает", "Поступил", "Поступила", "Госпитализирован", "Госпитализирована", "Przyjęty", "Przyjety", "Przyjęta", "Przyjeta", "Hospitalizowany", "Hospitalizowana"),
+        "admission_mode": ("Характер поступления", "Поступает первично или повторно", "Первично / повторно"),
         "doctor": ("Лечащий врач", "Врач", "Врач психиатр", "Врач-психиатр", "Хирург", "Терапевт", "Lekarz", "Lekarz prowadzący", "Lekarz prowadzacy", "Chirurg", "Terapeuta"),
         "head": ("Заведующий отделением", "Зав. отделением", "Зав. отд.", "Зав отд", "Зав.отделением", "Ordynator", "Kierownik oddziału", "Kierownik oddzialu"),
     }

@@ -617,6 +617,14 @@ class DialogExpertMixin:
         detail_rows: list[tuple[str, str]] = []
         detail_fields: list[str] = []
 
+        from medical_admission_mode import normalize_admission_mode
+        current_admission_mode = normalize_admission_mode(
+            self.admission_mode_var.get() if hasattr(self, "admission_mode_var") else ""
+        )
+        if not current_admission_mode:
+            detail_rows.append(("Поступает первично или повторно", ""))
+            detail_fields.append("admission_mode")
+
         if self._hospitalization_details_missing():
             detail_rows.append(("Лечение", self._treatment_popup_default()))
             detail_fields.append("treatment")
@@ -687,6 +695,12 @@ class DialogExpertMixin:
                 self._manual_diagnosis = True
                 if hasattr(self, "data"):
                     self.data.diagnosis = diagnosis
+            elif field == "admission_mode":
+                admission_mode = normalize_admission_mode(value)
+                if not admission_mode:
+                    messagebox.showwarning("Не заполнено поле", "Выберите: первично или повторно.")
+                    return False
+                self.admission_mode_var.set(admission_mode)
             elif field == "discharge_date":
                 if not self._store_discharge_date_value(value, source_label="окно выбранных документов"):
                     messagebox.showwarning(

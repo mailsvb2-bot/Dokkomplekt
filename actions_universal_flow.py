@@ -80,6 +80,7 @@ class ActionsUniversalFlowMixin:
             case_number = var_text("case_number_var")
         add("case.number", case_number)
         add("diagnosis.main", str(getattr(self, "_popup_diagnosis_override", "") or "").strip() or var_text("diagnosis_var"))
+        add("admission.mode", var_text("admission_mode_var"))
         add("treatment.plan", var_text("assigned_treatment_var"))
         additional_info = var_text("additional_info_text_var")
         add("additional.info", additional_info)
@@ -272,8 +273,14 @@ class ActionsUniversalFlowMixin:
         texts, the template itself is the text source and no redundant chooser is
         shown.
         """
-        if getattr(self, "status_files", None):
+        status_files = getattr(self, "status_files", None)
+        auto_selected = bool(getattr(self, "_diary_text_files_auto_selected", False))
+        if status_files and not auto_selected:
             return
+        if auto_selected:
+            auto_select = getattr(self, "_auto_select_diary_text_by_diagnosis", None)
+            if callable(auto_select) and auto_select(ask_folder=False) and getattr(self, "status_files", None):
+                return
         if current_pack is not None and diary_ids:
             try:
                 from universal_diary_generation import diary_documents_have_embedded_status_texts

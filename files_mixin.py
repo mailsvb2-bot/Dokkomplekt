@@ -12,10 +12,8 @@ from diary_constants import DIARY_KIND, DIR_DIARY_TEMPLATES, DIR_DIARY_TEXTS, DI
 from medical_constants import DIR_EPI, DIR_OUTPUT, DIR_PRIMARY_DOCUMENTS
 from medical_models import PatientData
 from diary_text_selection import (
-    diary_diagnosis_match_score,
     find_diary_text_file_for_diagnosis,
     folder_has_diary_text_candidates,
-    iter_diary_text_docx_files,
 )
 
 
@@ -86,6 +84,8 @@ class FilesMixin:
         """Сбросить данные прошлого пациента перед новым первичным файлом."""
         self.assigned_treatment_var.set("")
         self.case_number_var.set("")
+        if hasattr(self, "admission_mode_var"):
+            self.admission_mode_var.set("")
         self.expert_work_status_var.set("")
         self.expert_work_org_var.set("")
         self.expert_position_var.set("")
@@ -395,7 +395,9 @@ class FilesMixin:
 
     def _auto_select_diary_text_by_diagnosis(self, *, ask_folder: bool = False) -> bool:
         """Auto-select diary text DOCX files using diagnosis, folder hints, and safe fallbacks."""
-        diagnosis = self.diagnosis_var.get().strip()
+        diagnosis = str(getattr(self, "_popup_diagnosis_override", "") or "").strip()
+        if not diagnosis:
+            diagnosis = self.diagnosis_var.get().strip()
         if not diagnosis and getattr(self, "data", None) is not None:
             diagnosis = getattr(self.data, "diagnosis", "") or ""
         if not diagnosis:
@@ -404,24 +406,14 @@ class FilesMixin:
         # заменить только пустой выбор или прошлый автоматический выбор.
         if self.status_files and not getattr(self, "_diary_text_files_auto_selected", False):
             return True
+        # An automatically selected file belongs to the diagnosis that was active
+        # when it was chosen.  A later popup correction must invalidate it before
+        # we search again; otherwise generation can silently reuse the old disease.
+        if getattr(self, "_diary_text_files_auto_selected", False):
+            self.status_files = []
 
         for folder in self._candidate_diary_text_dirs():
             found = find_diary_text_file_for_diagnosis(folder, diagnosis)
-            fallback_reason = "по диагнозу"
-            if not found:
-                # Do not silently take the only/nearest DOCX: diary texts are diagnosis-specific.
-                try:
-                    candidates = iter_diary_text_docx_files(folder, max_depth=1)
-                    scored = [
-                        (diary_diagnosis_match_score(diagnosis, path.stem), path.name.lower(), path)
-                        for path in candidates
-                    ]
-                    scored = [item for item in scored if item[0] >= 70]
-                    if scored:
-                        found = sorted(scored, key=lambda item: (-item[0], item[1]))[0][2]
-                        fallback_reason = "по строгому совпадению диагноза"
-                except Exception as exc:
-                    record_soft_exception("files_mixin.diary_text_fallback", exc, detail=str(folder))
             if not found:
                 continue
             self.diary_texts_dir = str(found.parent)
@@ -430,7 +422,7 @@ class FilesMixin:
             self._remember_dialog_directory(DIR_DIARY_TEXTS, str(found))
             self._update_diary_text_label(success=True)
             self._redraw_selection_controls()
-            self._log(f"\n✅ Автоматически выбран текст дневников {fallback_reason}: {found.name}.\n")
+            self._log(f"\n✅ Автоматически выбран файл текстов дневников по диагнозу: {found.name}.\n")
             return True
 
         if ask_folder:
@@ -452,12 +444,16 @@ class FilesMixin:
                     self._redraw_selection_controls()
                     self._log(f"\n✅ Автоматически выбран текст дневников по диагнозу: {found.name}.\n")
                     return True
-                # Если совпадения нет, выбранный файл остаётся ручным fallback.
-                self.status_files = [str(selected)]
-                self._diary_text_files_auto_selected = False
-                self._update_diary_text_label(success=True)
+                # This picker identifies the folder for automatic diagnosis
+                # matching.  If the diagnosis is absent from every filename, do
+                # not silently use the arbitrary file the doctor clicked merely
+                # to point at the folder. Manual override remains available via
+                # the separate «Тексты» file picker.
+                self.status_files = []
+                self._diary_text_files_auto_selected = True
+                self._update_diary_text_label(success=False)
                 self._redraw_selection_controls()
-                return True
+                return False
         return False
 
     def choose_status_files(self) -> None:

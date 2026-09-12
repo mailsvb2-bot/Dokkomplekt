@@ -12,12 +12,18 @@ from medical_date_state import current_semantic_date
 class ActionsCreationExecutionMixin:
 
     def _rvk_needs_popup(self) -> bool:
+        from medical_admission_mode import normalize_admission_mode
+
+        admission_mode = normalize_admission_mode(
+            self.admission_mode_var.get() if getattr(self, "admission_mode_var", None) is not None else ""
+        )
         return (
             not all([self.rvk_act_number_var.get().strip(), self.rvk_military_commissariat_var.get().strip()])
             or self._case_number_missing()
             or self._should_prompt_discharge_date()
             or self._manual_treatment_missing()
             or self._hospitalization_details_missing()
+            or not admission_mode
         )
 
     def _sick_leave_vk_details_complete(self) -> bool:

@@ -176,6 +176,10 @@ class ActionsMedicalFlowMixin:
         elif data.expert_sick_leave_needed == "нет":
             data.sick_leave = "не нужен"
 
+        from medical_admission_mode import normalize_admission_mode
+        data.admission_mode = normalize_admission_mode(
+            self.admission_mode_var.get() if hasattr(self, "admission_mode_var") else data.admission_mode
+        )
         data.rvk_act_number = self.rvk_act_number_var.get().strip()
         data.rvk_military_commissariat = self.rvk_military_commissariat_var.get().strip()
         data.rvk_work_position = self.rvk_work_position_var.get().strip()

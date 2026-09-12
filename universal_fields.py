@@ -837,6 +837,7 @@ DEFAULT_FIELD_DEFINITIONS: tuple[FieldDefinition, ...] = (
     _fd("case.number", "Номер истории болезни", "case", ("История болезни №", "История болезни N", "ИБ №", "№ истории болезни"), "identifier", required=True),
     _fd("case.department", "Отделение", "case", ("Отделение", "поступает в", "госпитализируется в")),
     _fd("admission.date", "Дата госпитализации", "admission", ("Дата госпитализации", "Дата поступления", "Поступил", "Поступила", "Госпитализирован", "Госпитализирована"), "date", required=True),
+    _fd("admission.mode", "Поступает первично или повторно", "admission", ("Поступает первично или повторно", "Первично / повторно", "Характер поступления"), "text"),
     _fd("discharge.date", "Дата выписки", "discharge", ("Дата выписки", "Выписан", "Выписана"), "date"),
     _fd("expert.work_status", "Работает", "expert", ("Работает", "Трудоустроен", "Экспертный анамнез: работает"), "text"),
     _fd("expert.work_org", "Организация работы", "expert", ("Где работает", "Место работы", "Организация"), "text"),
@@ -883,7 +884,11 @@ DEFAULT_FIELD_DEFINITIONS: tuple[FieldDefinition, ...] = (
     _fd("labs.date", "Дата анализов", "labs", ("Дата анализов", "Дата лабораторных исследований", "Дата забора", "Дата исследования"), "date"),
     _fd("labs.source", "Источник анализов", "labs", ("Файл анализов", "Источник анализов"), "text"),
     _fd("labs.date_policy", "Правило дат анализов", "labs", ("Пусть даты подставит программа", "Без анализов", "Дата документа"), "text"),
-    _fd("labs.types", "Виды анализов", "labs", ("ОАК", "ОАМ", "БАК", "ЭКГ", "ЭЭГ", "КТ", "МРТ"), "block"),
+    # ``labs.types`` is metadata (which studies are present), not the result of
+    # an individual OAK/OAM/EEG line.  Short study names must never be treated
+    # as semantic value slots: doing so made one scanned value overwrite every
+    # laboratory/instrumental line in doctor-owned discharge templates.
+    _fd("labs.types", "Виды анализов", "labs", ("Виды анализов", "Перечень анализов", "Перечень исследований"), "block"),
     _fd("procedure.name", "Операция / процедура", "procedure", ("Операция", "Оперативное вмешательство", "Манипуляция", "Процедура"), "block"),
     _fd("procedure.date", "Дата операции / процедуры", "procedure", ("Дата операции", "Дата оперативного вмешательства", "Оперирован", "Оперирована"), "date"),
     _fd("procedure.anesthesia", "Вид анестезии", "procedure", ("Анестезия", "Вид анестезии", "Обезболивание"), "text"),

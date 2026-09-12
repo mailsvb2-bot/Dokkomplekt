@@ -169,6 +169,20 @@ try:
 except ValueError as exc:
     assert "Дата выписки" in str(exc), str(exc)
 
+missing_admission_mode_data = service.parse_primary_document(nav)
+missing_admission_mode_data.discharge_date = "11.06.2026"
+missing_admission_mode_data.admission_mode = ""
+try:
+    service.create_documents(
+        navigation_path=nav,
+        output_dir=OUT / "missing_admission_mode",
+        selected_docs=["discharge"],
+        override_data=missing_admission_mode_data,
+    )
+    raise AssertionError("discharge document must require primary/repeat admission choice")
+except ValueError as exc:
+    assert "первично или повторно" in str(exc), str(exc)
+
 try:
     service.create_documents(
         navigation_path=nav,
@@ -213,6 +227,7 @@ except ValueError as exc:
 try:
     bad_rvk_data = service.parse_primary_document(nav)
     bad_rvk_data.discharge_date = "11.06.2026"
+    bad_rvk_data.admission_mode = "первично"
     bad_rvk_data.rvk_act_number = "77-А"
     bad_rvk_data.rvk_military_commissariat = ""
     service.create_documents(
@@ -228,6 +243,7 @@ except ValueError as exc:
 if _legacy_fixed_templates_available():
     compact_popup_data = service.parse_primary_document(nav)
     compact_popup_data.discharge_date = "11062026"
+    compact_popup_data.admission_mode = "повторно"
     compact_popup_data.commission_date = "18062026"
     compact_popup_data.commission_number = "12"
     compact_popup_data.vk_date = "19062026"
@@ -344,6 +360,7 @@ if _legacy_fixed_templates_available():
 
     override_data = service.parse_primary_document(nav)
     override_data.discharge_date = ""
+    override_data.admission_mode = "первично"
     _mutation_created, used_override = service.create_documents(
         navigation_path=nav,
         output_dir=OUT / "override_copy",
@@ -516,6 +533,7 @@ except ValueError as exc:
 
 missing_sick_number_data = service.parse_primary_document(nav)
 missing_sick_number_data.discharge_date = "11.06.2026"
+missing_sick_number_data.admission_mode = "повторно"
 missing_sick_number_data.expert_sick_leave_needed = "да"
 missing_sick_number_data.expert_sick_leave_from = "10.06.2026"
 missing_sick_number_data.expert_work_org = "ООО Тест"
@@ -534,6 +552,7 @@ except ValueError as exc:
 
 bad_rvk_act_number_data = service.parse_primary_document(nav)
 bad_rvk_act_number_data.discharge_date = "11.06.2026"
+bad_rvk_act_number_data.admission_mode = "первично"
 bad_rvk_act_number_data.rvk_act_number = ""
 bad_rvk_act_number_data.rvk_military_commissariat = "Ленинский"
 try:

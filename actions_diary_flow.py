@@ -13,7 +13,7 @@ class ActionsDiaryFlowMixin:
         primary_path = selected_primary_document_path(self)
         title_admission_value = self._sync_admission_date_from_title(force=False)
         diary_admission_value = current_semantic_date(self, "admission_date") or title_admission_value
-        if not self.status_files:
+        if not self.status_files or getattr(self, "_diary_text_files_auto_selected", False):
             self._auto_select_diary_text_by_diagnosis(ask_folder=False)
         if not self.status_files:
             self.choose_status_files()
@@ -92,6 +92,8 @@ class ActionsDiaryFlowMixin:
             treatment=str(getattr(getattr(self, "assigned_treatment_var", None), "get", lambda: "")() or getattr(getattr(self, "data", None), "treatment_plan", "") or getattr(parsed_for_name, "treatment_plan", "") or ""),
             profile_status=str(getattr(parsed_for_name, "mental_status", "") or getattr(getattr(self, "data", None), "mental_status", "") or ""),
             sick_leave_from=current_semantic_date(self, "expert_sick_leave_from"),
+            treating_physician=str(getattr(parsed_for_name, "doctor", "") or getattr(getattr(self, "data", None), "doctor", "") or ""),
+            department_head=str(getattr(parsed_for_name, "head", "") or getattr(getattr(self, "data", None), "head", "") or ""),
         )
         if diary_mode == "hourly":
             from document_intelligence.diary_hourly_finalization import ensure_hourly_final_diary
