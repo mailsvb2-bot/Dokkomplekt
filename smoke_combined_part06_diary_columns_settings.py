@@ -373,6 +373,7 @@ if _legacy_fixed_templates_available():
 else:
     override_data = service.parse_primary_document(nav)
     override_data.discharge_date = ""
+    override_data.admission_mode = "первично"
     try:
         service.create_documents(
             navigation_path=nav,
