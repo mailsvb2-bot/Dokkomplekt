@@ -137,6 +137,7 @@ def _build_profile(root: Path):
             "Номер больничного: __________",
             "Место работы: __________",
             "Должность: __________",
+            "В 3 отделение КДП поступает СТАРОЕ ЗНАЧЕНИЕ",
         ],
     )
     attach_template_to_pack(pack, discharge_template, profile_path.parent, button_label="Выписной эпикриз", document_id="doctor_discharge", category="medical", role_id="discharge")
@@ -281,7 +282,8 @@ def _run_application_user_journey() -> None:
         assert "Дата выписки" in popup_calls[0][1]
         assert "Поступает первично или повторно" in popup_calls[0][1]
         assert app.admission_mode_var.get() == "первично"
-        assert app.data.admission_mode == "первично"
+        canonical_case = app._current_universal_patient_case()
+        assert canonical_case.get("admission.mode") == "первично"
         created = sorted(path for path in patient_dir.glob("*.docx") if path != primary)
         assert len(created) == 3, [path.name for path in created]
         by_name = {path.name: extract_docx_text(path) for path in created}
@@ -292,6 +294,7 @@ def _run_application_user_journey() -> None:
         assert "K35.8 Острый аппендицит" in primary_out
         assert "К-777" in discharge_out and "05.09.2026" in discharge_out
         assert "терапия из пользовательского popup" in discharge_out
+        assert "В 3 отделение КДП поступает первично" in discharge_out
         assert "02.09.26" in diary_out and "05.09.26" in diary_out
         assert "01.09.26" not in diary_out and "06.09.26" not in diary_out
         assert "Лечащий врач" in diary_out and "Зав. отделением" in diary_out
