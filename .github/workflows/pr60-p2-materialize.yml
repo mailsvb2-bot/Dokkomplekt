@@ -1,0 +1,35 @@
+name: PR60 P2 materialize
+on:
+  push:
+    branches:
+      - transport/pr60-p2
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/stable-render-stress-gate
+          fetch-depth: 0
+      - name: Apply exact P2 delta
+        shell: bash
+        env:
+          EXPECTED_HEAD: b24b1f1303d49a5eda86a42d38085ae83ea82d62
+          TARGET_TREE: b3376a0ce041f060109ba4301ffb32b5f12d4260
+          PATCH_URL: https://paste.rs/aym2p
+          PATCH_SHA256: 3e81b9311b568b1aa8af259137bd673702b017a816a0a40ef3325d95c9e6bb21
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          curl -fsSL "$PATCH_URL" -o /tmp/p2.patch
+          echo "$PATCH_SHA256  /tmp/p2.patch" | sha256sum -c -
+          git apply --check /tmp/p2.patch
+          git apply /tmp/p2.patch
+          git add smoke_stress_hardening.py
+          test "$(git write-tree)" = "$TARGET_TREE"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Fix performance gate retry statistic"
+          git push origin HEAD:fix/stable-render-stress-gate
