@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 import main as _main_module
 from desktop_intake import prepare_patient_work_folder, scan_primary_candidates
@@ -249,7 +250,7 @@ def _run_application_user_journey() -> None:
         root = Path(raw)
         intake = root / "Выписанные пациенты"
         intake.mkdir()
-        source = _journey_doc(intake / "01.09.2026 Первичный осмотр.docx", ["01.09.2026 Первичный осмотр", "Ф.И.О.: ИВАНОВ ИВАН ИВАНОВИЧ", "Дата поступления: 01.09.2026", "Жалобы: тревога", "Диагноз: K35.8 Острый аппендицит"])
+        source = _journey_doc(intake / "01.09.2026 Первичный осмотр.docx", ["01.09.2026 Первичный осмотр", "Ф.И.О.: ИВАНОВ ИВАН ИВАНОВИЧ", "Дата поступления: 01.09.2026", "Жалобы: тревога", "Диагноз: K35.8 Острый аппендицит", "Лечащий врач Петров П.П.", "Зав.отделением Сидорова А.А."])
         old = time.time() - 5
         os.utime(source, (old, old))
         candidates = scan_primary_candidates(intake, set())
@@ -289,7 +290,8 @@ def _run_application_user_journey() -> None:
         by_name = {path.name: extract_docx_text(path) for path in created}
         primary_out = next(text for name, text in by_name.items() if "Первичный осмотр" in name)
         discharge_out = next(text for name, text in by_name.items() if "Выписной эпикриз" in name)
-        diary_out = next(text for name, text in by_name.items() if "дневники" in name.lower())
+        diary_path = next(path for path in created if "дневники" in path.name.lower())
+        diary_out = by_name[diary_path.name]
         assert "К-777" in primary_out and "терапия из пользовательского popup" in primary_out
         assert "K35.8 Острый аппендицит" in primary_out
         assert "К-777" in discharge_out and "05.09.2026" in discharge_out
@@ -297,7 +299,15 @@ def _run_application_user_journey() -> None:
         assert "В 3 отделение КДП поступает первично" in discharge_out
         assert "02.09.26" in diary_out and "05.09.26" in diary_out
         assert "01.09.26" not in diary_out and "06.09.26" not in diary_out
-        assert "Лечащий врач" in diary_out and "Зав. отделением" in diary_out
+        diary_doc = Document(str(diary_path))
+        signatures = [p for p in diary_doc.paragraphs if p.text.startswith(("Лечащий врач", "Зав.отделением"))]
+        assert signatures and len(signatures) % 2 == 0
+        assert [p.text for p in signatures] == [
+            expected
+            for _ in range(len(signatures) // 2)
+            for expected in ("Лечащий врач Петров П.П.", "Зав.отделением Сидорова А.А.")
+        ]
+        assert all(p.alignment == WD_ALIGN_PARAGRAPH.RIGHT for p in signatures)
         assert scan_primary_candidates(intake, set()) == ()
         assert app.status_label.text == "Готово: файлы сохранены", app.status_label.text
     print("FULL USER JOURNEY SMOKE OK")
