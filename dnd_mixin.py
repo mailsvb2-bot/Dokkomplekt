@@ -116,9 +116,11 @@ class DragDropMixin:
             self.diary_texts_dir = str(Path(status_paths[0]).parent)
             self.status_files = []
             self._diary_text_files_auto_selected = True
+            self._diary_text_auto_selected_diagnosis = ""
             if not self._auto_select_diary_text_by_diagnosis(ask_folder=False):
                 self.status_files = status_paths
                 self._diary_text_files_auto_selected = False
+                self._diary_text_auto_selected_diagnosis = ""
                 self._remember_dialog_directory(DIR_DIARY_TEXTS, status_paths[0])
                 self._update_diary_text_label(success=True)
                 self._redraw_selection_controls()

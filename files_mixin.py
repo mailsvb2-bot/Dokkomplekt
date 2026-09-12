@@ -14,6 +14,7 @@ from medical_models import PatientData
 from diary_text_selection import (
     find_diary_text_file_for_diagnosis,
     folder_has_diary_text_candidates,
+    normalize_diary_diagnosis_name,
 )
 
 
@@ -167,6 +168,7 @@ class FilesMixin:
         if getattr(self, "status_files", None):
             self.status_files = []
         self._diary_text_files_auto_selected = True
+        self._diary_text_auto_selected_diagnosis = ""
         self._update_diary_text_label(success=bool(getattr(self, "diary_texts_dir", "")))
         if getattr(self, "diary_files", None):
             self.diary_files = []
@@ -404,12 +406,21 @@ class FilesMixin:
             return False
         # Ручной выбор нескольких файлов врачом сохраняем. Автоподбор может
         # заменить только пустой выбор или прошлый автоматический выбор.
-        if self.status_files and not getattr(self, "_diary_text_files_auto_selected", False):
+        auto_selected = bool(getattr(self, "_diary_text_files_auto_selected", False))
+        if self.status_files and not auto_selected:
             return True
-        # An automatically selected file belongs to the diagnosis that was active
-        # when it was chosen.  A later popup correction must invalidate it before
-        # we search again; otherwise generation can silently reuse the old disease.
-        if getattr(self, "_diary_text_files_auto_selected", False):
+        if self.status_files and auto_selected:
+            selected_for = str(getattr(self, "_diary_text_auto_selected_diagnosis", "") or "").strip()
+            if not selected_for:
+                # Non-empty files without auto-selection provenance are safest to
+                # treat as an explicit/manual choice.  This also prevents stale
+                # boolean state from silently deleting a valid doctor selection.
+                self._diary_text_files_auto_selected = False
+                return True
+            if normalize_diary_diagnosis_name(selected_for) == normalize_diary_diagnosis_name(diagnosis):
+                return True
+            # A genuinely auto-selected file belongs to the diagnosis active at
+            # selection time.  A later popup correction invalidates it.
             self.status_files = []
 
         for folder in self._candidate_diary_text_dirs():
@@ -419,6 +430,7 @@ class FilesMixin:
             self.diary_texts_dir = str(found.parent)
             self.status_files = [str(found)]
             self._diary_text_files_auto_selected = True
+            self._diary_text_auto_selected_diagnosis = diagnosis
             self._remember_dialog_directory(DIR_DIARY_TEXTS, str(found))
             self._update_diary_text_label(success=True)
             self._redraw_selection_controls()
@@ -439,6 +451,7 @@ class FilesMixin:
                 if found:
                     self.status_files = [str(found)]
                     self._diary_text_files_auto_selected = True
+                    self._diary_text_auto_selected_diagnosis = diagnosis
                     self._remember_dialog_directory(DIR_DIARY_TEXTS, str(found))
                     self._update_diary_text_label(success=True)
                     self._redraw_selection_controls()
@@ -451,6 +464,7 @@ class FilesMixin:
                 # the separate «Тексты» file picker.
                 self.status_files = []
                 self._diary_text_files_auto_selected = True
+                self._diary_text_auto_selected_diagnosis = diagnosis
                 self._update_diary_text_label(success=False)
                 self._redraw_selection_controls()
                 return False
@@ -472,6 +486,7 @@ class FilesMixin:
         self.diary_texts_dir = str(Path(selected_paths[0]).parent)
         self.status_files = selected_paths
         self._diary_text_files_auto_selected = False
+        self._diary_text_auto_selected_diagnosis = ""
         self._remember_dialog_directory(DIR_DIARY_TEXTS, selected_paths[0])
         self._update_diary_text_label(success=True)
         try:

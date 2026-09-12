@@ -1,12 +1,19 @@
 from __future__ import annotations
 
-from typing import Optional, Sequence
+from typing import TYPE_CHECKING, Optional, Sequence
 
 from medical_text_utils import normalize_match
 from medical_docx_editor_utils import paragraph_matches_marker
 
+if TYPE_CHECKING:
+    from docx.text.paragraph import Paragraph
+
 
 class DocxEditorMarkersMixin:
+    if TYPE_CHECKING:
+        @property
+        def paragraphs(self) -> list[Paragraph]: ...
+
     def find_paragraph_index(self, markers: Sequence[str]) -> Optional[int]:
         for i, paragraph in enumerate(self.paragraphs):
             text = normalize_match(paragraph.text)

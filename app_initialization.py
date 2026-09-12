@@ -346,6 +346,7 @@ class AppInitializationMixin:
         # может автоматически выбрать нужный DOCX по diagnosis_var.
         self.diary_texts_dir: str = ""
         self._diary_text_files_auto_selected = False
+        self._diary_text_auto_selected_diagnosis = ""
         self.diary_files: List[str] = []
         # Папка, выбранная кнопкой «Шаблоны дневников». Сама кнопка теперь
         # выбирает именно папку 01–31, а не отдельный DOCX-файл. Конкретный

@@ -61,8 +61,6 @@ def is_signature_paragraph_text(text: str) -> bool:
 def looks_like_status(text: str) -> bool:
     text = clean_status_text(text)
     low = text.lower()
-    if len(text) < MIN_STATUS_LEN:
-        return False
     # Do not turn document titles/section captions into patient observations.
     # Real status prose contains punctuation or is long enough to be prose; a
     # short all-caps/label-only heading is structural content, not a diary text.
@@ -76,6 +74,14 @@ def looks_like_status(text: str) -> bool:
         return False
     if re.fullmatch(r"[\d\s./-]+", text):
         return False
+    if len(text) < MIN_STATUS_LEN:
+        # A doctor may intentionally keep one observation very short, e.g.
+        # «Фон выравнивается.» or «Активнее в режиме.».  Treat two-word
+        # sentence-like prose as a real sequence entry instead of falling back
+        # to joining several paragraphs into one artificial status.
+        words = re.findall(r"[A-Za-zА-ЯЁа-яё]{3,}", text)
+        if len(text) < 8 or len(words) < 2 or re.search(r"[.!?…]$", text) is None:
+            return False
     return True
 
 
@@ -83,17 +89,13 @@ def extract_statuses_from_docx(path: str | Path) -> list[str]:
     compatible_path = ensure_docx_compatible(path, label="diary texts")
     doc = Document(str(compatible_path))
     statuses: list[str] = []
-    seen_statuses: set[str] = set()
-
     def add_candidate(text: str, *, style_name: str = "") -> None:
         style_low = str(style_name or "").strip().casefold()
         if style_low.startswith(("title", "heading", "заголовок")):
             return
         cleaned = clean_status_text(text)
-        key = cleaned.lower().replace("ё", "е")
-        if looks_like_status(cleaned) and key not in seen_statuses:
+        if looks_like_status(cleaned):
             statuses.append(cleaned)
-            seen_statuses.add(key)
 
     for paragraph in doc.paragraphs:
         add_candidate(paragraph.text, style_name=getattr(getattr(paragraph, "style", None), "name", ""))

@@ -36,6 +36,11 @@ def test_popup_date_contract_accepts_compact_six_digit_date() -> None:
     assert normalize_date_value("090926") == "09.09.2026"
 
 
+def test_short_diary_sentences_are_preserved_as_separate_sequence_entries(tmp_path: Path) -> None:
+    source = _write_lines(tmp_path / "F32 тексты.docx", "Фон выравнивается.", "Активнее в режиме.")
+    assert extract_statuses_from_docx(source) == ["Фон выравнивается.", "Активнее в режиме."]
+
+
 def test_female_diary_text_adapts_reported_real_world_forms() -> None:
     gender = detect_gender_from_patient_name("Банина Екатерина Сергеевна")
     assert gender == "female"
@@ -74,6 +79,7 @@ def test_diary_text_file_is_selected_by_diagnosis_filename_and_preserves_sequenc
     statuses = extract_statuses_from_docx(selected)
     assert statuses == [
         "Первый текст наблюдения достаточно длинный для дневника пациента.",
+        "Одинаковый повторяющийся текст наблюдения достаточно длинный для дневника пациента.",
         "Одинаковый повторяющийся текст наблюдения достаточно длинный для дневника пациента.",
         "Последний текст наблюдения достаточно длинный для дневника пациента.",
     ]
