@@ -217,3 +217,29 @@ def test_doctor_owned_discharge_cleans_stale_footer_payload_and_keeps_footer_boi
     assert "академического отпуска" not in footer_text.lower()
     assert "Документ сформирован лечащим подразделением." in footer_text
     assert DISCHARGE_RECOMMENDATION_TEXT in body_text
+
+
+def test_static_patient_boilerplate_with_document_date_is_not_deleted(tmp_path: Path) -> None:
+    template = tmp_path / "dated-static-joint.docx"
+    static = "Пациент ознакомлен с порядком обращения 09.09.2026, вопросы разъяснены."
+    stale = "Пациент предъявляет жалобы на тревогу и ранние пробуждения."
+    doc = Document()
+    doc.add_paragraph("Совместный осмотр")
+    doc.add_paragraph(static)
+    doc.add_paragraph(stale)
+    doc.save(template)
+
+    output = tmp_path / "dated-static-joint-out.docx"
+    case = PatientCase()
+    case.update_from_pairs({"complaints": "Жалоб не предъявляет."})
+    spec = DocumentTemplateSpec(
+        id="dated-static-joint", button_label="Совместный осмотр", template=str(template),
+        role_id="joint_medical_exam",
+    )
+    render_template_to_docx(
+        template_path=template, output_path=output, case=case, document=spec, strict=False,
+    )
+
+    text = _text(output)
+    assert static in text
+    assert stale not in text

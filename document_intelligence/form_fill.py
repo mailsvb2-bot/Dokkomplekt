@@ -249,9 +249,9 @@ _PATIENT_NARRATIVE_SECTION_IDS = frozenset({
     "admission", "discharge", "complaints", "anamnesis_disease", "anamnesis_life",
     "objective_status", "specialty_status", "diagnosis", "treatment", "labs", "instrumental",
 })
-_DYNAMIC_FACT_RE = re.compile(
-    r"(?i)(?:\b\d{1,2}[.]\d{1,2}[.]\d{2,4}\b|\b[A-ZА-ЯЁ]\s*\d{2}(?:[.,]\w+)?\b)"
-)
+_DATE_FACT_RE = re.compile(r"\b\d{1,2}[.]\d{1,2}[.]\d{2,4}\b")
+_ICD_FACT_RE = re.compile(r"(?i)\b[A-ZА-ЯЁ]\s*\d{2}(?:[.,]\w+)?\b")
+_DATE_FACT_SECTION_IDS = frozenset({"admission", "discharge"})
 _PATIENT_NAME_PAYLOAD_RE = re.compile(
     r"(?i:\b(?:пациент(?:ка)?|больн(?:ой|ая)))\s*[:,-]?\s*"
     r"[А-ЯЁ][А-ЯЁа-яё'-]{1,60}\s+(?:"
@@ -333,7 +333,14 @@ def _dynamic_template_payload_sections(
         return section_ids
     if _PATIENT_SUBJECT_RE.search(normalized) and set(section_ids) & _PATIENT_NARRATIVE_SECTION_IDS:
         return section_ids
-    if _DYNAMIC_FACT_RE.search(raw):
+    # A date or code is not patient payload merely because the paragraph also
+    # contains a generic word such as ``Пациент``.  Facts are only decisive in
+    # the semantic sections that actually own them; otherwise fixed/legal
+    # boilerplate with a document date could be erased as a false positive.
+    section_set = set(section_ids)
+    if _DATE_FACT_RE.search(raw) and section_set & _DATE_FACT_SECTION_IDS:
+        return section_ids
+    if _ICD_FACT_RE.search(raw) and "diagnosis" in section_set:
         return section_ids
     return ()
 
