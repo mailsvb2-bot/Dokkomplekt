@@ -14,29 +14,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: c7176044bf080b868c1c20cd1d1b4eb516573ea1
+          ref: 51c833d0403e06a15af84d448be484e3f9bc6c91
           fetch-depth: 0
-      - name: Fetch exact follow-up patch
+      - name: Fetch exact static-date safeguard patch
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL https://paste.rs/mks26 -o /tmp/v14100-followup.patch
-          echo '3147fe793b1bf9a876fa97e00cc54550a488aab7901d7887b1729d2dde46bf99  /tmp/v14100-followup.patch' | sha256sum -c -
+          curl -fsSL https://paste.rs/i3YOE -o /tmp/v14100-static-date-followup.patch
+          echo '524bb98b09f45233f9da7b8614a0265e80803f61d608ff645f2262c8f0c0568f  /tmp/v14100-static-date-followup.patch' | sha256sum -c -
       - name: Apply and verify exact tree
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = 'c7176044bf080b868c1c20cd1d1b4eb516573ea1'
-          git apply --index /tmp/v14100-followup.patch
+          test "$(git rev-parse HEAD)" = '51c833d0403e06a15af84d448be484e3f9bc6c91'
+          git apply --index /tmp/v14100-static-date-followup.patch
           tree=$(git write-tree)
           echo "candidate tree=$tree"
-          test "$tree" = '451dbe0ab1eff9a5227b125d57f5b48bff504a51'
+          test "$tree" = '9376109039295307c01a672c259b996a05def2ee'
       - name: Commit and publish candidate
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Keep medical role postprocessing within file budget'
-          test "$(git rev-parse HEAD^{tree})" = '451dbe0ab1eff9a5227b125d57f5b48bff504a51'
+          git commit -m 'Avoid deleting dated static patient boilerplate'
+          test "$(git rev-parse HEAD^{tree})" = '9376109039295307c01a672c259b996a05def2ee'
           git push --force origin HEAD:refs/heads/release/v1.4.100-template-residue-guard
