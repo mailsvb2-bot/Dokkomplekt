@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 import re
@@ -86,10 +87,26 @@ def iter_document_tables(document) -> Iterable:
                 yield from emit(table)
 
 
+def iter_body_direct_paragraphs(document) -> Iterable:
+    """Direct body paragraphs only, excluding tables, headers and footers.
+
+    Semantic block expansion (``Heading`` + following free-text paragraphs) is
+    intentionally body-only. Header/footer paragraphs are independent Word
+    stories and often contain legal/service boilerplate; treating them as a
+    continuation of a clinical block can erase unrelated footer text.
+    """
+    seen: set[int] = set()
+    for paragraph in document.paragraphs:
+        key = id(paragraph._p)
+        if key not in seen:
+            seen.add(key)
+            yield paragraph
+
+
 def iter_direct_story_paragraphs(document) -> Iterable:
     """Paragraphs not inside tables: body plus each unique header/footer."""
     seen: set[int] = set()
-    for paragraph in document.paragraphs:
+    for paragraph in iter_body_direct_paragraphs(document):
         key = id(paragraph._p)
         if key not in seen:
             seen.add(key)
@@ -220,6 +237,185 @@ def _replace_cell_value(cell, value: str) -> None:
         _replace_entire_paragraph(paragraph, "")
 
 
+_DYNAMIC_MEDICAL_SECTION_IDS = frozenset({
+    "patient_identity", "case_admin", "admission", "discharge", "complaints",
+    "anamnesis_disease", "anamnesis_life", "objective_status", "specialty_status",
+    "diagnosis", "treatment", "labs", "instrumental", "recommendations", "commission",
+})
+_PATIENT_SUBJECT_RE = re.compile(
+    r"(?i)\b(?:пациент(?:ка)?|больн(?:ой|ая)|обследуем(?:ый|ая))\b"
+)
+_PATIENT_NARRATIVE_SECTION_IDS = frozenset({
+    "admission", "discharge", "complaints", "anamnesis_disease", "anamnesis_life",
+    "objective_status", "specialty_status", "diagnosis", "treatment", "labs", "instrumental",
+})
+_DYNAMIC_FACT_RE = re.compile(
+    r"(?i)(?:\b\d{1,2}[.]\d{1,2}[.]\d{2,4}\b|\b[A-ZА-ЯЁ]\s*\d{2}(?:[.,]\w+)?\b)"
+)
+_PATIENT_NAME_PAYLOAD_RE = re.compile(
+    r"(?i:\b(?:пациент(?:ка)?|больн(?:ой|ая)))\s*[:,-]?\s*"
+    r"[А-ЯЁ][А-ЯЁа-яё'-]{1,60}\s+(?:"
+    r"[А-ЯЁ][А-ЯЁа-яё'-]{1,60}\s+[А-ЯЁ][А-ЯЁа-яё'-]{1,60}"
+    r"|[А-ЯЁ][.]?\s*[А-ЯЁ][.]?"
+    r")"
+)
+
+
+def _section_alias_norms(section) -> tuple[str, ...]:
+    values = (section.label, *section.aliases)
+    return tuple(
+        dict.fromkeys(
+            normalize(value).casefold().replace("ё", "е").strip(" \t:：–—-.,;")
+            for value in values
+            if normalize(value).strip()
+        )
+    )
+
+
+def _dynamic_template_payload_sections(
+    text: object, *, role_id: str = "", category: str = "", button_label: str = ""
+) -> tuple[str, ...]:
+    """Classify patient/sample prose that must not survive from a medical template unchanged.
+
+    Structural headings are deliberately preserved.  A paragraph becomes dynamic
+    when it carries a value after a known section label, contains an explicit
+    patient subject plus clinical semantics, or embeds obvious patient facts
+    (dates/diagnosis codes) inside a known medical section.
+    """
+
+    raw = str(text or "").strip()
+    if not raw or "{{" in raw or BLANK_RE.search(raw):
+        return ()
+    from regulatory_section_registry import default_section_registry
+
+    registry = default_section_registry()
+    section_ids = tuple(
+        section_id for section_id in registry.detect_sections(raw)
+        if section_id in _DYNAMIC_MEDICAL_SECTION_IDS
+    )
+    if not section_ids:
+        return ()
+
+    normalized = normalize(raw).casefold().replace("ё", "е").strip()
+    stripped = normalized.strip(" \t:：–—-.,;")
+    alias_norms: list[str] = []
+    for section_id in section_ids:
+        section = registry.get(section_id)
+        if section is None:
+            continue
+        alias_norms.extend(_section_alias_norms(section))
+    alias_norms = sorted(set(alias_norms), key=len, reverse=True)
+    if stripped in alias_norms:
+        return ()
+
+    if _semantic_inline_slot(
+        raw, role_id=role_id, category=category, button_label=button_label
+    ) is not None:
+        return section_ids
+
+    for section_id in section_ids:
+        # ``Пациент``/``Больной`` are grammatical subjects as often as they are
+        # identity labels.  Treating every sentence beginning with them as a
+        # patient-data slot deletes legitimate fixed boilerplate.
+        if section_id == "patient_identity":
+            continue
+        section = registry.get(section_id)
+        if section is None:
+            continue
+        for alias in _section_alias_norms(section):
+            if not alias or not normalized.startswith(alias):
+                continue
+            remainder = normalized[len(alias):].strip(" \t:：–—-.,;")
+            if remainder:
+                return section_ids
+
+    if _PATIENT_NAME_PAYLOAD_RE.search(raw):
+        return section_ids
+    if _PATIENT_SUBJECT_RE.search(normalized) and set(section_ids) & _PATIENT_NARRATIVE_SECTION_IDS:
+        return section_ids
+    if _DYNAMIC_FACT_RE.search(raw):
+        return section_ids
+    return ()
+
+
+def _supported_by_canonical_section_value(
+    text: str, section_ids: Iterable[str], values: Mapping[str, str]
+) -> bool:
+    """Return true only when this section carries its own current-case value.
+
+    A value from an unrelated field must never legitimise stale template prose.
+    For example, the same ICD code elsewhere in a paragraph cannot make an old
+    complaints/recommendations sentence safe.
+    """
+    from regulatory_section_registry import default_section_registry
+
+    haystack = normalize(text).casefold().replace("ё", "е")
+    registry = default_section_registry()
+    relevant_fields: list[str] = []
+    for section_id in section_ids:
+        section = registry.get(section_id)
+        if section is not None:
+            relevant_fields.extend(section.field_ids)
+    for field_id in dict.fromkeys(relevant_fields):
+        needle = normalize(values.get(field_id, "")).casefold().replace("ё", "е").strip()
+        if len(needle) >= 4 and needle in haystack:
+            return True
+    return False
+
+
+def remove_unchanged_medical_template_payloads(
+    template_path: str | Path,
+    output_path: str | Path,
+    values: Mapping[str, str],
+    *,
+    role_id: str = "",
+    category: str = "medical",
+    button_label: str = "",
+) -> tuple[str, ...]:
+    """Remove stale patient/sample prose copied verbatim from a medical template.
+
+    The renderer is allowed to preserve layout and fixed boilerplate, but a
+    dynamic medical payload may survive unchanged only when it actually matches
+    a canonical value of the current case.  This closes the class of bugs where
+    old recommendations, complaints, dates or diagnoses from a donor DOCX leak
+    into a newly generated patient document.
+    """
+
+    template = Document(str(Path(template_path).expanduser()))
+    rendered_path = Path(output_path).expanduser()
+    rendered = Document(str(rendered_path))
+    source_counts: Counter[str] = Counter()
+    for paragraph in iter_all_story_paragraphs(template):
+        raw = str(paragraph.text or "").strip()
+        if not _dynamic_template_payload_sections(
+            raw, role_id=role_id, category=category, button_label=button_label
+        ):
+            continue
+        source_counts[normalize(raw).casefold().replace("ё", "е")] += 1
+
+    removed: list[str] = []
+    for paragraph in list(iter_all_story_paragraphs(rendered)):
+        raw = str(paragraph.text or "").strip()
+        key = normalize(raw).casefold().replace("ё", "е")
+        if not key or source_counts.get(key, 0) <= 0:
+            continue
+        section_ids = _dynamic_template_payload_sections(
+            raw, role_id=role_id, category=category, button_label=button_label
+        )
+        if not section_ids:
+            continue
+        if _supported_by_canonical_section_value(raw, section_ids, values):
+            source_counts[key] -= 1
+            continue
+        _replace_entire_paragraph(paragraph, "")
+        source_counts[key] -= 1
+        removed.append(raw)
+
+    if removed:
+        rendered.save(str(rendered_path))
+    return tuple(removed)
+
+
 
 _NAME_TOKEN = r"[А-ЯЁ][А-ЯЁа-яё'-]{1,60}"
 _DEMOGRAPHIC_LINE_RE = re.compile(
@@ -311,7 +507,10 @@ def _fill_prefilled_semantic_paragraphs(
 
 def _fill_semantic_block_sections(document: Document, values: Mapping[str, str], *, role_id: str = "", category: str = "", button_label: str = "") -> list[str]:
     """Replace/clear sample block text following an exact semantic heading."""
-    paragraphs = list(iter_direct_story_paragraphs(document))
+    # Free-text block sections are meaningful only inside the main document
+    # story. Header/footer stories may contain labels such as ``Рекомендовано``
+    # followed by unrelated service text; never consume that text as block data.
+    paragraphs = list(iter_body_direct_paragraphs(document))
     filled: list[str] = []
     for index, paragraph in enumerate(paragraphs):
         field_id = _exact_semantic_label(paragraph.text, role_id=role_id, category=category, button_label=button_label)

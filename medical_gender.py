@@ -63,29 +63,20 @@ def adapt_patient_data_to_gender(data: PatientData) -> PatientData:
     return adapted
 
 
-def adapt_document_to_patient_gender(doc: DocxDocument, data: PatientData) -> None:
-    """Применить ту же муж/жен коррекцию к итоговому DOCX.
+def adapt_role_owned_patient_phrase(text: str, patient_name: str) -> str:
+    """Adapt one explicitly patient-owned renderer phrase, never an entire DOCX.
 
-    Это нужно для шаблонных фраз самих документов: например,
-    «Находился на лечении...» -> «Находилась на лечении...» для женской фамилии.
-    Диагнозные строки оставляем как есть: диагноз — отдельная медицинская сущность,
-    а не грамматическое описание пациента.
+    Templates contain both patient narrative and fixed legal/clinical boilerplate.
+    Whole-document morphology cannot distinguish those ownership classes and has
+    previously corrupted valid static wording (for example ``Пациент ознакомлен``
+    -> ``Пациентка ознакомлен``).  Callers must opt in only for phrases that the
+    renderer itself owns, such as a treatment/observation period sentence.
     """
-    gender = patient_gender(data)
+    gender = detect_gender_from_patient_name(str(patient_name or ""))
     if gender not in {"male", "female"}:
-        return
-
-    for paragraph in list(iter_all_paragraphs(doc)):
-        original = paragraph.text or ""
-        if not original.strip():
-            continue
-        # Защита от порчи фраз вида «установлен диагноз: ...» и названий МКБ.
-        # Клинические описания вокруг этих строк уже адаптированы на уровне данных.
-        if "диагноз" in normalize_match(original):
-            continue
-        updated, changed = adapt_text_to_patient_gender(original, gender)
-        if changed and updated != original:
-            set_paragraph_text(paragraph, updated)
+        return text
+    updated, _changed = adapt_text_to_patient_gender(str(text or ""), gender)
+    return updated
 
 
 
@@ -136,7 +127,9 @@ def finalize_medical_document(doc: DocxDocument, data: PatientData) -> None:
     """Общие финальные правки перед сохранением любого медицинского документа."""
     normalize_facility_references_in_document(doc)
     remove_forbidden_hospitalization_phrase_from_document(doc)
-    adapt_document_to_patient_gender(doc, data)
+    # Patient narrative is gender-adapted before rendering.  Do not run a
+    # morphology pass over the whole DOCX: fixed template boilerplate is not
+    # patient data and must remain byte-for-byte semantically stable.
     remove_forbidden_hospitalization_phrase_from_document(doc)
     if not data.epi_text:
         remove_epi_mentions_from_document(doc)

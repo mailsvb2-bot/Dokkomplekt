@@ -51,3 +51,4 @@ DOCUMENT_LABELS: Dict[str, str] = {
 DOCUMENT_ORDER = ("primary", "discharge", "commission", "vk_mse", "admission_doctor_referral", "sick_leave_vk", "rvk")
 RVK_COMMISSARIAT_PRESETS = ("Ленинский", "Канавинский", "Сормовский", "Московский")
 TARGET_MEDICAL_FACILITY = "ГБУЗ НО «НКЦПЗ» диспансер №2"
+DISCHARGE_RECOMMENDATION_TEXT = "Рекомендовано: наблюдение у районного психиатра, приём препаратов"
