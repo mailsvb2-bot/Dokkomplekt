@@ -14,28 +14,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: d839559786b7968b19bfe5e4fdd205fb969507ad
+          ref: c7176044bf080b868c1c20cd1d1b4eb516573ea1
           fetch-depth: 0
-      - name: Fetch exact patch
+      - name: Fetch exact follow-up patch
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL https://paste.rs/XfVIZ -o /tmp/v14100.patch
-          echo 'c9cb4caa37f4e43a343397daab3f83054681d5e5a041b44afb672bb24d1a8a3a  /tmp/v14100.patch' | sha256sum -c -
+          curl -fsSL https://paste.rs/mks26 -o /tmp/v14100-followup.patch
+          echo '3147fe793b1bf9a876fa97e00cc54550a488aab7901d7887b1729d2dde46bf99  /tmp/v14100-followup.patch' | sha256sum -c -
       - name: Apply and verify exact tree
         shell: bash
         run: |
           set -euo pipefail
-          git apply --index /tmp/v14100.patch
+          test "$(git rev-parse HEAD)" = 'c7176044bf080b868c1c20cd1d1b4eb516573ea1'
+          git apply --index /tmp/v14100-followup.patch
           tree=$(git write-tree)
           echo "candidate tree=$tree"
-          test "$tree" = '55976ec7b29076e65162a6ea28bb92c702082515'
+          test "$tree" = '451dbe0ab1eff9a5227b125d57f5b48bff504a51'
       - name: Commit and publish candidate
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Release 1.4.100 template residue guard hotfix'
-          test "$(git rev-parse HEAD^{tree})" = '55976ec7b29076e65162a6ea28bb92c702082515'
+          git commit -m 'Keep medical role postprocessing within file budget'
+          test "$(git rev-parse HEAD^{tree})" = '451dbe0ab1eff9a5227b125d57f5b48bff504a51'
           git push --force origin HEAD:refs/heads/release/v1.4.100-template-residue-guard
