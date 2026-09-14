@@ -14,29 +14,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 51c833d0403e06a15af84d448be484e3f9bc6c91
+          ref: f750b11a7631e9082d8440ae6eda4ca79aa7b410
           fetch-depth: 0
-      - name: Fetch exact static-date safeguard patch
+      - name: Fetch exact P1 review follow-up patch
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL https://paste.rs/i3YOE -o /tmp/v14100-static-date-followup.patch
-          echo '524bb98b09f45233f9da7b8614a0265e80803f61d608ff645f2262c8f0c0568f  /tmp/v14100-static-date-followup.patch' | sha256sum -c -
+          curl -fsSL https://paste.rs/Jjh32 -o /tmp/v14100-p1-followup.patch
+          echo '52eefeeeacf76e958afeb5c0792ba8120cb1c5241eaec14d7b75529c84184cae  /tmp/v14100-p1-followup.patch' | sha256sum -c -
       - name: Apply and verify exact tree
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = '51c833d0403e06a15af84d448be484e3f9bc6c91'
-          git apply --index /tmp/v14100-static-date-followup.patch
+          test "$(git rev-parse HEAD)" = 'f750b11a7631e9082d8440ae6eda4ca79aa7b410'
+          git apply --index /tmp/v14100-p1-followup.patch
           tree=$(git write-tree)
           echo "candidate tree=$tree"
-          test "$tree" = '9376109039295307c01a672c259b996a05def2ee'
+          test "$tree" = '07619bbe8de5d2c0c19a8a240044fe6544d154af'
       - name: Commit and publish candidate
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Avoid deleting dated static patient boilerplate'
-          test "$(git rev-parse HEAD^{tree})" = '9376109039295307c01a672c259b996a05def2ee'
+          git commit -m 'Resolve template residue guard P1 review findings'
+          test "$(git rev-parse HEAD^{tree})" = '07619bbe8de5d2c0c19a8a240044fe6544d154af'
           git push --force origin HEAD:refs/heads/release/v1.4.100-template-residue-guard
