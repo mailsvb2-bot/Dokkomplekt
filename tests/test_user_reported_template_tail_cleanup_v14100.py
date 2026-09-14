@@ -19,6 +19,7 @@ STRAY_JOINT_COMPLAINT = "Пациентка предъявляет жалобы 
 OTHER_STRAY_JOINT_COMPLAINT = "Пациент предъявляет жалобы на тревогу, слабость и ранние пробуждения."
 FIXED_JOINT_BOILERPLATE = "Осмотр проведён совместно лечащим врачом и заведующим отделением."
 FIXED_PATIENT_BOILERPLATE = "Пациент ознакомлен с рекомендациями, вопросы разъяснены."
+FIXED_TREATMENT_BOILERPLATE = "Пациент проинформирован о плане лечения и возможных побочных эффектах."
 
 
 def _text(path: Path) -> str:
@@ -243,3 +244,74 @@ def test_static_patient_boilerplate_with_document_date_is_not_deleted(tmp_path: 
     text = _text(output)
     assert static in text
     assert stale not in text
+
+
+
+def test_patient_treatment_information_boilerplate_is_not_deleted(tmp_path: Path) -> None:
+    template = tmp_path / "treatment-information-boilerplate.docx"
+    stale = "Пациент предъявляет жалобы на тревогу и выраженную слабость."
+    doc = Document()
+    doc.add_paragraph("Совместный осмотр")
+    doc.add_paragraph(FIXED_TREATMENT_BOILERPLATE)
+    doc.add_paragraph(stale)
+    doc.save(template)
+
+    output = tmp_path / "treatment-information-boilerplate-out.docx"
+    case = PatientCase()
+    case.update_from_pairs({"complaints": "Жалоб не предъявляет."})
+    spec = DocumentTemplateSpec(
+        id="joint-treatment-info", button_label="Совместный осмотр", template=str(template),
+        role_id="joint_medical_exam",
+    )
+    render_template_to_docx(
+        template_path=template, output_path=output, case=case, document=spec, strict=False,
+    )
+
+    text = _text(output)
+    assert FIXED_TREATMENT_BOILERPLATE in text
+    assert stale not in text
+
+
+def test_doctor_owned_discharge_preserves_canonical_template_recommendation(tmp_path: Path) -> None:
+    template = tmp_path / "canonical-custom-discharge.docx"
+    doc = Document()
+    doc.add_paragraph(DISCHARGE_RECOMMENDATION_TEXT)
+    doc.add_paragraph("Врач __________")
+    doc.save(template)
+
+    output = tmp_path / "canonical-custom-discharge-out.docx"
+    case = PatientCase()
+    spec = DocumentTemplateSpec(
+        id="canonical-discharge", button_label="Выписной эпикриз", template=str(template),
+        role_id="discharge_epicrisis",
+    )
+    render_template_to_docx(
+        template_path=template, output_path=output, case=case, document=spec, strict=False,
+    )
+
+    text = _text(output)
+    assert text.count(DISCHARGE_RECOMMENDATION_TEXT) == 1
+
+
+def test_builtin_discharge_preserves_canonical_template_recommendation(tmp_path: Path) -> None:
+    template = tmp_path / "canonical-builtin-discharge.docx"
+    doc = Document()
+    doc.add_paragraph("Дата, время")
+    doc.add_paragraph("Ф.И.О., г.р., зарегистрирован по адресу")
+    doc.add_paragraph("Находилась на лечении в старом учреждении")
+    doc.add_paragraph("В 3 отделение КДП поступает")
+    doc.add_paragraph(DISCHARGE_RECOMMENDATION_TEXT)
+    doc.add_paragraph("Зав. отд. __________ Врач __________")
+    doc.save(template)
+
+    output = tmp_path / "canonical-builtin-discharge-out.docx"
+    data = PatientData(
+        fio="Иванова Анна Сергеевна",
+        admission_date="01.09.2026",
+        discharge_date="09.09.2026",
+        admission_mode="первично",
+    )
+    MedicalDocumentRenderer().render("discharge", template, output, data)
+
+    text = _text(output)
+    assert text.count(DISCHARGE_RECOMMENDATION_TEXT) == 1

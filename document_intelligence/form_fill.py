@@ -249,6 +249,10 @@ _PATIENT_NARRATIVE_SECTION_IDS = frozenset({
     "admission", "discharge", "complaints", "anamnesis_disease", "anamnesis_life",
     "objective_status", "specialty_status", "diagnosis", "treatment", "labs", "instrumental",
 })
+_PATIENT_NARRATIVE_CUE_RE = re.compile(
+    r"(?i)\b(?:предъявля\w*|жал(?:уется|уются)|отмеча\w*|указыва\w*|сообща\w*|"
+    r"отрица\w*|испытыва\w*|наблюда\w*|беспоко\w*)\b"
+)
 _DATE_FACT_RE = re.compile(r"\b\d{1,2}[.]\d{1,2}[.]\d{2,4}\b")
 _ICD_FACT_RE = re.compile(r"(?i)\b[A-ZА-ЯЁ]\s*\d{2}(?:[.,]\w+)?\b")
 _DATE_FACT_SECTION_IDS = frozenset({"admission", "discharge"})
@@ -331,7 +335,14 @@ def _dynamic_template_payload_sections(
 
     if _PATIENT_NAME_PAYLOAD_RE.search(raw):
         return section_ids
-    if _PATIENT_SUBJECT_RE.search(normalized) and set(section_ids) & _PATIENT_NARRATIVE_SECTION_IDS:
+    # A patient subject plus a clinical noun is not enough: fixed/legal text
+    # legitimately says things like ``Пациент проинформирован о плане лечения``.
+    # Require a narrative cue that describes the patient's actual state/report.
+    if (
+        _PATIENT_SUBJECT_RE.search(normalized)
+        and _PATIENT_NARRATIVE_CUE_RE.search(normalized)
+        and set(section_ids) & _PATIENT_NARRATIVE_SECTION_IDS
+    ):
         return section_ids
     # A date or code is not patient payload merely because the paragraph also
     # contains a generic word such as ``Пациент``.  Facts are only decisive in

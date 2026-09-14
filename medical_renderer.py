@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Mapping
 
 from medical_gender import adapt_patient_data_to_gender
 from medical_models import PatientData
@@ -14,6 +15,21 @@ from medical_renderer_commission import MedicalRendererCommissionMixin
 from medical_renderer_labs import MedicalRendererLabsMixin
 from medical_renderer_primary import MedicalRendererPrimaryMixin
 from medical_renderer_special import MedicalRendererSpecialMixin
+
+
+def medical_residue_guard_values(values: Mapping[str, str], role_id: str) -> dict[str, str]:
+    """Return current-case values including wording owned by a medical role.
+
+    The residue guard compares surviving template prose with canonical values.
+    Role-owned output (for example the mandatory discharge recommendation) is
+    canonical even when there is no user-editable field value for it.
+    """
+    result = {str(field_id): str(value or "") for field_id, value in values.items()}
+    if role_id == "discharge_epicrisis":
+        from medical_constants import DISCHARGE_RECOMMENDATION_TEXT
+
+        result["recommendations"] = DISCHARGE_RECOMMENDATION_TEXT
+    return result
 
 
 def _append_additional_info_to_docx(output_path: str | Path, data: PatientData) -> None:
@@ -70,11 +86,15 @@ class MedicalDocumentRenderer(
             "rvk": "military_commissariat_act",
         }
         case = patient_data_to_case(gender_adapted_data, source_document=str(template_path))
+        role_id = role_by_kind[kind]
+        guard_values = medical_residue_guard_values(
+            {field_id: value.value for field_id, value in case.values.items()}, role_id
+        )
         remove_unchanged_medical_template_payloads(
             template_path,
             output_path,
-            {field_id: value.value for field_id, value in case.values.items()},
-            role_id=role_by_kind[kind],
+            guard_values,
+            role_id=role_id,
             category="medical",
             button_label=kind,
         )

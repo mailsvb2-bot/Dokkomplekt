@@ -624,7 +624,7 @@ def render_template_to_docx(
                     "Не удалось заполнить видимые поля Word-шаблона: "
                     + ", ".join(unfilled_with_values)
                 )
-        from medical_renderer import apply_role_owned_medical_postprocessing
+        from medical_renderer import apply_role_owned_medical_postprocessing, medical_residue_guard_values
 
         apply_role_owned_medical_postprocessing(output, case, document)
 
@@ -636,7 +636,7 @@ def render_template_to_docx(
             remove_unchanged_medical_template_payloads(
                 template,
                 output,
-                context,
+                medical_residue_guard_values(context, role),
                 role_id=role,
                 category=document.category,
                 button_label=document.button_label,
