@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_VERSION = "1.4.99"
-CURRENT_VERSION_LABEL = "v1.4.99_embedded_diary_text_source_hotfix"
-CURRENT_VERSION_TUPLE = "(1, 4, 99, 0)"
-HOTFIX_PHRASE = "embedded diary text source propagation"
+CURRENT_VERSION = "1.4.100"
+CURRENT_VERSION_LABEL = "v1.4.100_template_residue_guard_hotfix"
+CURRENT_VERSION_TUPLE = "(1, 4, 100, 0)"
+HOTFIX_PHRASE = "template residue guard"
 
 
 def _read(relative: str) -> str:

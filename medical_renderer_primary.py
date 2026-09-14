@@ -5,7 +5,7 @@ from pathlib import Path
 from docx import Document
 from docx.shared import RGBColor
 
-from medical_constants import TARGET_MEDICAL_FACILITY
+from medical_constants import DISCHARGE_RECOMMENDATION_TEXT, TARGET_MEDICAL_FACILITY
 from medical_docx_editor import (
     DocxBlockEditor,
     iter_all_paragraphs,
@@ -20,7 +20,7 @@ from medical_formatting import (
     format_military_commissariat_referral,
     treatment_period_text,
 )
-from medical_gender import finalize_medical_document
+from medical_gender import adapt_role_owned_patient_phrase, finalize_medical_document
 from medical_markers import (
     COMMISSION_MARKERS,
     DISCHARGE_MARKERS,
@@ -111,7 +111,10 @@ class MedicalRendererPrimaryMixin:
         birth_text = format_birth_for_person_line(data.birth)
         person_line = f"{data.fio}, {birth_text}, зарегистрирован по адресу: {data.registered}".strip(" ,")
         editor.replace_first_matching_paragraph(["г.р.,", "зарегистрирован по адресу"], person_line)
-        period = f"Находился на лечении в {TARGET_MEDICAL_FACILITY} с {data.admission_date} по {data.discharge_date}".strip()
+        period = adapt_role_owned_patient_phrase(
+            f"Находился на лечении в {TARGET_MEDICAL_FACILITY} с {data.admission_date} по {data.discharge_date}".strip(),
+            data.fio or data.output_fio,
+        )
         period_index = editor.find_paragraph_index(["Находился на лечении", "Находилась на лечении"])
         if period_index is not None:
             set_paragraph_text(editor.paragraphs[period_index], period)
@@ -147,6 +150,19 @@ class MedicalRendererPrimaryMixin:
             editor.remove_all_matching_paragraphs(["ЭПИ"])
         if data.treatment_plan:
             editor.replace_block(["Лечение"], "Лечение:", data.treatment_plan, DISCHARGE_MARKERS)
+
+        recommendation_found = False
+        for paragraph in iter_all_paragraphs(doc):
+            normalized = normalize_match(paragraph.text or "")
+            if normalized.startswith(("рекомендовано", "рекомендации")):
+                set_paragraph_text(paragraph, DISCHARGE_RECOMMENDATION_TEXT)
+                recommendation_found = True
+        if not recommendation_found:
+            if not editor.insert_before_first_matching_paragraph(
+                ["Зав. отд.", "Зав. отделением", "Врач"], DISCHARGE_RECOMMENDATION_TEXT
+            ):
+                doc.add_paragraph(DISCHARGE_RECOMMENDATION_TEXT)
+
         signature = f"  Зав. отд. {data.head}                                                                                                 Врач\t{data.doctor}"
         editor.replace_first_matching_paragraph(["Зав. отд.", "Врач"], signature)
         finalize_medical_document(doc, data)

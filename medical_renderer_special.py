@@ -18,7 +18,7 @@ from medical_formatting import (
     format_military_commissariat_area,
     treatment_period_text,
 )
-from medical_gender import finalize_medical_document
+from medical_gender import adapt_role_owned_patient_phrase, finalize_medical_document
 from medical_markers import (
     COMMISSION_MARKERS,
     DISCHARGE_MARKERS,
@@ -122,7 +122,10 @@ class MedicalRendererSpecialMixin:
         # В Акте для РВК строка "Место работы" не нужна: удаляем её из результата,
         # чтобы туда не попадали данные из направления или старые значения UI.
         editor.remove_all_matching_paragraphs(["Место работы"])
-        period = f"Находился на обследовании в {TARGET_MEDICAL_FACILITY} с {data.admission_date} по {data.discharge_date}".strip()
+        period = adapt_role_owned_patient_phrase(
+            f"Находился на обследовании в {TARGET_MEDICAL_FACILITY} с {data.admission_date} по {data.discharge_date}".strip(),
+            data.fio or data.output_fio,
+        )
         editor.replace_first_matching_paragraph(["Находился на обследовании"], period)
         military_area = format_military_commissariat_area(data.rvk_military_commissariat)
         if military_area:
